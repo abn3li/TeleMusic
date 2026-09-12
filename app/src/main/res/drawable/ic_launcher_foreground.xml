@@ -1,0 +1,52 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="108dp" android:height="108dp" android:viewportWidth="108" android:viewportHeight="108">
+
+    <!-- Original artwork is drawn in its native 512x512 space, then scaled/centered into the
+         adaptive icon's safe zone by this single group transform (pivot at the artwork's own
+         center, scaled down so the waveform/teardrop never gets clipped by a launcher mask). -->
+    <group
+        android:pivotX="256" android:pivotY="256"
+        android:scaleX="0.1875" android:scaleY="0.1875"
+        android:translateX="-202" android:translateY="-202">
+
+        <!-- Vibrant background glow -->
+        <path android:pathData="M 256,64 C 110,64 64,110 64,256 C 64,402 110,448 256,448 C 402,448 448,402 448,256 C 448,110 402,64 256,64 Z">
+            <aapt:attr name="android:fillColor">
+                <gradient
+                    android:type="linear"
+                    android:startX="64" android:startY="64"
+                    android:endX="448" android:endY="448">
+                    <item android:offset="0" android:color="#FF512F" />
+                    <item android:offset="1" android:color="#DD2476" />
+                </gradient>
+            </aapt:attr>
+        </path>
+
+        <!-- Frosted teardrop -->
+        <path
+            android:pathData="M 256,110 C 345,110 400,185 400,270 C 400,355 330,420 256,420 C 182,420 112,355 112,270 C 112,185 167,110 256,110 Z"
+            android:strokeColor="#FFFFFF" android:strokeWidth="2.5" android:strokeAlpha="0.5">
+            <aapt:attr name="android:fillColor">
+                <gradient
+                    android:type="linear"
+                    android:startX="112" android:startY="110"
+                    android:endX="400" android:endY="420">
+                    <item android:offset="0" android:color="#A6FFFFFF" />
+                    <item android:offset="1" android:color="#26FFFFFF" />
+                </gradient>
+            </aapt:attr>
+        </path>
+
+        <!-- Play glyph hint -->
+        <path android:pathData="M 215,190 L 335,265 L 215,340 Z" android:fillColor="#FFFFFF" android:fillAlpha="0.15" />
+
+        <!-- Waveform bars -->
+        <path android:fillColor="#FFFFFF" android:pathData="M183,260 A8,8 0 0,1 191,268 L191,292 A8,8 0 0,1 183,300 A8,8 0 0,1 175,292 L175,268 A8,8 0 0,1 183,260 Z" />
+        <path android:fillColor="#FFFFFF" android:pathData="M215,210 A8,8 0 0,1 223,218 L223,322 A8,8 0 0,1 215,330 A8,8 0 0,1 207,322 L207,218 A8,8 0 0,1 215,210 Z" />
+        <path android:fillColor="#FFFFFF" android:pathData="M247,160 A8,8 0 0,1 255,168 L255,372 A8,8 0 0,1 247,380 A8,8 0 0,1 239,372 L239,168 A8,8 0 0,1 247,160 Z" />
+        <path android:fillColor="#FFFFFF" android:pathData="M279,195 A8,8 0 0,1 287,203 L287,347 A8,8 0 0,1 279,355 A8,8 0 0,1 271,347 L271,203 A8,8 0 0,1 279,195 Z" />
+        <path android:fillColor="#FFFFFF" android:pathData="M311,235 A8,8 0 0,1 319,243 L319,307 A8,8 0 0,1 311,315 A8,8 0 0,1 303,307 L303,243 A8,8 0 0,1 311,235 Z" />
+        <path android:fillColor="#FFFFFF" android:pathData="M343,265 A8,8 0 0,1 351,273 L351,287 A8,8 0 0,1 343,295 A8,8 0 0,1 335,287 L335,273 A8,8 0 0,1 343,265 Z" />
+    </group>
+</vector>
