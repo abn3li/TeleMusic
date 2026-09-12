@@ -233,7 +233,38 @@ class TdlibDataSource(private val tdlibManager: TdlibManager) : BaseDataSource(t
 
                 // 3. Check for FLAC Container ("fLaC" at byte 0..3)
                 if (header[0] == 0x66.toByte() && header[1] == 0x4C.toByte() && header[2] == 0x61.toByte() && header[3] == 0x43.toByte()) {
-                    return minOf(maxOf(defaultTargetBytes, 384_000L), totalSize)
+                    // A flat guess here is wrong whenever the file embeds cover art: FLAC's
+                    // metadata blocks (STREAMINFO, VORBIS_COMMENT, and often a multi-megabyte
+                    // PICTURE block for the cover) all come BEFORE the actual audio frames, so a
+                    // fixed 384KB can land well before real audio data starts - which is exactly
+                    // what repeatedly failed extractor parsing on a real file here, even past 3MB
+                    // downloaded. Scan the real metadata block chain instead, the same way the
+                    // MP4 branch above scans for its "moov" box rather than guessing.
+                    val available = file.length()
+                    var pos = 4L // past the "fLaC" magic
+                    val blockHeader = ByteArray(4)
+                    while (pos + 4 <= available) {
+                        raf.seek(pos)
+                        if (raf.read(blockHeader) < 4) break
+                        val isLast = (blockHeader[0].toInt() and 0x80) != 0
+                        val blockLength = ((blockHeader[0].toInt() and 0x7F) shl 16) or
+                            ((blockHeader[1].toInt() and 0xFF) shl 8) or
+                            (blockHeader[2].toInt() and 0xFF)
+                        val blockEnd = pos + 4 + blockLength
+                        if (isLast) {
+                            // Audio frames start right here - the real answer, not a guess.
+                            return minOf(maxOf(defaultTargetBytes, blockEnd + 128_000L), totalSize)
+                        }
+                        if (blockEnd > available) {
+                            // This block's data isn't fully downloaded yet - ask for exactly
+                            // enough to finish it, then this function runs again on the next
+                            // poll to continue the scan from there.
+                            return minOf(blockEnd + 128_000L, totalSize)
+                        }
+                        pos = blockEnd
+                    }
+                    // Not even the chain scanned so far is fully downloaded yet.
+                    return minOf(maxOf(pos + 128_000L, defaultTargetBytes), totalSize)
                 }
 
                 // 4. Check for OGG / Opus / Vorbis Container ("OggS" at byte 0..3)
@@ -265,7 +296,14 @@ class TdlibDataSource(private val tdlibManager: TdlibManager) : BaseDataSource(t
         var waited = 0L
         while (waited < READ_WAIT_MAX_MS) {
             val progress = if (fileId != -1) tdlibManager.getCachedFileProgress(fileId) else null
-            val completed = progress?.local?.isDownloadingCompleted ?: true
+            // Defaults to NOT completed - a null progress (no UpdateFile callback delivered yet
+            // for this fileId, most likely right after a fresh login/first playback of the
+            // session) must never be read as "download finished", or read() reports end-of-input
+            // after whatever few seconds happened to be buffered, stopping playback dead until
+            // the user manually presses play again to force a fresh open()/read() cycle by which
+            // point TDLib has actually reported real progress. open() already gets this right
+            // (defaults to false) - this was the one place still defaulting to true.
+            val completed = progress?.local?.isDownloadingCompleted ?: false
             val currentDiskLength = raf?.length() ?: 0L
             val availableOnDisk = maxOf(0L, currentDiskLength - readPosition)
 

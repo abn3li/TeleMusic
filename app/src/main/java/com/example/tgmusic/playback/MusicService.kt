@@ -108,6 +108,9 @@ class MusicService : MediaSessionService() {
                     .build()
             )
             .build()
+        // See PlaybackController.playUri()'s comment - same single-instance MediaItem swap
+        // requires an explicit stop() first to fully reset the audio renderer between songs.
+        player.stop()
         player.setMediaItem(item)
         player.prepare()
         player.play()

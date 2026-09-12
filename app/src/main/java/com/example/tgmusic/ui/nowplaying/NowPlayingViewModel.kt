@@ -130,6 +130,15 @@ class NowPlayingViewModel(
                 if (songId == _uiState.value.song?.telegramMessageId) return
                 resyncToExternallyChangedSong(songId)
             }
+
+            // isBuffering existed in NowPlayingUiState and the screen already had a spinner
+            // wired to it (over the artwork, and swapped in for the play/pause icon) - nothing
+            // ever actually set it, so streaming stalls (TDlibDataSource waiting on more bytes
+            // from Telegram) played dead silence with no way to tell that apart from the app
+            // being broken. Player.STATE_BUFFERING is exactly ExoPlayer's own signal for this.
+            override fun onPlaybackStateChanged(playbackState: Int) {
+                _uiState.value = _uiState.value.copy(isBuffering = playbackState == Player.STATE_BUFFERING)
+            }
         })
     }
 
