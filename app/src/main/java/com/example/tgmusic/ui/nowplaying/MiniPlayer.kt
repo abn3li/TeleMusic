@@ -21,6 +21,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
+import com.example.tgmusic.data.local.SongEntity
 
 /** Approximate height of a visible MiniPlayer, reserved as bottom padding in the nav Scaffold. */
 val MiniPlayerHeight: Dp = 78.dp
@@ -46,108 +47,125 @@ fun MiniPlayer(
     ) {
         val song = state.song ?: return@AnimatedVisibility
 
+        // A flat, darkened average of the artwork - not a copy of the artwork itself. Text and
+        // icons below are all explicit white/fixed colors (never inherited), since an arbitrary
+        // background color is exactly what caused text to disappear elsewhere - see
+        // GlassInfoRow in NowPlayingScreen.kt for that bug.
+        val artworkColor = rememberArtworkColor(song.albumArtUrl)
+
         Surface(
             onClick = onClick,
             shape = RoundedCornerShape(20.dp),
-            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+            color = artworkColor ?: MaterialTheme.colorScheme.surfaceContainerHigh,
             shadowElevation = 8.dp,
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 12.dp, vertical = 6.dp)
         ) {
-            Column {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 12.dp, vertical = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    // Cute rounded artwork thumbnail
-                    Surface(
-                        shape = RoundedCornerShape(12.dp),
-                        color = MaterialTheme.colorScheme.surfaceContainerHighest,
-                        modifier = Modifier.size(46.dp)
-                    ) {
-                        if (!song.albumArtUrl.isNullOrEmpty()) {
-                            AsyncImage(
-                                model = song.albumArtUrl,
-                                contentDescription = null,
-                                contentScale = ContentScale.Crop,
-                                modifier = Modifier.fillMaxSize()
-                            )
-                        } else {
-                            Box(
-                                modifier = Modifier.fillMaxSize(),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(
-                                    Icons.Default.MusicNote,
-                                    contentDescription = null,
-                                    modifier = Modifier.size(22.dp),
-                                    tint = MaterialTheme.colorScheme.primary
-                                )
-                            }
-                        }
-                    }
+            MiniPlayerContent(state, song, onPlayPause, onNext)
+        }
+    }
+}
 
-                    Spacer(Modifier.width(12.dp))
-
-                    // Title & Artist
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = song.title,
-                            style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                        Spacer(Modifier.height(2.dp))
-                        Text(
-                            text = song.artist,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                    }
-
-                    // Play/Pause Button
-                    IconButton(
-                        onClick = onPlayPause,
-                        modifier = Modifier.size(40.dp)
-                    ) {
-                        Icon(
-                            imageVector = if (state.isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
-                            contentDescription = if (state.isPlaying) "Pause" else "Play",
-                            tint = MaterialTheme.colorScheme.primary
-                        )
-                    }
-
-                    // Next Button
-                    IconButton(
-                        onClick = onNext,
-                        modifier = Modifier.size(40.dp)
-                    ) {
-                        Icon(
-                            Icons.Default.SkipNext,
-                            contentDescription = "Next",
-                            tint = MaterialTheme.colorScheme.onSurface
-                        )
-                    }
-                }
-
-                // Mini Progress Bar
-                if (state.durationMs > 0L) {
-                    val progressFloat = (state.currentPositionMs.toFloat() / state.durationMs.toFloat()).coerceIn(0f, 1f)
-                    LinearProgressIndicator(
-                        progress = { progressFloat },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(2.5.dp),
-                        color = MaterialTheme.colorScheme.primary,
-                        trackColor = Color.Transparent
+@Composable
+private fun MiniPlayerContent(
+    state: NowPlayingUiState,
+    song: SongEntity,
+    onPlayPause: () -> Unit,
+    onNext: () -> Unit
+) {
+    Column {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            // Cute rounded artwork thumbnail
+            Surface(
+                shape = RoundedCornerShape(12.dp),
+                color = Color.White.copy(alpha = 0.12f),
+                modifier = Modifier.size(46.dp)
+            ) {
+                if (!song.albumArtUrl.isNullOrEmpty()) {
+                    AsyncImage(
+                        model = song.albumArtUrl,
+                        contentDescription = null,
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier.fillMaxSize()
                     )
+                } else {
+                    Box(
+                        modifier = Modifier.fillMaxSize(),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            Icons.Default.MusicNote,
+                            contentDescription = null,
+                            modifier = Modifier.size(22.dp),
+                            tint = Color.White
+                        )
+                    }
                 }
             }
+
+            Spacer(Modifier.width(12.dp))
+
+            // Title & Artist
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = song.title,
+                    style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
+                    color = Color.White,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Spacer(Modifier.height(2.dp))
+                Text(
+                    text = song.artist,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Color.White.copy(alpha = 0.75f),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+
+            // Play/Pause Button
+            IconButton(
+                onClick = onPlayPause,
+                modifier = Modifier.size(40.dp)
+            ) {
+                Icon(
+                    imageVector = if (state.isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
+                    contentDescription = if (state.isPlaying) "Pause" else "Play",
+                    tint = Color.White
+                )
+            }
+
+            // Next Button
+            IconButton(
+                onClick = onNext,
+                modifier = Modifier.size(40.dp)
+            ) {
+                Icon(
+                    Icons.Default.SkipNext,
+                    contentDescription = "Next",
+                    tint = Color.White
+                )
+            }
+        }
+
+        // Mini Progress Bar
+        if (state.durationMs > 0L) {
+            val progressFloat = (state.currentPositionMs.toFloat() / state.durationMs.toFloat()).coerceIn(0f, 1f)
+            LinearProgressIndicator(
+                progress = { progressFloat },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(2.5.dp),
+                color = Color.White,
+                trackColor = Color.White.copy(alpha = 0.2f)
+            )
         }
     }
 }

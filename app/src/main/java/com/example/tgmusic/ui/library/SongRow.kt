@@ -30,10 +30,9 @@ import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import com.example.tgmusic.data.local.PlaylistEntity
 
-// Recomputing these per row, per recomposition, added up across hundreds of rows during a
+// Recomputing this per row, per recomposition, added up across hundreds of rows during a
 // fling - RoundedCornerShape at a fixed dp doesn't depend on composition/theme at all, so it's
 // hoisted to a one-time allocation instead of one per SongRow call.
-private val RowShape = RoundedCornerShape(14.dp)
 private val ThumbnailShape = RoundedCornerShape(12.dp)
 
 /**
@@ -70,11 +69,11 @@ fun SongRow(
     // Same story as the shapes above: .copy() allocates a new TextStyle every time it runs, so
     // callers that render many rows (SongList, SongListScaffold) hoist this once and pass it
     // down instead of paying for it on every row on every recomposition.
-    titleStyle: TextStyle = MaterialTheme.typography.bodyLarge.copy(
-        fontWeight = FontWeight.SemiBold,
+    titleStyle: TextStyle = MaterialTheme.typography.bodyMedium.copy(
+        fontWeight = FontWeight.Medium,
         platformStyle = PlatformTextStyle(includeFontPadding = false)
     ),
-    subtitleStyle: TextStyle = MaterialTheme.typography.bodyMedium.copy(
+    subtitleStyle: TextStyle = MaterialTheme.typography.bodySmall.copy(
         platformStyle = PlatformTextStyle(includeFontPadding = false)
     )
 ) {
@@ -90,12 +89,12 @@ fun SongRow(
             .build()
     }
 
-    // Flat list item row (0 card wrappers, 0 outer boxes)
+    // Flat list item row (0 card wrappers, 0 outer boxes, no per-row clip/highlight shape -
+    // rows are visually separated by a plain divider between them instead, like a plain list).
     Row(
         modifier = modifier
             .fillMaxWidth()
             .height(68.dp)
-            .clip(RowShape)
             .clickable(onClick = onClick)
             .padding(horizontal = 12.dp, vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically

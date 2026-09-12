@@ -12,18 +12,6 @@ enum class AppThemeMode(val displayName: String, val subtitle: String) {
     AMOLED("AMOLED Black", "Pure black for OLED screens")
 }
 
-enum class AppColorScheme(
-    val displayName: String,
-    val description: String,
-    val primaryHex: Long,
-    val secondaryHex: Long
-) {
-    CATPPUCCIN("Catppuccin", "Soft pastel mauve & blue", 0xFFCBA6F7, 0xFF89B4FA),
-    PINK("Pink", "Soft rose & pink", 0xFFE91E63, 0xFFFFB2C9),
-    PEACH("Peach", "Warm coral & peach", 0xFFE65100, 0xFFFFB59D),
-    VIOLET("Violet", "Soft lilac & lavender", 0xFF6750A4, 0xFFD4BBFF)
-}
-
 enum class DnsResolver(
     val displayName: String,
     val source: String,
@@ -57,9 +45,6 @@ class AppSettingsStore(context: Context) {
     private val _themeModeFlow = MutableStateFlow(themeMode)
     val themeModeFlow: StateFlow<AppThemeMode> = _themeModeFlow
 
-    private val _colorSchemeFlow = MutableStateFlow(colorScheme)
-    val colorSchemeFlow: StateFlow<AppColorScheme> = _colorSchemeFlow
-
     val proxySettings: ProxySettings
         get() = ProxySettings(proxyEnabled, proxyServer, proxyPort, proxySecret)
 
@@ -71,16 +56,6 @@ class AppSettingsStore(context: Context) {
         set(value) {
             prefs.edit().putString(KEY_THEME_MODE, value.name).apply()
             _themeModeFlow.value = value
-        }
-
-    var colorScheme: AppColorScheme
-        get() {
-            val name = prefs.getString(KEY_COLOR_SCHEME, AppColorScheme.CATPPUCCIN.name) ?: AppColorScheme.CATPPUCCIN.name
-            return runCatching { AppColorScheme.valueOf(name) }.getOrDefault(AppColorScheme.CATPPUCCIN)
-        }
-        set(value) {
-            prefs.edit().putString(KEY_COLOR_SCHEME, value.name).apply()
-            _colorSchemeFlow.value = value
         }
 
     var dnsResolver: DnsResolver
@@ -149,7 +124,6 @@ class AppSettingsStore(context: Context) {
 
     companion object {
         private const val KEY_THEME_MODE = "theme_mode"
-        private const val KEY_COLOR_SCHEME = "color_scheme"
         private const val KEY_DNS_RESOLVER = "dns_resolver"
         private const val KEY_CUSTOM_DNS_IPS = "custom_dns_ips"
         private const val KEY_PROXY_ENABLED = "proxy_enabled"

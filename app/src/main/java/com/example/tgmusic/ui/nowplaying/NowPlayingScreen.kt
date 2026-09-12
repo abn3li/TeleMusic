@@ -75,7 +75,6 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import coil.ImageLoader
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
@@ -89,65 +88,6 @@ import java.io.RandomAccessFile
 import java.util.Locale
 import kotlin.math.abs
 import kotlin.math.roundToInt
-
-data class ArtworkColors(
-    val dominant: Color,
-    val vibrant: Color,
-    val darkVibrant: Color,
-    val lightVibrant: Color
-)
-
-@Composable
-fun rememberArtworkColors(artworkUrl: String?): ArtworkColors? {
-    val context = LocalContext.current
-    var colors by remember(artworkUrl) { mutableStateOf<ArtworkColors?>(null) }
-
-    LaunchedEffect(artworkUrl) {
-        if (artworkUrl.isNullOrEmpty()) {
-            colors = null
-            return@LaunchedEffect
-        }
-        withContext(Dispatchers.IO) {
-            try {
-                val loader = ImageLoader(context)
-                val request = ImageRequest.Builder(context)
-                    .data(artworkUrl)
-                    .allowHardware(false)
-                    .build()
-                val result = (loader.execute(request) as? SuccessResult)?.drawable
-                val bitmap = (result as? BitmapDrawable)?.bitmap
-                if (bitmap != null) {
-                    val scaled = Bitmap.createScaledBitmap(bitmap, 1, 1, true)
-                    val pixel = scaled.getPixel(0, 0)
-                    scaled.recycle()
-
-                    val domColor = Color(pixel)
-                    val darkVib = Color(
-                        red = (domColor.red * 0.35f),
-                        green = (domColor.green * 0.35f),
-                        blue = (domColor.blue * 0.35f),
-                        alpha = 1f
-                    )
-                    val vib = Color(
-                        red = minOf(1f, domColor.red * 1.35f + 0.15f),
-                        green = minOf(1f, domColor.green * 1.35f + 0.15f),
-                        blue = minOf(1f, domColor.blue * 1.35f + 0.15f),
-                        alpha = 1f
-                    )
-
-                    colors = ArtworkColors(
-                        dominant = domColor,
-                        vibrant = vib,
-                        darkVibrant = darkVib,
-                        lightVibrant = vib
-                    )
-                }
-            } catch (_: Exception) {
-            }
-        }
-    }
-    return colors
-}
 
 /**
  * The sheet's own open/close motion - expand-from-mini-player and swipe-down-to-mini-player
@@ -334,9 +274,6 @@ private fun NowPlayingContent(
         animationSpec = spring(dampingRatio = Spring.DampingRatioLowBouncy, stiffness = Spring.StiffnessLow),
         label = "artScale"
     )
-
-    // Extract real-time vibrant/dominant colors directly from song's album artwork bitmap via Bitmap sampler
-    val artworkColors = rememberArtworkColors(state.song?.albumArtUrl)
 
     // Auto-scroll-to-active-line and the isActive highlight itself both moved into
     // SyncedLyricsView below, which collects playbackProgress on its own - see that
@@ -818,6 +755,7 @@ private fun NowPlayingContent(
                 // collects playbackProgress itself - see SeekbarSection's doc.
                 SeekbarSection(
                     viewModel = viewModel,
+                    songId = state.song?.telegramMessageId,
                     modifier = Modifier.padding(horizontal = 24.dp)
                 )
 
@@ -973,21 +911,10 @@ private fun NowPlayingContent(
                 else -> "Streaming via TDLib"
             }
 
-            // Colors extracted 100% EXCLUSIVELY from song's album artwork bitmap
-            val cardBgColor = artworkColors?.darkVibrant?.copy(alpha = 0.92f)
-                ?: artworkColors?.dominant?.copy(alpha = 0.92f)
-                ?: Color(0xFF1B1B22).copy(alpha = 0.92f)
-
-            val accentColor = artworkColors?.vibrant
-                ?: artworkColors?.lightVibrant
-                ?: Color(0xFF8B9DFF)
-
-            val borderBrush = Brush.linearGradient(
-                listOf(
-                    accentColor.copy(alpha = 0.75f),
-                    Color.White.copy(alpha = 0.18f)
-                )
-            )
+            // Fixed theme colors, not the song's own album art palette - see GlassInfoRow's doc
+            // for why that was the actual source of the "colors/titles sometimes disappear" bug.
+            val cardBgColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.92f)
+            val accentColor = MaterialTheme.colorScheme.primary
 
             Box(
                 modifier = Modifier
@@ -1008,7 +935,7 @@ private fun NowPlayingContent(
                     ) { showSongInfoDialog = false },
                 contentAlignment = Alignment.Center
             ) {
-                // Card Surface Colored Exclusively from Song Artwork
+                // Card Surface - fixed theme colors, see cardBgColor's own doc above
                 Surface(
                     onClick = {}, // Prevent tap through
                     shape = RoundedCornerShape(28.dp),
@@ -1021,7 +948,7 @@ private fun NowPlayingContent(
                     // thing that was darkening the popup.
                     tonalElevation = 0.dp,
                     shadowElevation = 0.dp,
-                    border = BorderStroke(1.2.dp, borderBrush),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
                     modifier = Modifier
                         .fillMaxWidth(0.86f)
                         .wrapContentHeight()
@@ -1056,11 +983,11 @@ private fun NowPlayingContent(
                                 .padding(24.dp),
                             horizontalAlignment = Alignment.CenterHorizontally
                         ) {
-                            // Header Badge tinted by artwork's vibrant accent color
+                            // Header badge - white pill, black icon/text, matching the app's
+                            // one fixed "main action" style everywhere else.
                             Surface(
                                 shape = RoundedCornerShape(12.dp),
-                                color = accentColor.copy(alpha = 0.22f),
-                                border = BorderStroke(1.dp, accentColor.copy(alpha = 0.5f)),
+                                color = accentColor,
                                 modifier = Modifier.padding(bottom = 16.dp)
                             ) {
                                 Row(
@@ -1071,14 +998,14 @@ private fun NowPlayingContent(
                                     Icon(
                                         Icons.Default.Info,
                                         contentDescription = null,
-                                        tint = accentColor,
+                                        tint = MaterialTheme.colorScheme.onPrimary,
                                         modifier = Modifier.size(16.dp)
                                     )
                                     Text(
                                         "AUDIO DETAILS",
                                         style = MaterialTheme.typography.labelMedium,
                                         fontWeight = FontWeight.Bold,
-                                        color = accentColor
+                                        color = MaterialTheme.colorScheme.onPrimary
                                     )
                                 }
                             }
@@ -1087,14 +1014,14 @@ private fun NowPlayingContent(
                                 modifier = Modifier.fillMaxWidth(),
                                 verticalArrangement = Arrangement.spacedBy(12.dp)
                             ) {
-                                GlassInfoRow(Icons.Default.MusicNote, "Title", song.title, accentColor)
-                                GlassInfoRow(Icons.Default.Person, "Artist", song.artist, accentColor)
-                                GlassInfoRow(Icons.Default.Album, "Album", song.album?.ifBlank { "Unknown Album" } ?: "Unknown Album", accentColor)
-                                GlassInfoRow(Icons.Default.AudioFile, "Audio Codec", containerFormat, accentColor)
-                                GlassInfoRow(Icons.Default.GraphicEq, "Bitrate", bitrateText, accentColor)
-                                GlassInfoRow(Icons.Default.Timer, "Duration", formatMs(song.durationSeconds * 1000L), accentColor)
-                                GlassInfoRow(Icons.Default.Storage, "File Size", sizeMB, accentColor)
-                                GlassInfoRow(Icons.Default.Storage, "Storage", storageStatus, accentColor)
+                                GlassInfoRow(Icons.Default.MusicNote, "Title", song.title)
+                                GlassInfoRow(Icons.Default.Person, "Artist", song.artist)
+                                GlassInfoRow(Icons.Default.Album, "Album", song.album?.ifBlank { "Unknown Album" } ?: "Unknown Album")
+                                GlassInfoRow(Icons.Default.AudioFile, "Audio Codec", containerFormat)
+                                GlassInfoRow(Icons.Default.GraphicEq, "Bitrate", bitrateText)
+                                GlassInfoRow(Icons.Default.Timer, "Duration", formatMs(song.durationSeconds * 1000L))
+                                GlassInfoRow(Icons.Default.Storage, "File Size", sizeMB)
+                                GlassInfoRow(Icons.Default.Storage, "Storage", storageStatus)
                             }
 
                             Spacer(Modifier.height(20.dp))
@@ -1123,14 +1050,40 @@ private fun NowPlayingContent(
  * cost of following playback to just the slider instead of the entire Now Playing screen.
  */
 @Composable
-private fun SeekbarSection(viewModel: NowPlayingViewModel, modifier: Modifier = Modifier) {
+private fun SeekbarSection(
+    viewModel: NowPlayingViewModel,
+    songId: Long?,
+    modifier: Modifier = Modifier
+) {
     val progress by viewModel.playbackProgress.collectAsState()
-    ExpressiveAnimatedSlider(
-        currentPositionMs = progress.currentPositionMs,
-        durationMs = progress.durationMs,
-        onSeekTo = { viewModel.seekTo(it) },
-        modifier = modifier
-    )
+    val amplitudes = rememberWaveformAmplitudes(seed = songId)
+
+    Column(modifier = modifier) {
+        WaveformSeekBar(
+            amplitudes = amplitudes,
+            currentPositionMs = progress.currentPositionMs,
+            durationMs = progress.durationMs,
+            onSeekTo = { viewModel.seekTo(it) }
+        )
+
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(start = 4.dp, top = 2.dp, end = 4.dp),
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Text(
+                text = formatMs(progress.currentPositionMs),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Text(
+                text = formatMs(progress.durationMs),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+    }
 }
 
 /**
@@ -1183,107 +1136,6 @@ private fun SyncedLyricsView(
                     textAlign = TextAlign.Center
                 )
             }
-        }
-    }
-}
-
-/** How much of the Slider's raw finger-position delta actually moves the seek position once a
- * drag is under way - see the comment inside ExpressiveAnimatedSlider for why this exists. */
-private const val SEEK_DRAG_SENSITIVITY = 0.3f
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-fun ExpressiveAnimatedSlider(
-    currentPositionMs: Long,
-    durationMs: Long,
-    onSeekTo: (Long) -> Unit,
-    modifier: Modifier = Modifier
-) {
-    // A hairline-capsule reskin (custom thumb/track slots, drag-state-driven height animation,
-    // plus two rounds of safety nets to patch what that reskin kept breaking: mid-drag resets, a
-    // stuck first-touch-goes-to-0, shaking on press, a frozen bar after a cancelled vertical
-    // drag, and finally the pink fill visibly snapping back to the stale position mid-drag) never
-    // actually became reliable across all of that. This exact Slider configuration - default
-    // thumb/track slots, no custom drag-state tracking layered on top - is confirmed working
-    // correctly, and carries the real fix that matters: the damped-delta precision drag below.
-    var isDragging by remember { mutableStateOf(false) }
-    var dragPositionMs by remember { mutableLongStateOf(0L) }
-    // Where this drag gesture started, in both display-ms and raw-Slider-value terms - used
-    // to turn subsequent onValueChange calls into a DAMPED delta from the start point instead
-    // of jumping straight to wherever Slider reports the finger currently is.
-    var dragStartPositionMs by remember { mutableFloatStateOf(0f) }
-    var dragStartSliderValue by remember { mutableFloatStateOf(0f) }
-
-    val positionToDisplay = if (isDragging) dragPositionMs else currentPositionMs
-    val maxDuration = durationMs.coerceAtLeast(1L).toFloat()
-
-    Column(modifier = modifier) {
-        Slider(
-            value = positionToDisplay.toFloat().coerceIn(0f, maxDuration),
-            onValueChange = { rawValue ->
-                if (!isDragging) {
-                    // First touch of this gesture - accept it as-is, so tapping/starting a
-                    // drag anywhere on the track still jumps roughly there immediately.
-                    isDragging = true
-                    dragStartPositionMs = currentPositionMs.toFloat()
-                    dragStartSliderValue = rawValue
-                    dragPositionMs = rawValue.toLong()
-                } else {
-                    // Slider maps its ENTIRE value range linearly across the screen's physical
-                    // width - on a long song, that meant a single pixel of finger movement
-                    // could be several real seconds, with no way to land on any second in
-                    // between ("drag jumps by 4 seconds" for a track long enough that 4s is
-                    // what one pixel works out to). Every move after the first is now a
-                    // DAMPED delta from where this drag started rather than the raw finger
-                    // position, giving roughly 1/SEEK_DRAG_SENSITIVITY times the effective
-                    // track length for fine control.
-                    val rawDelta = rawValue - dragStartSliderValue
-                    val dampedPosition = dragStartPositionMs + rawDelta * SEEK_DRAG_SENSITIVITY
-                    dragPositionMs = dampedPosition.toLong().coerceIn(0L, maxDuration.toLong())
-                }
-            },
-            onValueChangeFinished = {
-                onSeekTo(dragPositionMs)
-                isDragging = false
-            },
-            valueRange = 0f..maxDuration,
-            thumb = {
-                Text(
-                    text = "🐱",
-                    fontSize = 20.sp,
-                    modifier = Modifier.size(24.dp),
-                    textAlign = TextAlign.Center
-                )
-            },
-            track = { sliderState ->
-                SliderDefaults.Track(
-                    sliderState = sliderState,
-                    modifier = Modifier.height(8.dp),
-                    colors = SliderDefaults.colors(
-                        activeTrackColor = MaterialTheme.colorScheme.primary,
-                        inactiveTrackColor = MaterialTheme.colorScheme.surfaceContainerHighest
-                    )
-                )
-            },
-            modifier = Modifier.fillMaxWidth()
-        )
-
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(start = 4.dp, top = 2.dp, end = 4.dp),
-            horizontalArrangement = Arrangement.SpaceBetween
-        ) {
-            Text(
-                text = formatMs(positionToDisplay),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            Text(
-                text = formatMs(durationMs),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
         }
     }
 }
@@ -1454,22 +1306,30 @@ private fun detectAudioFormat(filePath: String?, durationSec: Int): Pair<String,
 }
 
 @Composable
-private fun GlassInfoRow(icon: ImageVector, label: String, value: String, accentColor: Color) {
+private fun GlassInfoRow(icon: ImageVector, label: String, value: String) {
     Row(
         modifier = Modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp)
     ) {
+        // Fixed white badge / black icon (matches the rest of the app's "main action" style -
+        // the selected tab chip, filled buttons, etc.) - this used to be tinted from the song's
+        // own album art palette, which is exactly why it (and the value text below, which
+        // inherited its color from the same artwork-derived card background) sometimes read as
+        // invisible: Palette extraction can fail, run late, or land on a color Material3 can't
+        // derive a safe contrasting content color from for an arbitrary/unbounded background.
+        // Fixed theme colors always have a well-defined contrast pair, so that whole class of
+        // bug is gone by construction now.
         Surface(
             shape = RoundedCornerShape(10.dp),
-            color = accentColor.copy(alpha = 0.18f),
+            color = MaterialTheme.colorScheme.primary,
             modifier = Modifier.size(34.dp)
         ) {
             Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
                 Icon(
                     imageVector = icon,
                     contentDescription = null,
-                    tint = accentColor,
+                    tint = MaterialTheme.colorScheme.onPrimary,
                     modifier = Modifier.size(16.dp)
                 )
             }
@@ -1478,13 +1338,14 @@ private fun GlassInfoRow(icon: ImageVector, label: String, value: String, accent
             Text(
                 text = label,
                 style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f)
+                color = MaterialTheme.colorScheme.onSurfaceVariant
             )
             Spacer(Modifier.height(1.dp))
             Text(
                 text = value,
                 style = MaterialTheme.typography.bodyMedium,
                 fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onSurface,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )

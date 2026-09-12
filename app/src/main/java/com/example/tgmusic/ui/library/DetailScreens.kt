@@ -95,10 +95,10 @@ private fun SongListScaffold(
     val onSurfaceVariant = MaterialTheme.colorScheme.onSurfaceVariant
     val typography = MaterialTheme.typography
     val titleStyle = remember(typography) {
-        typography.bodyLarge.copy(fontWeight = FontWeight.SemiBold, platformStyle = PlatformTextStyle(includeFontPadding = false))
+        typography.bodyMedium.copy(fontWeight = FontWeight.Medium, platformStyle = PlatformTextStyle(includeFontPadding = false))
     }
     val subtitleStyle = remember(typography) {
-        typography.bodyMedium.copy(platformStyle = PlatformTextStyle(includeFontPadding = false))
+        typography.bodySmall.copy(platformStyle = PlatformTextStyle(includeFontPadding = false))
     }
 
     Scaffold(
@@ -129,8 +129,7 @@ private fun SongListScaffold(
                 }
             } else {
                 LazyColumn(
-                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
-                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp)
                 ) {
                     // Header section with Samsung rounded album art & Play All / Shuffle buttons
                     item {
@@ -227,6 +226,9 @@ private fun SongListScaffold(
                             titleStyle = titleStyle,
                             subtitleStyle = subtitleStyle
                         )
+                        if (index < songs.lastIndex) {
+                            HorizontalDivider(thickness = 0.5.dp, color = MaterialTheme.colorScheme.outlineVariant)
+                        }
                     }
                 }
             }

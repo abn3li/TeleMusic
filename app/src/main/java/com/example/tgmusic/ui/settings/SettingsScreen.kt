@@ -28,7 +28,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import com.example.tgmusic.TgMusicApp
-import com.example.tgmusic.data.settings.AppColorScheme
 import com.example.tgmusic.data.settings.AppSettingsStore
 import com.example.tgmusic.data.settings.AppThemeMode
 import com.example.tgmusic.data.settings.DnsResolver
@@ -43,7 +42,6 @@ fun SettingsScreen(onBack: () -> Unit, onLoggedOut: () -> Unit) {
     val clipboardManager = LocalClipboardManager.current
 
     var selectedThemeMode by remember { mutableStateOf(app.settingsStore.themeMode) }
-    var selectedColorScheme by remember { mutableStateOf(app.settingsStore.colorScheme) }
     var enrichEnabled by remember { mutableStateOf(app.settingsStore.enrichMetadataOnSync) }
     var cacheLimit by remember { mutableStateOf(app.settingsStore.maxCacheSizeBytes) }
 
@@ -72,6 +70,8 @@ fun SettingsScreen(onBack: () -> Unit, onLoggedOut: () -> Unit) {
     var cacheMenuExpanded by remember { mutableStateOf(false) }
 
     Scaffold(
+        containerColor = MaterialTheme.colorScheme.background,
+        contentColor = MaterialTheme.colorScheme.onBackground,
         topBar = {
             TopAppBar(
                 title = { Text("Settings", fontWeight = FontWeight.Bold) },
@@ -81,7 +81,7 @@ fun SettingsScreen(onBack: () -> Unit, onLoggedOut: () -> Unit) {
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.surface
+                    containerColor = MaterialTheme.colorScheme.background
                 )
             )
         }
@@ -96,7 +96,7 @@ fun SettingsScreen(onBack: () -> Unit, onLoggedOut: () -> Unit) {
         ) {
             // ---- APPEARANCE & THEME SECTION ----
             Card(
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
                 shape = RoundedCornerShape(20.dp),
                 modifier = Modifier.fillMaxWidth()
             ) {
@@ -171,35 +171,12 @@ fun SettingsScreen(onBack: () -> Unit, onLoggedOut: () -> Unit) {
                             }
                         }
                     }
-
-                    Spacer(Modifier.height(20.dp))
-
-                    Text(
-                        "Cute Color Palettes",
-                        style = MaterialTheme.typography.labelLarge,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-
-                    Spacer(Modifier.height(8.dp))
-
-                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        AppColorScheme.entries.forEach { scheme ->
-                            ColorSchemeRow(
-                                scheme = scheme,
-                                isSelected = selectedColorScheme == scheme,
-                                onClick = {
-                                    selectedColorScheme = scheme
-                                    app.settingsStore.colorScheme = scheme
-                                }
-                            )
-                        }
-                    }
                 }
             }
 
             // ---- DNS RESOLVERS SECTION (TELEGRAM X / NAGRAM X) ----
             Card(
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
                 shape = RoundedCornerShape(20.dp),
                 modifier = Modifier.fillMaxWidth()
             ) {
@@ -340,7 +317,7 @@ fun SettingsScreen(onBack: () -> Unit, onLoggedOut: () -> Unit) {
 
             // ---- MTPROTO PROXY (ANTI-CENSORSHIP) SECTION ----
             Card(
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
                 shape = RoundedCornerShape(20.dp),
                 modifier = Modifier.fillMaxWidth()
             ) {
@@ -488,7 +465,7 @@ fun SettingsScreen(onBack: () -> Unit, onLoggedOut: () -> Unit) {
 
             // ---- SYNC SECTION ----
             Card(
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
                 shape = RoundedCornerShape(20.dp),
                 modifier = Modifier.fillMaxWidth()
             ) {
@@ -537,7 +514,7 @@ fun SettingsScreen(onBack: () -> Unit, onLoggedOut: () -> Unit) {
 
             // ---- STORAGE & LIBRARY MANAGEMENT SECTION ----
             Card(
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
                 shape = RoundedCornerShape(20.dp),
                 modifier = Modifier.fillMaxWidth()
             ) {
@@ -659,7 +636,7 @@ fun SettingsScreen(onBack: () -> Unit, onLoggedOut: () -> Unit) {
 
             // ---- TELEGRAM ACCOUNT SECTION ----
             Card(
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
                 shape = RoundedCornerShape(20.dp),
                 modifier = Modifier.fillMaxWidth()
             ) {
@@ -693,7 +670,7 @@ fun SettingsScreen(onBack: () -> Unit, onLoggedOut: () -> Unit) {
 
             // ---- ABOUT SECTION ----
             Card(
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
                 shape = RoundedCornerShape(20.dp),
                 modifier = Modifier.fillMaxWidth()
             ) {
@@ -898,73 +875,6 @@ private fun ThemeModeChip(
                 style = MaterialTheme.typography.bodyMedium,
                 fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
             )
-        }
-    }
-}
-
-@Composable
-private fun ColorSchemeRow(
-    scheme: AppColorScheme,
-    isSelected: Boolean,
-    onClick: () -> Unit
-) {
-    val borderColor = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant
-    val containerColor = if (isSelected) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f) else MaterialTheme.colorScheme.surfaceContainerHigh
-
-    Surface(
-        onClick = onClick,
-        shape = RoundedCornerShape(14.dp),
-        color = containerColor,
-        border = BorderStroke(if (isSelected) 2.dp else 1.dp, borderColor),
-        modifier = Modifier.fillMaxWidth()
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(12.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                // Dual Color Preview Swatch
-                Box(
-                    modifier = Modifier
-                        .size(36.dp)
-                        .clip(CircleShape)
-                        .background(Color(scheme.primaryHex)),
-                    contentAlignment = Alignment.BottomEnd
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(20.dp)
-                            .clip(CircleShape)
-                            .background(Color(scheme.secondaryHex))
-                            .border(1.5.dp, Color.White, CircleShape)
-                    )
-                }
-
-                Column {
-                    Text(
-                        scheme.displayName,
-                        style = MaterialTheme.typography.bodyLarge,
-                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
-                    )
-                    Text(
-                        scheme.description,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-            }
-
-            if (isSelected) {
-                Icon(
-                    Icons.Default.Check,
-                    contentDescription = "Selected",
-                    tint = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.size(20.dp)
-                )
-            }
         }
     }
 }

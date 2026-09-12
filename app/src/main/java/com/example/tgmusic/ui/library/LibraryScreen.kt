@@ -8,6 +8,7 @@ import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.shrinkVertically
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -43,10 +44,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.PlatformTextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -63,7 +62,7 @@ import com.example.tgmusic.repository.SortField
 import com.example.tgmusic.sync.SyncService
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import kotlin.math.abs
+import kotlin.math.roundToInt
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
@@ -94,35 +93,43 @@ fun LibraryScreen(
     var searchQuery by remember { mutableStateOf("") }
     var isSearchActive by remember { mutableStateOf(false) }
 
+    // The text field itself stays bound to searchQuery directly so typing never lags - only the
+    // (potentially expensive, on a large library) re-filtering below waits for a short pause in
+    // typing, instead of re-scanning all four lists on the main thread after every keystroke.
+    val debouncedSearchQuery by produceState(initialValue = searchQuery, searchQuery) {
+        delay(250)
+        value = searchQuery
+    }
+
     // Real-time filtering based on search query
-    val filteredTracksUi = remember(tracksUiModels, searchQuery) {
-        if (searchQuery.isBlank()) tracksUiModels
+    val filteredTracksUi = remember(tracksUiModels, debouncedSearchQuery) {
+        if (debouncedSearchQuery.isBlank()) tracksUiModels
         else tracksUiModels.filter { song ->
-            song.title.contains(searchQuery, ignoreCase = true) ||
-            song.subtitle.contains(searchQuery, ignoreCase = true)
+            song.title.contains(debouncedSearchQuery, ignoreCase = true) ||
+            song.subtitle.contains(debouncedSearchQuery, ignoreCase = true)
         }
     }
 
-    val filteredFavoritesUi = remember(favoritesUiModels, searchQuery) {
-        if (searchQuery.isBlank()) favoritesUiModels
+    val filteredFavoritesUi = remember(favoritesUiModels, debouncedSearchQuery) {
+        if (debouncedSearchQuery.isBlank()) favoritesUiModels
         else favoritesUiModels.filter { song ->
-            song.title.contains(searchQuery, ignoreCase = true) ||
-            song.subtitle.contains(searchQuery, ignoreCase = true)
+            song.title.contains(debouncedSearchQuery, ignoreCase = true) ||
+            song.subtitle.contains(debouncedSearchQuery, ignoreCase = true)
         }
     }
 
-    val filteredAlbums = remember(albums, searchQuery) {
-        if (searchQuery.isBlank()) albums
+    val filteredAlbums = remember(albums, debouncedSearchQuery) {
+        if (debouncedSearchQuery.isBlank()) albums
         else albums.filter { album ->
-            album.album.contains(searchQuery, ignoreCase = true) ||
-            album.artist.contains(searchQuery, ignoreCase = true)
+            album.album.contains(debouncedSearchQuery, ignoreCase = true) ||
+            album.artist.contains(debouncedSearchQuery, ignoreCase = true)
         }
     }
 
-    val filteredArtists = remember(artists, searchQuery) {
-        if (searchQuery.isBlank()) artists
+    val filteredArtists = remember(artists, debouncedSearchQuery) {
+        if (debouncedSearchQuery.isBlank()) artists
         else artists.filter { artist ->
-            artist.artist.contains(searchQuery, ignoreCase = true)
+            artist.artist.contains(debouncedSearchQuery, ignoreCase = true)
         }
     }
 
@@ -132,21 +139,31 @@ fun LibraryScreen(
         pageCount = { LibraryTab.entries.size }
     )
 
-    val filterChipsLazyListState = rememberLazyListState()
+    val filterChipsListState = rememberLazyListState()
 
-    // Instant 1:1 real-time frame synchronization: as your finger drags the page, top filter chips move simultaneously!
-    val density = LocalDensity.current
-    val chipWidthPx = remember(density) { with(density) { 95.dp.toPx() }.toInt() }
-
-    LaunchedEffect(pagerState.currentPage, pagerState.currentPageOffsetFraction) {
-        val current = pagerState.currentPage
-        val fraction = pagerState.currentPageOffsetFraction
-        val scrollOffset = (fraction * chipWidthPx).toInt()
-
-        filterChipsLazyListState.scrollToItem(
-            index = current.coerceIn(0, LibraryTab.entries.lastIndex),
-            scrollOffset = scrollOffset
-        )
+    // Keeps the chip row's scroll position AND which chip is highlighted tracking the pager's
+    // live drag position (not just where it settles) - this needs to react every frame of the
+    // drag, which is exactly what's needed for the chip row to actually follow your finger
+    // instead of jumping only once the swipe finishes, and for a chip past the edge of the
+    // screen (Artists, the last tab) to actually scroll into view instead of the row staying put
+    // while the page underneath changes. A single snapshotFlow collector (rather than a
+    // LaunchedEffect keyed on the continuously-changing offset fraction) avoids cancelling and
+    // relaunching a coroutine on every single drag frame.
+    LaunchedEffect(filterChipsListState) {
+        snapshotFlow { pagerState.currentPage + pagerState.currentPageOffsetFraction }
+            .collect { rawIndex ->
+                val liveIndex = rawIndex.coerceIn(0f, (LibraryTab.entries.size - 1).toFloat())
+                val base = liveIndex.toInt()
+                val info = filterChipsListState.layoutInfo.visibleItemsInfo.firstOrNull { it.index == base }
+                if (info != null) {
+                    val nextInfo = filterChipsListState.layoutInfo.visibleItemsInfo.firstOrNull { it.index == base + 1 }
+                    val itemWidth = nextInfo?.let { it.offset - info.offset } ?: info.size
+                    val offset = ((liveIndex - base) * itemWidth).toInt()
+                    filterChipsListState.scrollToItem(base, offset)
+                } else {
+                    filterChipsListState.scrollToItem(base)
+                }
+            }
     }
 
     // Sync Pager page settlement -> ViewModel selected tab
@@ -216,21 +233,16 @@ fun LibraryScreen(
         }
     }
 
-    val activeContainer = MaterialTheme.colorScheme.primaryContainer
-    val inactiveContainer = MaterialTheme.colorScheme.surfaceContainerHigh
-    val activeLabel = MaterialTheme.colorScheme.onPrimaryContainer
-    val inactiveLabel = MaterialTheme.colorScheme.onSurfaceVariant
-
     Scaffold(
         topBar = {
-            Surface(color = MaterialTheme.colorScheme.surface) {
+            Surface(color = MaterialTheme.colorScheme.background) {
                 Column {
                     TopAppBar(
                         title = {
                             Column {
                                 Text(
-                                    text = "Your Library",
-                                    style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold)
+                                    text = "Library",
+                                    style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Medium)
                                 )
                                 Spacer(Modifier.height(2.dp))
                                 Row(
@@ -302,6 +314,15 @@ fun LibraryScreen(
                             },
                             singleLine = true,
                             shape = RoundedCornerShape(24.dp),
+                            // Card-like: filled with the same background as the app's other
+                            // cards (surfaceVariant), no visible outline - instead of the
+                            // previous bordered/transparent look.
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant,
+                                unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant,
+                                focusedBorderColor = Color.Transparent,
+                                unfocusedBorderColor = Color.Transparent
+                            ),
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .padding(horizontal = 16.dp, vertical = 6.dp)
@@ -397,44 +418,36 @@ fun LibraryScreen(
         }
     ) { padding ->
         Column(modifier = Modifier.padding(padding).fillMaxSize()) {
-            // Horizontally Scrollable Filter Chips Header Row with Generous Vertical Bounds
+            // Flat filter chips row - filled white pill when selected, thin outline otherwise.
+            // "Selected" here means whichever tab is CLOSEST to the pager's live drag position,
+            // not the settled tab - see the LaunchedEffect above for why.
             LazyRow(
-                state = filterChipsLazyListState,
+                state = filterChipsListState,
                 modifier = Modifier.fillMaxWidth(),
-                contentPadding = PaddingValues(start = 16.dp, top = 6.dp, end = 16.dp, bottom = 8.dp),
+                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 itemsIndexed(LibraryTab.entries) { index, t ->
-                    val currentPosition = pagerState.currentPage + pagerState.currentPageOffsetFraction
-                    val pageDistance = abs(currentPosition - index)
-                    val activeFraction = (1f - pageDistance).coerceIn(0f, 1f)
-
-                    val chipBg = lerp(inactiveContainer, activeContainer, activeFraction)
-                    val chipTextColor = lerp(inactiveLabel, activeLabel, activeFraction)
-
+                    val liveIndex = (pagerState.currentPage + pagerState.currentPageOffsetFraction).roundToInt()
+                    val selected = index == liveIndex
                     Surface(
                         onClick = {
                             coroutineScope.launch {
-                                pagerState.animateScrollToPage(index)
+                                pagerState.animateScrollToPage(t.ordinal)
                             }
                         },
-                        shape = RoundedCornerShape(20.dp),
-                        color = chipBg,
-                        modifier = Modifier.height(34.dp)
+                        shape = RoundedCornerShape(16.dp),
+                        color = if (selected) MaterialTheme.colorScheme.onSurface else Color.Transparent,
+                        border = if (!selected) BorderStroke(0.5.dp, MaterialTheme.colorScheme.outline) else null
                     ) {
-                        Box(
-                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text(
-                                text = t.label,
-                                color = chipTextColor,
-                                fontWeight = if (activeFraction > 0.5f) FontWeight.Bold else FontWeight.Medium,
-                                style = MaterialTheme.typography.labelMedium,
-                                maxLines = 1,
-                                softWrap = false
-                            )
-                        }
+                        Text(
+                            text = t.label,
+                            color = if (selected) MaterialTheme.colorScheme.surface else MaterialTheme.colorScheme.onSurface,
+                            style = MaterialTheme.typography.labelMedium,
+                            maxLines = 1,
+                            softWrap = false,
+                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp)
+                        )
                     }
                 }
             }
@@ -527,10 +540,10 @@ private fun SongList(
     // titleStyle/subtitleStyle doc for why.
     val typography = MaterialTheme.typography
     val titleStyle = remember(typography) {
-        typography.bodyLarge.copy(fontWeight = FontWeight.SemiBold, platformStyle = PlatformTextStyle(includeFontPadding = false))
+        typography.bodyMedium.copy(fontWeight = FontWeight.Medium, platformStyle = PlatformTextStyle(includeFontPadding = false))
     }
     val subtitleStyle = remember(typography) {
-        typography.bodyMedium.copy(platformStyle = PlatformTextStyle(includeFontPadding = false))
+        typography.bodySmall.copy(platformStyle = PlatformTextStyle(includeFontPadding = false))
     }
 
     if (songsUi.isEmpty()) {
@@ -545,11 +558,11 @@ private fun SongList(
             }
         }
     } else {
-        // Clean flat LazyColumn
+        // Clean flat LazyColumn - rows are separated by a plain thin divider rather than a
+        // gap, matching a plain list feel instead of a card-per-row one.
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(start = 16.dp, top = 2.dp, end = 16.dp, bottom = 12.dp),
-            verticalArrangement = Arrangement.spacedBy(4.dp)
+            contentPadding = PaddingValues(horizontal = 16.dp)
         ) {
             item(key = "sort_bar", contentType = "sort_bar") {
                 SortBar(sortField, ascending, onFieldSelected, onToggleDir)
@@ -575,6 +588,9 @@ private fun SongList(
                     titleStyle = titleStyle,
                     subtitleStyle = subtitleStyle
                 )
+                if (index < songsUi.lastIndex) {
+                    HorizontalDivider(thickness = 0.5.dp, color = MaterialTheme.colorScheme.outlineVariant)
+                }
             }
         }
     }

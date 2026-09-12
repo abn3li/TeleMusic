@@ -28,7 +28,7 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.core.graphics.ColorUtils
-import coil.ImageLoader
+import coil.imageLoader
 import coil.request.ImageRequest
 import coil.request.SuccessResult
 import kotlinx.coroutines.Dispatchers
@@ -66,7 +66,7 @@ fun rememberArtworkMesh(imageUrl: String?, artPx: Int = 512): ArtworkMesh? {
                         .size(MESH_PX, MESH_PX)
                         .allowHardware(false) // the sleeve has to be read back pixel by pixel
                         .build()
-                    val result = ImageLoader(context).execute(request) as? SuccessResult
+                    val result = context.imageLoader.execute(request) as? SuccessResult
                     (result?.drawable as? BitmapDrawable)?.bitmap
                 }.getOrNull()
             }

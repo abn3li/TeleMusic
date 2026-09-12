@@ -17,9 +17,8 @@ class MainActivity : ComponentActivity() {
         val app = application as TgMusicApp
         setContent {
             val themeMode by app.settingsStore.themeModeFlow.collectAsState()
-            val colorSchemeChoice by app.settingsStore.colorSchemeFlow.collectAsState()
 
-            TgMusicTheme(themeMode = themeMode, colorSchemeChoice = colorSchemeChoice) {
+            TgMusicTheme(themeMode = themeMode) {
                 Surface(modifier = Modifier.fillMaxSize()) {
                     TgMusicNavGraph()
                 }
