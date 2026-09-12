@@ -1,9 +1,21 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.compose")
     id("com.google.devtools.ksp")
 }
+
+// Release signing credentials live in local.properties (gitignored, machine-local) - never
+// committed. Falls back to the debug key when they're absent, e.g. a fresh checkout that
+// hasn't set these up yet, so the release build type still works out of the box for local
+// testing without a real keystore.
+val localProperties = Properties().apply {
+    val file = rootProject.file("local.properties")
+    if (file.exists()) file.inputStream().use { load(it) }
+}
+val releaseStoreFile = localProperties.getProperty("release.storeFile")
 
 kotlin {
     jvmToolchain(17)
@@ -22,17 +34,24 @@ android {
         // (see ui/credentials/CredentialsScreen.kt + data/telegram/TelegramCredentialsStore.kt)
     }
     signingConfigs {
-        // Reuses the debug key so a release build can be installed locally for perf
-        // testing without a real release keystore. Swap for a proper signingConfig
-        // before shipping to users.
         getByName("debug") {}
+        if (releaseStoreFile != null) {
+            create("release") {
+                storeFile = file(releaseStoreFile)
+                storePassword = localProperties.getProperty("release.storePassword")
+                keyAlias = localProperties.getProperty("release.keyAlias")
+                keyPassword = localProperties.getProperty("release.keyPassword")
+            }
+        }
     }
     buildTypes {
         release {
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
-            signingConfig = signingConfigs.getByName("debug")
+            // Real release keystore when local.properties has one configured (see above);
+            // falls back to the debug key otherwise so this build type still works without it.
+            signingConfig = if (releaseStoreFile != null) signingConfigs.getByName("release") else signingConfigs.getByName("debug")
         }
     }
     buildFeatures { compose = true }
