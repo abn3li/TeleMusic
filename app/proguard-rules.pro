@@ -8,10 +8,10 @@
 # Gson deserializes these response models by matching JSON keys to field names via
 # reflection - none of them use @SerializedName, so obfuscating field names silently
 # drops every field (nulls everywhere) instead of crashing.
--keep class com.example.tgmusic.data.remote.** { *; }
+-keep class com.abn3li.telemusic.data.remote.** { *; }
 
 # Room entities are read/written by generated DAO code but can also be inspected via
 # reflection by some Room internals (type converters, POJO mapping) - keep field names.
--keep class com.example.tgmusic.data.local.*Entity { *; }
--keep class com.example.tgmusic.data.local.*Summary { *; }
--keep class com.example.tgmusic.data.local.*CrossRef { *; }
+-keep class com.abn3li.telemusic.data.local.*Entity { *; }
+-keep class com.abn3li.telemusic.data.local.*Summary { *; }
+-keep class com.abn3li.telemusic.data.local.*CrossRef { *; }

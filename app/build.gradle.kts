@@ -22,14 +22,14 @@ kotlin {
 }
 
 android {
-    namespace = "com.example.tgmusic"
+    namespace = "com.abn3li.telemusic"
     compileSdk = 34
     defaultConfig {
-        applicationId = "com.example.tgmusic"
+        applicationId = "com.abn3li.telemusic"
         minSdk = 26
         targetSdk = 34
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = 2
+        versionName = "1.2"
         // No Telegram credentials anywhere in the build - user enters them at runtime
         // (see ui/credentials/CredentialsScreen.kt + data/telegram/TelegramCredentialsStore.kt)
     }
