@@ -18,12 +18,10 @@ enum class AppColorScheme(
     val primaryHex: Long,
     val secondaryHex: Long
 ) {
-    AUXIO("Auxio Indigo", "Classic blue theme", 0xFF4155B5, 0xFF8B9DFF),
-    SAKURA_PINK("Sakura Pink 🌸", "Cute soft rose & pink", 0xFFE91E63, 0xFFFFB2C9),
-    MATCHA_MINT("Matcha Mint 🍵", "Cute sage & fresh mint", 0xFF2E7D32, 0xFF9FD4AD),
-    SUNSET_PEACH("Sunset Peach 🍑", "Cute warm coral & peach", 0xFFE65100, 0xFFFFB59D),
-    CLOUD_VIOLET("Cloud Violet ☁️", "Cute soft lilac & lavender", 0xFF6750A4, 0xFFD4BBFF),
-    AMOLED_NEON("AMOLED Neon ⚡", "Vibrant neon cyan & magenta", 0xFF00E5FF, 0xFFFF4081)
+    CATPPUCCIN("Catppuccin", "Soft pastel mauve & blue", 0xFFCBA6F7, 0xFF89B4FA),
+    PINK("Pink", "Soft rose & pink", 0xFFE91E63, 0xFFFFB2C9),
+    PEACH("Peach", "Warm coral & peach", 0xFFE65100, 0xFFFFB59D),
+    VIOLET("Violet", "Soft lilac & lavender", 0xFF6750A4, 0xFFD4BBFF)
 }
 
 enum class DnsResolver(
@@ -77,8 +75,8 @@ class AppSettingsStore(context: Context) {
 
     var colorScheme: AppColorScheme
         get() {
-            val name = prefs.getString(KEY_COLOR_SCHEME, AppColorScheme.AUXIO.name) ?: AppColorScheme.AUXIO.name
-            return runCatching { AppColorScheme.valueOf(name) }.getOrDefault(AppColorScheme.AUXIO)
+            val name = prefs.getString(KEY_COLOR_SCHEME, AppColorScheme.CATPPUCCIN.name) ?: AppColorScheme.CATPPUCCIN.name
+            return runCatching { AppColorScheme.valueOf(name) }.getOrDefault(AppColorScheme.CATPPUCCIN)
         }
         set(value) {
             prefs.edit().putString(KEY_COLOR_SCHEME, value.name).apply()
