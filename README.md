@@ -13,6 +13,12 @@
 
 ---
 
+<p align="center">
+  <img src="docs/banner.png" alt="TeleMusic banner" width="100%">
+</p>
+
+---
+
 ## ✨ Features
 
 - **🎵 Telegram-native library** — syncs audio from any channel/chat you already belong to, no `@username` guessing
