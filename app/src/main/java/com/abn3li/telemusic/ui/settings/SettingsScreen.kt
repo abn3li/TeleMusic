@@ -1,14 +1,13 @@
 package com.abn3li.telemusic.ui.settings
 
 import android.content.Intent
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
@@ -20,7 +19,6 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalUriHandler
@@ -31,7 +29,10 @@ import com.abn3li.telemusic.TgMusicApp
 import com.abn3li.telemusic.data.settings.AppSettingsStore
 import com.abn3li.telemusic.data.settings.AppThemeMode
 import com.abn3li.telemusic.data.settings.DnsResolver
+import com.abn3li.telemusic.repository.LocalAudioFile
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -68,6 +69,32 @@ fun SettingsScreen(onBack: () -> Unit, onLoggedOut: () -> Unit) {
 
     var showLogoutConfirm by remember { mutableStateOf(false) }
     var cacheMenuExpanded by remember { mutableStateOf(false) }
+
+    // Import from local storage state
+    var localAudioFiles by remember { mutableStateOf<List<LocalAudioFile>>(emptyList()) }
+    var alreadyImportedSongIds by remember { mutableStateOf<Set<Long>>(emptySet()) }
+    var isScanningLocalFolder by remember { mutableStateOf(false) }
+    var showImportSheet by remember { mutableStateOf(false) }
+
+    // Opens the system file explorer's folder picker (Storage Access Framework) - no storage
+    // permission needed at all, that grant is independent of READ_MEDIA_AUDIO/
+    // READ_EXTERNAL_STORAGE. See MusicRepository.scanLocalFolder()'s own doc.
+    val importFolderLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocumentTree()
+    ) { treeUri ->
+        if (treeUri != null) {
+            runCatching {
+                context.contentResolver.takePersistableUriPermission(treeUri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+            showImportSheet = true
+            isScanningLocalFolder = true
+            scope.launch {
+                localAudioFiles = withContext(Dispatchers.IO) { app.musicRepository.scanLocalFolder(treeUri) }
+                alreadyImportedSongIds = withContext(Dispatchers.IO) { app.musicRepository.getLocalImportSongIds() }
+                isScanningLocalFolder = false
+            }
+        }
+    }
 
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
@@ -576,6 +603,32 @@ fun SettingsScreen(onBack: () -> Unit, onLoggedOut: () -> Unit) {
                     HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
                     Spacer(Modifier.height(16.dp))
 
+                    // Import Local Songs Button
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("Import local songs", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
+                            Text(
+                                "Pick a folder on your device to add its audio files to your Tracks library.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        Spacer(Modifier.width(8.dp))
+                        OutlinedButton(onClick = { importFolderLauncher.launch(null) }) {
+                            Icon(Icons.Default.LibraryMusic, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(Modifier.width(6.dp))
+                            Text("Import")
+                        }
+                    }
+
+                    Spacer(Modifier.height(16.dp))
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
+                    Spacer(Modifier.height(16.dp))
+
                     // Clear Cache Only Button
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -800,6 +853,35 @@ fun SettingsScreen(onBack: () -> Unit, onLoggedOut: () -> Unit) {
             },
             dismissButton = {
                 TextButton(onClick = { showLogoutConfirm = false }) { Text("Cancel") }
+            }
+        )
+    }
+
+    if (showImportSheet) {
+        ImportLocalMusicSheet(
+            files = localAudioFiles,
+            alreadyImportedIds = alreadyImportedSongIds,
+            isScanning = isScanningLocalFolder,
+            onImport = { selected ->
+                val count = selected.size
+                scope.launch {
+                    // The import itself is just file copies + DB writes - fine on this
+                    // screen-scoped coroutine even if the user navigates away right after.
+                    // Enrichment is the part that can't live here: see
+                    // TgMusicApp.enrichLibraryInBackground()'s own doc for why.
+                    app.musicRepository.importLocalSongs(selected)
+                    if (enrichEnabled) {
+                        app.enrichLibraryInBackground()
+                        storageActionStatus = "Imported $count song(s) - fetching artwork in the background..."
+                    } else {
+                        storageActionStatus = "Imported $count song(s)!"
+                    }
+                }
+                showImportSheet = false
+            },
+            onDismiss = {
+                showImportSheet = false
+                localAudioFiles = emptyList()
             }
         )
     }

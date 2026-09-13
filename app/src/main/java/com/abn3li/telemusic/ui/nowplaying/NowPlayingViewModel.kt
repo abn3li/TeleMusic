@@ -143,11 +143,11 @@ class NowPlayingViewModel(
     }
 
     /**
-     * Catches this ViewModel's own displayed state up to a song change it didn't initiate -
-     * see the transition listener in [init]. The queue's position is already correct (the
-     * service advanced the same shared [PlaybackQueue] instance) and playback is already under
-     * way, so unlike [loadCurrentQueuePosition] this must never call [startPlayback] or
-     * otherwise touch the transport - it only re-reads what's now playing.
+     * Catches this ViewModel's own displayed state up to a song change it didn't initiate - see
+     * the transition listener registered in the init block above. The queue's position is
+     * already correct (the service advanced the same shared [PlaybackQueue] instance) and
+     * playback is already under way, so unlike [loadCurrentQueuePosition] this must never call
+     * [startPlayback] or otherwise touch the transport - it only re-reads what's now playing.
      */
     private fun resyncToExternallyChangedSong(songId: Long) {
         viewModelScope.launch {
@@ -339,8 +339,13 @@ class NowPlayingViewModel(
 
             startPlayback(song)
 
-            // Streamed-only auto-cache bookkeeping (does NOT set isExplicitDownload).
-            launch(Dispatchers.IO) { repository.markStreamedFileCached(song) }
+            // Streamed-only auto-cache bookkeeping (does NOT set isExplicitDownload). A local
+            // import is already fully on-device and has no real TDLib file behind it to poll
+            // for - markStreamedFileCached would otherwise loop forever waiting for a download
+            // completion that can never come.
+            if (!song.isLocalImport) {
+                launch(Dispatchers.IO) { repository.markStreamedFileCached(song) }
+            }
         }
     }
 

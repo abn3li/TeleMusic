@@ -57,8 +57,9 @@ interface SongDao {
     @Query("SELECT * FROM songs WHERE artist = :artist ORDER BY title ASC")
     fun observeSongsByArtist(artist: String): Flow<List<SongEntity>>
 
-    // --- Cache management: only ever touches the auto-cache, never explicit downloads ---
-    @Query("SELECT * FROM songs WHERE localFilePath IS NOT NULL AND isExplicitDownload = 0 ORDER BY lastPlayedAtMillis ASC")
+    // --- Cache management: only ever touches the auto-cache, never explicit downloads or a
+    // local import (isLocalImport's localFilePath is the user's OWN file, never safe to delete) ---
+    @Query("SELECT * FROM songs WHERE localFilePath IS NOT NULL AND isExplicitDownload = 0 AND isLocalImport = 0 ORDER BY lastPlayedAtMillis ASC")
     suspend fun getAutoCachedSongsOldestFirst(): List<SongEntity>
 
     @Query("UPDATE songs SET lastPlayedAtMillis = :timestamp WHERE telegramMessageId = :id")
@@ -75,4 +76,8 @@ interface SongDao {
 
     @Query("DELETE FROM songs WHERE telegramMessageId = :id")
     suspend fun delete(id: Long)
+
+    // For the local-import picker's "already imported" check - see LocalAudioFile.stableSongId().
+    @Query("SELECT telegramMessageId FROM songs WHERE isLocalImport = 1")
+    suspend fun getLocalImportSongIds(): List<Long>
 }

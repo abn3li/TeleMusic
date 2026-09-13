@@ -1,5 +1,6 @@
 package com.abn3li.telemusic.repository
 
+import android.net.Uri
 import com.abn3li.telemusic.data.local.AlbumSummary
 import com.abn3li.telemusic.data.local.ArtistSummary
 import com.abn3li.telemusic.data.local.PlaylistDao
@@ -24,7 +25,8 @@ class MusicRepository(
     private val lyricsRepository: LyricsRepository,
     private val metadataRepository: MetadataRepository,
     private val settingsStore: AppSettingsStore,
-    private val thumbnailGenerator: ThumbnailGenerator
+    private val thumbnailGenerator: ThumbnailGenerator,
+    private val localAudioImporter: LocalAudioImporter
 ) {
     // ---- Tracks / Favourites, metadata-driven sort ----
     fun observeLibrary(sortField: SortField, ascending: Boolean): Flow<List<SongEntity>> =
@@ -37,6 +39,45 @@ class MusicRepository(
         songDao.observeFavorites().map { it.sortedByField(sortField, ascending) }
 
     suspend fun setFavorite(song: SongEntity, isFavorite: Boolean) = songDao.setFavorite(song.telegramMessageId, isFavorite)
+
+    // ---- Import from local storage ----
+    /** [treeUri] is a folder the user picked via the system file explorer (SAF) - no storage
+     * permission needed, that grant is independent of READ_MEDIA_AUDIO/READ_EXTERNAL_STORAGE. */
+    fun scanLocalFolder(treeUri: Uri): List<LocalAudioFile> = localAudioImporter.scanFolder(treeUri)
+
+    /** Which local imports (by their stableSongId()) are already in the library - lets the
+     * picker sheet show them as checked/disabled instead of the user re-importing blind. */
+    suspend fun getLocalImportSongIds(): Set<Long> = songDao.getLocalImportSongIds().toSet()
+
+    /** Copies each file into the app's own private storage (never leaves it depending on the
+     * picked folder's URI staying valid) and upserts it as a song - see LocalAudioFile's own
+     * stableSongId() doc for why re-picking the same file resolves to the same row rather than
+     * duplicating. */
+    suspend fun importLocalSongs(files: List<LocalAudioFile>) {
+        for (file in files) {
+            val songId = file.stableSongId()
+            val copiedPath = localAudioImporter.importToPrivateStorage(file, songId) ?: continue
+            songDao.upsert(
+                SongEntity(
+                    telegramMessageId = songId,
+                    telegramFileId = 0,
+                    title = file.title,
+                    artist = file.artist,
+                    album = file.album,
+                    durationSeconds = file.durationSeconds,
+                    localFilePath = copiedPath,
+                    isLocalImport = true,
+                    // Left unenriched on purpose - it already has a real title/artist from the
+                    // device's own tags, so enrichMissingMetadata() won't touch those, but it
+                    // still has no artwork (nothing extracts embedded cover art from an imported
+                    // file), so it still needs that pass to fetch one. Call
+                    // enrichMissingMetadata() after this import to fetch it right away rather
+                    // than waiting for a Telegram sync that may never come.
+                    metadataEnriched = false
+                )
+            )
+        }
+    }
 
     // ---- Albums / Artists - grouped straight from real metadata ----
     fun observeAlbums(): Flow<List<AlbumSummary>> = songDao.observeAlbums()
@@ -153,7 +194,12 @@ class MusicRepository(
 
             onProgress("Fetching info for $originalTitle...")
 
-            val needsMetadataGuess = originalTitle == "Unknown title" || song.album == null
+            // A local import always has a real title/artist from its own tags, so the first two
+            // checks rarely fire for one - but it never has artwork either (nothing extracts
+            // embedded cover art from an imported file), so without that third check a local
+            // import that happens to already carry an album tag would never get a lookup at all
+            // and would silently stay coverless forever.
+            val needsMetadataGuess = originalTitle == "Unknown title" || song.album == null || song.albumArtUrl == null
             val enriched = if (needsMetadataGuess) {
                 metadataRepository.enrich("$originalTitle $originalArtist".trim())
             } else null
@@ -236,8 +282,11 @@ class MusicRepository(
     }
 
     /** EXPLICIT download only - triggered by the download button. Sets isExplicitDownload =
-     * true, meaning enforceCacheLimit() will never touch this file. */
+     * true, meaning enforceCacheLimit() will never touch this file. A local import is already
+     * fully on-device - nothing to download, and there's no real Telegram file behind it to ask
+     * TDLib for. */
     suspend fun downloadExplicitly(song: SongEntity): String {
+        if (song.isLocalImport) return song.localFilePath ?: error("Local import ${song.telegramMessageId} has no file path")
         val freshFileId = getFreshFileIdForSong(song)
         val path = tdlibManager.downloadFile(freshFileId)
         check(File(path).let { it.exists() && it.length() > 0 }) { "Download completed but file missing/empty at $path" }
@@ -280,10 +329,14 @@ class MusicRepository(
         return count
     }
 
-    /** Deletes ALL songs, playlists, and cached audio files from local DB and disk for a 100% fresh sync reset. */
+    /** Deletes ALL Telegram-synced songs, playlists, and cached audio files from local DB and
+     * disk for a 100% fresh sync reset. Local imports are deliberately left untouched - this
+     * reset is about Telegram sync state, and their localFilePath is the user's own file on
+     * shared storage, never safe to delete. */
     suspend fun clearAllLibrarySongs() {
         val allSongs = songDao.observeAll().firstOrNull().orEmpty()
         for (song in allSongs) {
+            if (song.isLocalImport) continue
             val path = song.localFilePath
             if (path != null) {
                 val file = File(path)
@@ -301,6 +354,10 @@ class MusicRepository(
     suspend fun stampLastPlayed(song: SongEntity) = songDao.stampLastPlayed(song.telegramMessageId, System.currentTimeMillis())
 
     suspend fun getFreshFileIdForSong(song: SongEntity): Int {
+        // No real Telegram message behind a local import - asking TDLib would just burn a
+        // lookup per channel for a message id that was never real to begin with.
+        if (song.isLocalImport) return song.telegramFileId
+
         var channelId = settingsStore.lastSyncedChatId
         if (channelId == 0L) {
             val found = tdlibManager.findFirstChannelId()

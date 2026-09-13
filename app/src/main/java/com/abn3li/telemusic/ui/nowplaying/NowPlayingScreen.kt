@@ -1,7 +1,5 @@
 package com.abn3li.telemusic.ui.nowplaying
 
-import android.graphics.Bitmap
-import android.graphics.drawable.BitmapDrawable
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.Crossfade
 import androidx.compose.animation.core.animateFloatAsState
@@ -75,14 +73,10 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
-import coil.ImageLoader
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
-import coil.request.SuccessResult
 import com.abn3li.telemusic.playback.RepeatMode
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.RandomAccessFile
 import java.util.Locale
@@ -433,7 +427,7 @@ private fun NowPlayingContent(
                             )
                             if (!state.song?.album.isNullOrBlank()) {
                                 Text(
-                                    text = state.song?.album ?: "",
+                                    text = state.song.album,
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     maxLines = 1,
@@ -616,7 +610,7 @@ private fun NowPlayingContent(
                                         ) {
                                             item {
                                                 Text(
-                                                    text = state.song?.lyricsPlain ?: "",
+                                                    text = state.song.lyricsPlain,
                                                     style = MaterialTheme.typography.titleLarge,
                                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                                     textAlign = TextAlign.Center,
@@ -706,23 +700,27 @@ private fun NowPlayingContent(
                             onClick = { viewModel.toggleFavorite() }
                         )
 
-                        // Download Button
+                        // Download Button - hidden entirely for a local import, which is
+                        // already fully on-device and has no Telegram file behind it to
+                        // download.
                         val isDownloaded = state.song?.isExplicitDownload == true
-                        if (state.isDownloading) {
-                            Box(modifier = Modifier.size(34.dp), contentAlignment = Alignment.Center) {
-                                CircularProgressIndicator(
-                                    modifier = Modifier.size(18.dp),
-                                    strokeWidth = 2.dp,
-                                    color = MaterialTheme.colorScheme.primary
+                        if (state.song?.isLocalImport != true) {
+                            if (state.isDownloading) {
+                                Box(modifier = Modifier.size(34.dp), contentAlignment = Alignment.Center) {
+                                    CircularProgressIndicator(
+                                        modifier = Modifier.size(18.dp),
+                                        strokeWidth = 2.dp,
+                                        color = MaterialTheme.colorScheme.primary
+                                    )
+                                }
+                            } else {
+                                PlayerCircleGlyph(
+                                    icon = if (isDownloaded) Icons.Default.CloudDone else Icons.Default.CloudDownload,
+                                    contentDescription = if (isDownloaded) "Downloaded" else "Download song",
+                                    active = isDownloaded,
+                                    onClick = { if (!isDownloaded) viewModel.downloadCurrentSong() }
                                 )
                             }
-                        } else {
-                            PlayerCircleGlyph(
-                                icon = if (isDownloaded) Icons.Default.CloudDone else Icons.Default.CloudDownload,
-                                contentDescription = if (isDownloaded) "Downloaded" else "Download song",
-                                active = isDownloaded,
-                                onClick = { if (!isDownloaded) viewModel.downloadCurrentSong() }
-                            )
                         }
 
                         // Lyrics Toggle Button (Moved right next to Download & Like buttons)
@@ -845,8 +843,8 @@ private fun NowPlayingContent(
 
         // Manual Custom Lyrics Search Dialog
         if (showManualLyricsDialog && state.song != null) {
-            var customTitle by remember { mutableStateOf(state.song?.title ?: "") }
-            var customArtist by remember { mutableStateOf(state.song?.artist ?: "") }
+            var customTitle by remember { mutableStateOf(state.song.title) }
+            var customArtist by remember { mutableStateOf(state.song.artist) }
 
             AlertDialog(
                 onDismissRequest = { showManualLyricsDialog = false },
@@ -906,6 +904,7 @@ private fun NowPlayingContent(
             val (containerFormat, bitrateText) = detectAudioFormat(song.localFilePath, song.durationSeconds)
 
             val storageStatus = when {
+                song.isLocalImport -> "Imported from Device"
                 song.isExplicitDownload -> "Downloaded (Offline)"
                 song.localFilePath != null -> "Cached on Storage"
                 else -> "Streaming via TDLib"

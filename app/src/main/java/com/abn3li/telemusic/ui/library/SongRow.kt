@@ -13,6 +13,7 @@ import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.MusicNote
+import androidx.compose.material.icons.filled.PhoneAndroid
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -162,6 +163,18 @@ fun SongRow(
                         modifier = Modifier.size(18.dp),
                         strokeWidth = 2.dp,
                         color = primaryColor
+                    )
+                }
+            } else if (song.isLocalImport) {
+                // Imported straight from device storage - already fully local, so there's
+                // nothing to download. A distinct icon instead of CloudDone so this doesn't
+                // read as "downloaded from Telegram."
+                Box(modifier = Modifier.size(36.dp), contentAlignment = Alignment.Center) {
+                    Icon(
+                        imageVector = Icons.Default.PhoneAndroid,
+                        contentDescription = "Imported from device storage",
+                        tint = onSurfaceVariant,
+                        modifier = Modifier.size(20.dp)
                     )
                 }
             } else {

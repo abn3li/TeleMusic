@@ -25,6 +25,13 @@ data class SongEntity(
     // from streaming/playing a song. This is what the "Downloaded" icon actually checks,
     // and what cache eviction must NEVER touch.
     val isExplicitDownload: Boolean = false,
+    // True for a song imported directly from the device's own storage rather than synced from
+    // Telegram - telegramFileId is meaningless (0) for these, and localFilePath points at the
+    // user's OWN file on shared storage, not an app-managed cache/download copy. Cache eviction
+    // and getFreshFileIdForSong() must NEVER touch these: touching telegramFileId would spam
+    // TDLib with lookups for a message that doesn't exist, and touching localFilePath the way
+    // cache eviction does for auto-cached songs would delete a file the app doesn't own.
+    val isLocalImport: Boolean = false,
     // Stamped every time the song actually starts playing - used to pick which auto-cached
     // (non-explicit-download) files to evict first when the cache size limit is hit.
     val lastPlayedAtMillis: Long = 0L,

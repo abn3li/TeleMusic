@@ -14,7 +14,8 @@ data class SongUiModel(
     val listArtworkUrl: String?,
     val isFavorite: Boolean,
     val isExplicitDownload: Boolean,
-    val isDownloading: Boolean
+    val isDownloading: Boolean,
+    val isLocalImport: Boolean
 )
 
 fun SongEntity.toUiModel(isDownloading: Boolean): SongUiModel = SongUiModel(
@@ -24,5 +25,6 @@ fun SongEntity.toUiModel(isDownloading: Boolean): SongUiModel = SongUiModel(
     listArtworkUrl = thumbnailPath ?: albumArtUrl,
     isFavorite = isFavorite,
     isExplicitDownload = isExplicitDownload,
-    isDownloading = isDownloading
+    isDownloading = isDownloading,
+    isLocalImport = isLocalImport
 )

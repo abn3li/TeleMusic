@@ -9,7 +9,7 @@ import androidx.room.migration.Migration
 
 @Database(
     entities = [SongEntity::class, PlaylistEntity::class, PlaylistSongCrossRef::class],
-    version = 2,
+    version = 3,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -28,10 +28,19 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        // Adds the local-import flag for the "import from local storage" feature - defaults to
+        // 0 (false) for every existing row, which is correct: nothing synced from Telegram
+        // before this existed is a local import.
+        private val MIGRATION_2_3 = object : Migration(2, 3) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE songs ADD COLUMN isLocalImport INTEGER NOT NULL DEFAULT 0")
+            }
+        }
+
         fun get(context: Context): AppDatabase =
             INSTANCE ?: synchronized(this) {
                 INSTANCE ?: Room.databaseBuilder(context.applicationContext, AppDatabase::class.java, "tgmusic.db")
-                    .addMigrations(MIGRATION_1_2)
+                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
                     .fallbackToDestructiveMigration() // fine during active development, for any version this migration chain doesn't cover
                     .build().also { INSTANCE = it }
             }

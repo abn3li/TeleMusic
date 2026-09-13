@@ -10,6 +10,7 @@ import com.abn3li.telemusic.data.telegram.TdlibManager
 import com.abn3li.telemusic.data.telegram.TelegramCredentialsStore
 import com.abn3li.telemusic.playback.PlaybackController
 import com.abn3li.telemusic.playback.PlaybackQueue
+import com.abn3li.telemusic.repository.LocalAudioImporter
 import com.abn3li.telemusic.repository.LyricsRepository
 import com.abn3li.telemusic.repository.MetadataRepository
 import com.abn3li.telemusic.repository.MusicRepository
@@ -42,7 +43,8 @@ class TgMusicApp : Application(), ImageLoaderFactory {
         musicRepository = MusicRepository(
             songDao = db.songDao(), playlistDao = db.playlistDao(), tdlibManager = tdlibManager,
             lyricsRepository = LyricsRepository(), metadataRepository = MetadataRepository(),
-            settingsStore = settingsStore, thumbnailGenerator = ThumbnailGenerator(this)
+            settingsStore = settingsStore, thumbnailGenerator = ThumbnailGenerator(this),
+            localAudioImporter = LocalAudioImporter(this)
         )
         if (credentialsStore.hasCredentials()) {
             tdlibManager.start(
@@ -57,6 +59,18 @@ class TgMusicApp : Application(), ImageLoaderFactory {
         // One-shot catch-up for songs enriched before the thumbnail cache existed - runs once
         // in the background at startup rather than blocking the Library screen's first load.
         appScope.launch { musicRepository.backfillThumbnails() }
+    }
+
+    /**
+     * Runs enrichMissingMetadata() on this Application-scoped coroutine rather than whatever
+     * screen triggered it - it makes several sequential network calls per unenriched song, and
+     * a plain rememberCoroutineScope() (tied to that screen's own composition) would get
+     * cancelled the moment the user navigates away before it finishes, silently leaving newly
+     * imported songs without artwork. This is exactly the failure mode SyncService's own doc
+     * describes for channel sync, just for local-import artwork instead.
+     */
+    fun enrichLibraryInBackground() {
+        appScope.launch { musicRepository.enrichMissingMetadata() }
     }
 
     /**
