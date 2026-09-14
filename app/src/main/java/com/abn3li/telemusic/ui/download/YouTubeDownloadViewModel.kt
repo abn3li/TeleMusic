@@ -4,12 +4,17 @@ import android.content.Context
 import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.abn3li.telemusic.data.browse.BrowseCollection
+import com.abn3li.telemusic.data.browse.HomeSection
 import com.abn3li.telemusic.data.download.DownloadQuality
 import com.abn3li.telemusic.data.download.YtDlpRepository
 import com.abn3li.telemusic.data.download.YtDlpSearchResult
 import com.abn3li.telemusic.data.download.ytDlpStableSongId
 import com.abn3li.telemusic.data.settings.AppSettingsStore
+import com.abn3li.telemusic.repository.DiscoveryRepository
 import com.abn3li.telemusic.repository.MusicRepository
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
@@ -37,7 +42,12 @@ data class YouTubeDownloadUiState(
     // Set the moment a download is confirmed but no folder is saved yet - the screen reacts by
     // launching the system folder picker. The result+quality waiting behind that prompt is kept
     // here rather than re-requested, so picking a folder resumes the exact song the user tapped.
-    val pendingFolderPrompt: PendingDownload? = null
+    val pendingFolderPrompt: PendingDownload? = null,
+    // The Home feed - shown whenever the query is blank instead of a plain "search for a song"
+    // placeholder, same as YouTube Music's own Home tab doubling as pre-search browse.
+    val isLoadingHome: Boolean = true,
+    val homeSections: List<HomeSection> = emptyList(),
+    val genres: List<BrowseCollection> = emptyList()
 )
 
 /**
@@ -50,12 +60,25 @@ class YouTubeDownloadViewModel(
     private val context: Context,
     private val ytDlpRepository: YtDlpRepository,
     private val musicRepository: MusicRepository,
-    private val settingsStore: AppSettingsStore
+    private val settingsStore: AppSettingsStore,
+    private val discoveryRepository: DiscoveryRepository
 ) : ViewModel() {
     private val _uiState = MutableStateFlow(
         YouTubeDownloadUiState(lastUsedQuality = DownloadQuality.fromStoredName(settingsStore.downloadQuality))
     )
     val uiState: StateFlow<YouTubeDownloadUiState> = _uiState
+
+    init {
+        viewModelScope.launch {
+            coroutineScope {
+                val sectionsDeferred = async { discoveryRepository.homeFeed() }
+                val genresDeferred = async { discoveryRepository.genres() }
+                _uiState.update {
+                    it.copy(isLoadingHome = false, homeSections = sectionsDeferred.await(), genres = genresDeferred.await())
+                }
+            }
+        }
+    }
 
     fun onQueryChange(query: String) {
         _uiState.update { it.copy(query = query) }

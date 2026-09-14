@@ -30,6 +30,7 @@ class TgMusicApp : Application(), ImageLoaderFactory {
     lateinit var playbackQueue: PlaybackQueue; private set
     lateinit var playbackController: PlaybackController; private set
     lateinit var ytDlpRepository: YtDlpRepository; private set
+    lateinit var discoveryRepository: com.abn3li.telemusic.repository.DiscoveryRepository; private set
 
     private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
@@ -43,6 +44,7 @@ class TgMusicApp : Application(), ImageLoaderFactory {
         playbackController = PlaybackController(this)
         playbackController.connect(onReady = {})
         ytDlpRepository = YtDlpRepository(this)
+        discoveryRepository = com.abn3li.telemusic.repository.DiscoveryRepository()
 
         musicRepository = MusicRepository(
             songDao = db.songDao(), playlistDao = db.playlistDao(), tdlibManager = tdlibManager,

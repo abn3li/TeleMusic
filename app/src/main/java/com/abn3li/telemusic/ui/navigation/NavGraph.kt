@@ -21,11 +21,14 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import com.abn3li.telemusic.TgMusicApp
 import com.abn3li.telemusic.ui.credentials.CredentialsScreen
+import com.abn3li.telemusic.ui.download.BrowseCollectionScreen
 import com.abn3li.telemusic.ui.download.YouTubeDownloadScreen
 import com.abn3li.telemusic.ui.library.AlbumDetailScreen
 import com.abn3li.telemusic.ui.library.ArtistDetailScreen
 import com.abn3li.telemusic.ui.library.LibraryScreen
 import com.abn3li.telemusic.ui.library.PlaylistDetailScreen
+import com.abn3li.telemusic.ui.library.SmartPlaylistDetailScreen
+import com.abn3li.telemusic.ui.library.SmartPlaylistKind
 import com.abn3li.telemusic.ui.nowplaying.MiniPlayerHeight
 import com.abn3li.telemusic.ui.nowplaying.NowPlayingViewModel
 import com.abn3li.telemusic.ui.nowplaying.PlayerSheetOverlay
@@ -40,11 +43,22 @@ object Routes {
     const val ALBUM = "album/{album}"
     const val ARTIST = "artist/{artist}"
     const val PLAYLIST = "playlist/{id}/{name}"
+    const val SMART_PLAYLIST = "smart_playlist/{kind}"
     const val YOUTUBE_DOWNLOAD = "youtube_download"
+    const val YOUTUBE_BROWSE = "youtube_browse/{browseId}/{title}/{params}"
 
     fun album(name: String) = "album/${Uri.encode(name)}"
     fun artist(name: String) = "artist/${Uri.encode(name)}"
     fun playlist(id: Long, name: String) = "playlist/$id/${Uri.encode(name)}"
+    fun smartPlaylist(kind: SmartPlaylistKind) = "smart_playlist/${kind.name}"
+
+    // params is a required path segment (not optional query) to keep this route's argument
+    // handling simple - "none" stands in for "no params" rather than the segment itself being
+    // absent or empty, since Navigation Compose's route matcher rejects an empty path segment
+    // outright (the whole route fails to match anything in the graph, not just that argument).
+    private const val NO_PARAMS = "none"
+    fun youtubeBrowse(browseId: String, title: String, params: String?) =
+        "youtube_browse/${Uri.encode(browseId)}/${Uri.encode(title)}/${Uri.encode(params ?: NO_PARAMS)}"
 }
 
 /**
@@ -107,12 +121,42 @@ fun TgMusicNavGraph(navController: NavHostController = rememberNavController()) 
                         onAlbumClick = { album -> navController.navigate(Routes.album(album)) },
                         onArtistClick = { artist -> navController.navigate(Routes.artist(artist)) },
                         onPlaylistClick = { id, name -> navController.navigate(Routes.playlist(id, name)) },
+                        onSmartPlaylistClick = { kind -> navController.navigate(Routes.smartPlaylist(kind)) },
                         onYouTubeDownloadClick = { navController.navigate(Routes.YOUTUBE_DOWNLOAD) }
                     )
                 }
-                composable(Routes.YOUTUBE_DOWNLOAD) { YouTubeDownloadScreen(onBack = { navController.popBackStack() }) }
-                composable(Routes.SYNC) { SyncScreen(onBack = { navController.popBackStack() }) }
-                composable(Routes.SETTINGS) {
+                composable(Routes.YOUTUBE_DOWNLOAD) {
+                    YouTubeDownloadScreen(
+                        onBack = { navController.popBackStack() },
+                        onOpenCollection = { c -> navController.navigate(Routes.youtubeBrowse(c.browseId, c.title, c.params)) }
+                    )
+                }
+                composable(
+                    route = Routes.YOUTUBE_BROWSE,
+                    exitTransition = { ExitTransition.None },
+                    popEnterTransition = { EnterTransition.None }
+                ) { backStackEntry ->
+                    val browseId = backStackEntry.arguments?.getString("browseId")?.let { Uri.decode(it) } ?: ""
+                    val title = backStackEntry.arguments?.getString("title")?.let { Uri.decode(it) } ?: ""
+                    val params = backStackEntry.arguments?.getString("params")?.let { Uri.decode(it) }?.takeIf { it.isNotBlank() && it != "none" }
+                    BrowseCollectionScreen(
+                        title = title,
+                        browseId = browseId,
+                        params = params,
+                        onBack = { navController.popBackStack() },
+                        onOpenCollection = { c -> navController.navigate(Routes.youtubeBrowse(c.browseId, c.title, c.params)) }
+                    )
+                }
+                composable(
+                    route = Routes.SYNC,
+                    exitTransition = { ExitTransition.None },
+                    popEnterTransition = { EnterTransition.None }
+                ) { SyncScreen(onBack = { navController.popBackStack() }) }
+                composable(
+                    route = Routes.SETTINGS,
+                    exitTransition = { ExitTransition.None },
+                    popEnterTransition = { EnterTransition.None }
+                ) {
                     SettingsScreen(
                         onBack = { navController.popBackStack() },
                         onLoggedOut = { navController.navigate(Routes.CREDENTIALS) { popUpTo(0) { inclusive = true } } }
@@ -142,6 +186,15 @@ fun TgMusicNavGraph(navController: NavHostController = rememberNavController()) 
                     val id = backStackEntry.arguments?.getString("id")?.toLongOrNull() ?: 0L
                     val name = backStackEntry.arguments?.getString("name")?.let { Uri.decode(it) } ?: "Playlist"
                     PlaylistDetailScreen(id, name, onBack = { navController.popBackStack() }, onSongClick = playSong)
+                }
+                composable(
+                    route = Routes.SMART_PLAYLIST,
+                    exitTransition = { ExitTransition.None },
+                    popEnterTransition = { EnterTransition.None }
+                ) { backStackEntry ->
+                    val kind = backStackEntry.arguments?.getString("kind")
+                        ?.let { runCatching { SmartPlaylistKind.valueOf(it) }.getOrNull() } ?: SmartPlaylistKind.LIKED
+                    SmartPlaylistDetailScreen(kind, onBack = { navController.popBackStack() }, onSongClick = playSong)
                 }
             }
         }

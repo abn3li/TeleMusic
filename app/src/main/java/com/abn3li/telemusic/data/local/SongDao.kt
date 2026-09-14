@@ -39,6 +39,17 @@ interface SongDao {
     @Query("UPDATE songs SET isFavorite = :isFavorite WHERE telegramMessageId = :id")
     suspend fun setFavorite(id: Long, isFavorite: Boolean)
 
+    // A real Telegram-synced row always has a non-zero telegramFileId - both a YouTube download
+    // and a local import use 0 there (see SongEntity's own doc), so this is the same check the
+    // rest of the app already relies on to tell a Telegram row apart from the other two sources.
+    @Query("SELECT * FROM songs WHERE telegramFileId != 0")
+    fun observeTelegramSongs(): Flow<List<SongEntity>>
+
+    // Only ever true for a song the user explicitly tapped Download on (YouTube or a re-download
+    // of a Telegram track) - never a plain streaming cache hit, see isExplicitDownload's own doc.
+    @Query("SELECT * FROM songs WHERE isExplicitDownload = 1")
+    fun observeDownloaded(): Flow<List<SongEntity>>
+
     @Query(
         """
         SELECT COALESCE(NULLIF(album, ''), 'Unknown Album') AS album, artist AS artist,

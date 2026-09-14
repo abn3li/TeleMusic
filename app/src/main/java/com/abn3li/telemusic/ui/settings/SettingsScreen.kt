@@ -30,6 +30,8 @@ import com.abn3li.telemusic.TgMusicApp
 import com.abn3li.telemusic.data.settings.AppSettingsStore
 import com.abn3li.telemusic.data.settings.AppThemeMode
 import com.abn3li.telemusic.data.settings.DnsResolver
+import com.abn3li.telemusic.data.update.UpdateChecker
+import com.abn3li.telemusic.data.update.UpdateCheckResult
 import com.abn3li.telemusic.repository.LocalAudioFile
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -76,6 +78,12 @@ fun SettingsScreen(onBack: () -> Unit, onLoggedOut: () -> Unit) {
 
     var showLogoutConfirm by remember { mutableStateOf(false) }
     var cacheMenuExpanded by remember { mutableStateOf(false) }
+
+    // Update check state
+    val updateChecker = remember { UpdateChecker() }
+    var isCheckingUpdate by remember { mutableStateOf(false) }
+    var updateCheckStatus by remember { mutableStateOf<String?>(null) }
+    var availableUpdate by remember { mutableStateOf<UpdateCheckResult.UpdateAvailable?>(null) }
 
     // Import from local storage state
     var localAudioFiles by remember { mutableStateOf<List<LocalAudioFile>>(emptyList()) }
@@ -813,6 +821,46 @@ fun SettingsScreen(onBack: () -> Unit, onLoggedOut: () -> Unit) {
                         Text("v$versionName", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
 
+                    Spacer(Modifier.height(10.dp))
+
+                    OutlinedButton(
+                        onClick = {
+                            isCheckingUpdate = true
+                            updateCheckStatus = null
+                            scope.launch {
+                                when (val result = updateChecker.check(versionName ?: "0")) {
+                                    is UpdateCheckResult.UpdateAvailable -> {
+                                        availableUpdate = result
+                                    }
+                                    UpdateCheckResult.UpToDate -> {
+                                        updateCheckStatus = "You're on the latest version"
+                                    }
+                                    is UpdateCheckResult.Error -> {
+                                        updateCheckStatus = "Couldn't check for updates: ${result.message}"
+                                    }
+                                }
+                                isCheckingUpdate = false
+                            }
+                        },
+                        enabled = !isCheckingUpdate,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        if (isCheckingUpdate) {
+                            CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                            Spacer(Modifier.width(8.dp))
+                            Text("Checking...")
+                        } else {
+                            Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(Modifier.width(6.dp))
+                            Text("Check for updates")
+                        }
+                    }
+
+                    updateCheckStatus?.let { status ->
+                        Spacer(Modifier.height(8.dp))
+                        Text(status, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+
                     Spacer(Modifier.height(12.dp))
                     HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
                     Spacer(Modifier.height(12.dp))
@@ -906,6 +954,32 @@ fun SettingsScreen(onBack: () -> Unit, onLoggedOut: () -> Unit) {
             },
             dismissButton = {
                 TextButton(onClick = { showLogoutConfirm = false }) { Text("Cancel") }
+            }
+        )
+    }
+
+    availableUpdate?.let { update ->
+        val uriHandler = LocalUriHandler.current
+        AlertDialog(
+            onDismissRequest = { availableUpdate = null },
+            icon = { Icon(Icons.Default.Refresh, contentDescription = null) },
+            title = { Text("Update available: v${update.version}") },
+            text = {
+                Text(
+                    update.notes?.trim()?.takeIf { it.isNotBlank() }
+                        ?: "A newer version is available on GitHub."
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        uriHandler.openUri(update.releaseUrl)
+                        availableUpdate = null
+                    }
+                ) { Text("View on GitHub") }
+            },
+            dismissButton = {
+                TextButton(onClick = { availableUpdate = null }) { Text("Later") }
             }
         )
     }

@@ -78,6 +78,20 @@ fun PlaylistDetailScreen(playlistId: Long, playlistName: String, onBack: () -> U
     SongListScaffold(playlistName, onBack, holder.detail, onSongClick)
 }
 
+@Composable
+fun SmartPlaylistDetailScreen(kind: SmartPlaylistKind, onBack: () -> Unit, onSongClick: (List<Long>, Int) -> Unit) {
+    val app = LocalContext.current.applicationContext as TgMusicApp
+    val holder = remember(kind) {
+        val songsFlow = when (kind) {
+            SmartPlaylistKind.LIKED -> app.musicRepository.observeFavorites(SortField.TITLE, true)
+            SmartPlaylistKind.TELEGRAM -> app.musicRepository.observeTelegramSongs(SortField.TITLE, true)
+            SmartPlaylistKind.DOWNLOADED -> app.musicRepository.observeDownloadedSongs(SortField.TITLE, true)
+        }
+        DetailHolderViewModel(app.musicRepository, songsFlow)
+    }
+    SongListScaffold(kind.label, onBack, holder.detail, onSongClick)
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun SongListScaffold(
@@ -86,6 +100,7 @@ private fun SongListScaffold(
     vm: DetailViewModel,
     onSongClick: (List<Long>, Int) -> Unit
 ) {
+    val app = LocalContext.current.applicationContext as TgMusicApp
     val songs by vm.songs.collectAsState()
     val playlists by vm.playlists.collectAsState()
     val downloadingIds by vm.downloadingIds.collectAsState()
@@ -222,7 +237,12 @@ private fun SongListScaffold(
                             onDownloadClick = { vm.download(song) },
                             onAddToPlaylist = { id -> vm.addToPlaylist(id, song) },
                             onCreatePlaylistAndAdd = { name -> vm.createPlaylistAndAdd(name, song) },
-                            onDeleteDownload = { vm.removeDownload(song) },
+                            onDeleteDownload = {
+                                if (app.playbackQueue.currentSongId() == song.telegramMessageId && app.playbackController.isPlaying()) {
+                                    app.playbackController.togglePlayPause()
+                                }
+                                vm.removeDownload(song)
+                            },
                             primaryColor = primaryColor,
                             onSurfaceVariant = onSurfaceVariant,
                             titleStyle = titleStyle,

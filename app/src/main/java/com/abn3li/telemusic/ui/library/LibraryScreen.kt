@@ -31,7 +31,9 @@ import androidx.compose.material.icons.filled.ArrowUpward
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.Send
 import androidx.compose.material.icons.automirrored.filled.PlaylistPlay
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
@@ -56,6 +58,7 @@ import com.abn3li.telemusic.TgMusicApp
 import com.abn3li.telemusic.data.local.AlbumSummary
 import com.abn3li.telemusic.data.local.ArtistSummary
 import com.abn3li.telemusic.data.local.PlaylistEntity
+import com.abn3li.telemusic.data.local.PlaylistSummary
 import com.abn3li.telemusic.data.local.SongEntity
 import com.abn3li.telemusic.data.telegram.TelegramConnectionState
 import com.abn3li.telemusic.repository.SortField
@@ -73,6 +76,7 @@ fun LibraryScreen(
     onAlbumClick: (String) -> Unit,
     onArtistClick: (String) -> Unit,
     onPlaylistClick: (Long, String) -> Unit,
+    onSmartPlaylistClick: (SmartPlaylistKind) -> Unit,
     onYouTubeDownloadClick: () -> Unit
 ) {
     val app = LocalContext.current.applicationContext as TgMusicApp
@@ -83,12 +87,11 @@ fun LibraryScreen(
     val sortField by viewModel.sortField.collectAsState()
     val ascending by viewModel.ascending.collectAsState()
     val tracks by viewModel.tracks.collectAsState()
-    val favorites by viewModel.favorites.collectAsState()
     val tracksUiModels by viewModel.tracksUiModels.collectAsState()
-    val favoritesUiModels by viewModel.favoritesUiModels.collectAsState()
     val albums by viewModel.albums.collectAsState()
     val artists by viewModel.artists.collectAsState()
     val playlists by viewModel.playlists.collectAsState()
+    val playlistSummaries by viewModel.playlistSummaries.collectAsState()
 
     // Search state
     var searchQuery by remember { mutableStateOf("") }
@@ -106,14 +109,6 @@ fun LibraryScreen(
     val filteredTracksUi = remember(tracksUiModels, debouncedSearchQuery) {
         if (debouncedSearchQuery.isBlank()) tracksUiModels
         else tracksUiModels.filter { song ->
-            song.title.contains(debouncedSearchQuery, ignoreCase = true) ||
-            song.subtitle.contains(debouncedSearchQuery, ignoreCase = true)
-        }
-    }
-
-    val filteredFavoritesUi = remember(favoritesUiModels, debouncedSearchQuery) {
-        if (debouncedSearchQuery.isBlank()) favoritesUiModels
-        else favoritesUiModels.filter { song ->
             song.title.contains(debouncedSearchQuery, ignoreCase = true) ||
             song.subtitle.contains(debouncedSearchQuery, ignoreCase = true)
         }
@@ -465,10 +460,9 @@ fun LibraryScreen(
                 key(page) {
                     when (LibraryTab.entries[page]) {
                         LibraryTab.TRACKS -> SongList(filteredTracksUi, tracks, playlists, onSongClick, viewModel, sortField, ascending)
-                        LibraryTab.FAVOURITES -> SongList(filteredFavoritesUi, favorites, playlists, onSongClick, viewModel, sortField, ascending)
                         LibraryTab.ALBUMS -> AlbumsList(filteredAlbums, onAlbumClick)
                         LibraryTab.ARTISTS -> ArtistsList(filteredArtists, onArtistClick)
-                        LibraryTab.PLAYLISTS -> PlaylistsList(playlists, onPlaylistClick, viewModel)
+                        LibraryTab.PLAYLISTS -> PlaylistsList(playlistSummaries, onPlaylistClick, onSmartPlaylistClick, viewModel)
                     }
                 }
             }
@@ -532,6 +526,7 @@ private fun SongList(
     sortField: SortField,
     ascending: Boolean
 ) {
+    val app = LocalContext.current.applicationContext as TgMusicApp
     val entitiesById = remember(songsEntities) { songsEntities.associateBy { it.telegramMessageId } }
     val songIds = remember(songsUi) { songsUi.map { it.id } }
 
@@ -587,7 +582,18 @@ private fun SongList(
                     onDownloadClick = remember(songEntity) { { viewModel.downloadSong(songEntity) } },
                     onAddToPlaylist = remember(songEntity) { { id -> viewModel.addSongToPlaylist(id, songEntity) } },
                     onCreatePlaylistAndAdd = remember(songEntity) { { name -> viewModel.createPlaylistAndAddSong(name, songEntity) } },
-                    onDeleteDownload = remember(songEntity) { { viewModel.removeDownload(songEntity) } },
+                    onDeleteDownload = remember(songEntity, app) {
+                        {
+                            // Deleting the file out from under an actively playing/buffering
+                            // ExoPlayer instance is fragile (it may keep playing already-buffered
+                            // audio fine, or fail on the next read/seek) - pausing first avoids
+                            // that race instead of leaving it to chance.
+                            if (app.playbackQueue.currentSongId() == songEntity.telegramMessageId && app.playbackController.isPlaying()) {
+                                app.playbackController.togglePlayPause()
+                            }
+                            viewModel.removeDownload(songEntity)
+                        }
+                    },
                     primaryColor = primaryColor,
                     onSurfaceVariant = onSurfaceVariant,
                     titleStyle = titleStyle,
@@ -803,11 +809,59 @@ private fun ArtistsList(artists: List<ArtistSummary>, onArtistClick: (String) ->
 }
 
 @Composable
+private fun SmartPlaylistRow(
+    label: String,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    onClick: () -> Unit
+) {
+    Surface(
+        onClick = onClick,
+        shape = RoundedCornerShape(20.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerLow,
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Surface(
+                shape = RoundedCornerShape(12.dp),
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(52.dp)
+            ) {
+                Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
+                    Icon(
+                        imageVector = icon,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onPrimary
+                    )
+                }
+            }
+
+            Spacer(Modifier.width(12.dp))
+
+            Text(
+                text = label,
+                style = MaterialTheme.typography.bodyLarge.copy(
+                    fontWeight = FontWeight.SemiBold,
+                    platformStyle = PlatformTextStyle(includeFontPadding = false)
+                ),
+                modifier = Modifier.weight(1f)
+            )
+        }
+    }
+}
+
+@Composable
 private fun PlaylistsList(
-    playlists: List<PlaylistEntity>,
+    playlists: List<PlaylistSummary>,
     onPlaylistClick: (Long, String) -> Unit,
+    onSmartPlaylistClick: (SmartPlaylistKind) -> Unit,
     viewModel: LibraryViewModel
 ) {
+    val context = LocalContext.current
     var showCreateDialog by remember { mutableStateOf(false) }
 
     Column(Modifier.fillMaxSize()) {
@@ -826,77 +880,112 @@ private fun PlaylistsList(
                 Text("New Playlist")
             }
         }
-        if (playlists.isEmpty()) {
-            Box(Modifier.weight(1f).fillMaxSize(), contentAlignment = Alignment.Center) {
-                Text(
-                    text = "No playlists created yet",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+        LazyColumn(
+            modifier = Modifier.weight(1f),
+            contentPadding = PaddingValues(start = 16.dp, top = 2.dp, end = 16.dp, bottom = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            item(key = "smart_liked", contentType = "smart_playlist_row") {
+                SmartPlaylistRow(
+                    label = SmartPlaylistKind.LIKED.label,
+                    icon = Icons.Default.Favorite,
+                    onClick = remember(onSmartPlaylistClick) { { onSmartPlaylistClick(SmartPlaylistKind.LIKED) } }
                 )
             }
-        } else {
-            LazyColumn(
-                modifier = Modifier.weight(1f),
-                contentPadding = PaddingValues(start = 16.dp, top = 2.dp, end = 16.dp, bottom = 12.dp),
-                verticalArrangement = Arrangement.spacedBy(4.dp)
-            ) {
-                items(
-                    items = playlists,
-                    key = { it.id },
-                    contentType = { "playlist_row" }
-                ) { playlist ->
-                    val onPlaylistClicked = remember(playlist.id, playlist.name, onPlaylistClick) {
-                        { onPlaylistClick(playlist.id, playlist.name) }
-                    }
+            item(key = "smart_telegram", contentType = "smart_playlist_row") {
+                SmartPlaylistRow(
+                    label = SmartPlaylistKind.TELEGRAM.label,
+                    icon = Icons.Default.Send,
+                    onClick = remember(onSmartPlaylistClick) { { onSmartPlaylistClick(SmartPlaylistKind.TELEGRAM) } }
+                )
+            }
+            item(key = "smart_downloaded", contentType = "smart_playlist_row") {
+                SmartPlaylistRow(
+                    label = SmartPlaylistKind.DOWNLOADED.label,
+                    icon = Icons.Default.Download,
+                    onClick = remember(onSmartPlaylistClick) { { onSmartPlaylistClick(SmartPlaylistKind.DOWNLOADED) } }
+                )
+            }
 
-                    val onDeleteClicked = remember(playlist.id, viewModel) {
-                        { viewModel.deletePlaylist(playlist.id); Unit }
-                    }
+            if (playlists.isNotEmpty()) {
+                item(key = "your_playlists_header", contentType = "header") {
+                    Text(
+                        text = "Your playlists",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(top = 12.dp, bottom = 4.dp, start = 4.dp)
+                    )
+                }
+            }
 
-                    Surface(
-                        onClick = onPlaylistClicked,
-                        shape = RoundedCornerShape(20.dp),
-                        color = MaterialTheme.colorScheme.surfaceContainerLow,
-                        modifier = Modifier.fillMaxWidth()
+            items(
+                items = playlists,
+                key = { it.id },
+                contentType = { "playlist_row" }
+            ) { playlist ->
+                val onPlaylistClicked = remember(playlist.id, playlist.name, onPlaylistClick) {
+                    { onPlaylistClick(playlist.id, playlist.name) }
+                }
+
+                val onDeleteClicked = remember(playlist.id, viewModel) {
+                    { viewModel.deletePlaylist(playlist.id); Unit }
+                }
+
+                Surface(
+                    onClick = onPlaylistClicked,
+                    shape = RoundedCornerShape(20.dp),
+                    color = MaterialTheme.colorScheme.surfaceContainerLow,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Row(
+                        Box(
                             modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(12.dp),
-                            verticalAlignment = Alignment.CenterVertically
+                                .size(52.dp)
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(MaterialTheme.colorScheme.secondaryContainer),
+                            contentAlignment = Alignment.Center
                         ) {
-                            Surface(
-                                shape = RoundedCornerShape(12.dp),
-                                color = MaterialTheme.colorScheme.secondaryContainer,
-                                modifier = Modifier.size(52.dp)
-                            ) {
-                                Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
-                                    Icon(
-                                        imageVector = Icons.AutoMirrored.Filled.PlaylistPlay,
-                                        contentDescription = null,
-                                        tint = MaterialTheme.colorScheme.onSecondaryContainer
-                                    )
+                            if (!playlist.albumArtUrl.isNullOrEmpty()) {
+                                val request = remember(playlist.albumArtUrl) {
+                                    ImageRequest.Builder(context).data(playlist.albumArtUrl).size(150, 150).build()
                                 }
-                            }
-
-                            Spacer(Modifier.width(12.dp))
-
-                            Text(
-                                text = playlist.name,
-                                style = MaterialTheme.typography.bodyLarge.copy(
-                                    fontWeight = FontWeight.SemiBold,
-                                    platformStyle = PlatformTextStyle(includeFontPadding = false)
-                                ),
-                                modifier = Modifier.weight(1f)
-                            )
-
-                            IconButton(onClick = onDeleteClicked) {
+                                Image(
+                                    painter = rememberAsyncImagePainter(request),
+                                    contentDescription = null,
+                                    contentScale = ContentScale.Crop,
+                                    modifier = Modifier.fillMaxSize()
+                                )
+                            } else {
                                 Icon(
-                                    imageVector = Icons.Default.Delete,
-                                    contentDescription = "Delete playlist",
-                                    tint = MaterialTheme.colorScheme.error
+                                    imageVector = Icons.AutoMirrored.Filled.PlaylistPlay,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.onSecondaryContainer
                                 )
                             }
+                        }
+
+                        Spacer(Modifier.width(12.dp))
+
+                        Text(
+                            text = playlist.name,
+                            style = MaterialTheme.typography.bodyLarge.copy(
+                                fontWeight = FontWeight.SemiBold,
+                                platformStyle = PlatformTextStyle(includeFontPadding = false)
+                            ),
+                            modifier = Modifier.weight(1f)
+                        )
+
+                        IconButton(onClick = onDeleteClicked) {
+                            Icon(
+                                imageVector = Icons.Default.Delete,
+                                contentDescription = "Delete playlist",
+                                tint = MaterialTheme.colorScheme.error
+                            )
                         }
                     }
                 }

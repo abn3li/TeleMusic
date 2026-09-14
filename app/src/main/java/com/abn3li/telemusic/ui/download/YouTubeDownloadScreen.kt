@@ -9,6 +9,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
@@ -41,6 +42,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextField
@@ -64,6 +66,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import coil.compose.AsyncImage
 import com.abn3li.telemusic.TgMusicApp
+import com.abn3li.telemusic.data.browse.BrowseCollection
+import com.abn3li.telemusic.data.browse.HomeSection
 import com.abn3li.telemusic.data.download.DownloadQuality
 import com.abn3li.telemusic.data.download.YtDlpSearchResult
 
@@ -76,10 +80,10 @@ import com.abn3li.telemusic.data.download.YtDlpSearchResult
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun YouTubeDownloadScreen(onBack: () -> Unit) {
+fun YouTubeDownloadScreen(onBack: () -> Unit, onOpenCollection: (BrowseCollection) -> Unit) {
     val app = LocalContext.current.applicationContext as TgMusicApp
     val viewModel = remember {
-        YouTubeDownloadViewModel(app.applicationContext, app.ytDlpRepository, app.musicRepository, app.settingsStore)
+        YouTubeDownloadViewModel(app.applicationContext, app.ytDlpRepository, app.musicRepository, app.settingsStore, app.discoveryRepository)
     }
     val state by viewModel.uiState.collectAsState()
 
@@ -89,7 +93,8 @@ fun YouTubeDownloadScreen(onBack: () -> Unit) {
 
     state.qualityPickerResult?.let { result ->
         QualityPickerDialog(
-            result = result,
+            key = result.videoId,
+            title = result.title,
             initialQuality = state.lastUsedQuality,
             onDismiss = viewModel::dismissQualityPicker,
             onConfirm = { quality -> viewModel.confirmDownload(result, quality) }
@@ -146,6 +151,12 @@ fun YouTubeDownloadScreen(onBack: () -> Unit) {
             )
 
             when {
+                state.query.isBlank() -> DiscoveryHome(
+                    isLoading = state.isLoadingHome,
+                    sections = state.homeSections,
+                    genres = state.genres,
+                    onOpenCollection = onOpenCollection
+                )
                 state.isSearching -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     CircularProgressIndicator()
                 }
@@ -170,18 +181,121 @@ fun YouTubeDownloadScreen(onBack: () -> Unit) {
     }
 }
 
+/** YouTube Music's own real Home feed - shelves of playlists/charts/artists (never a bare music
+ * video card - see data/browse/BrowseParser's own doc on the "audio only" filtering this all
+ * goes through). Tapping any card is a real browse, not a static preview - see
+ * BrowseCollectionScreen's own doc. */
+@Composable
+private fun DiscoveryHome(
+    isLoading: Boolean,
+    sections: List<HomeSection>,
+    genres: List<BrowseCollection>,
+    onOpenCollection: (BrowseCollection) -> Unit
+) {
+    when {
+        isLoading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
+        sections.isEmpty() && genres.isEmpty() -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Text("Couldn't load Discovery - check your connection", color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        else -> androidx.compose.foundation.lazy.LazyColumn(contentPadding = PaddingValues(vertical = 8.dp)) {
+            if (genres.isNotEmpty()) {
+                item(key = "genres_header") {
+                    Text(
+                        text = "Genres",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(start = 16.dp, top = 12.dp, bottom = 8.dp)
+                    )
+                }
+                item(key = "genres_row") {
+                    androidx.compose.foundation.lazy.LazyRow(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        contentPadding = PaddingValues(horizontal = 16.dp)
+                    ) {
+                        items(genres, key = { it.title }) { genre ->
+                            GenreChip(genre = genre, onClick = { onOpenCollection(genre) })
+                        }
+                    }
+                }
+            }
+            items(sections, key = { it.title }) { section ->
+                Text(
+                    text = section.title,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(start = 16.dp, top = 12.dp, bottom = 8.dp)
+                )
+                androidx.compose.foundation.lazy.LazyRow(
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    contentPadding = PaddingValues(horizontal = 16.dp)
+                ) {
+                    items(section.items, key = { it.browseId }) { card ->
+                        DiscoveryCard(card = card, onClick = { onOpenCollection(card) })
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun GenreChip(genre: BrowseCollection, onClick: () -> Unit) {
+    Surface(
+        onClick = onClick,
+        shape = RoundedCornerShape(100),
+        color = MaterialTheme.colorScheme.secondaryContainer
+    ) {
+        Text(
+            text = genre.title,
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSecondaryContainer,
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp)
+        )
+    }
+}
+
+@Composable
+private fun DiscoveryCard(card: BrowseCollection, onClick: () -> Unit) {
+    val context = LocalContext.current
+    Column(modifier = Modifier.width(140.dp).clickable(onClick = onClick)) {
+        Box(
+            modifier = Modifier.size(140.dp).clip(RoundedCornerShape(10.dp)).background(MaterialTheme.colorScheme.surfaceContainerHigh),
+            contentAlignment = Alignment.Center
+        ) {
+            if (card.thumbnailUrl != null) {
+                val request = remember(card.thumbnailUrl) {
+                    coil.request.ImageRequest.Builder(context).data(card.thumbnailUrl).size(300, 300).build()
+                }
+                AsyncImage(model = request, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+            } else {
+                Icon(Icons.Default.MusicNote, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+            }
+        }
+        Spacer(Modifier.height(6.dp))
+        Text(card.title, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        card.subtitle?.let {
+            Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+    }
+}
+
 /** Per-download quality/format choice, styled as a grid of selectable boxes rather than a plain
  * dropdown/list - matches what the user asked for, and reads faster than text rows since every
- * option's size/label is visible at once instead of one at a time in a menu. Only ever shown for
- * a YouTube download - see this file's own top-level doc for why. */
+ * option's size/label is visible at once instead of one at a time in a menu. Shared between the
+ * search results screen and Discovery/Browse (see BrowseCollectionScreen) so both offer the same
+ * per-download choice - just a Compose dialog with local state, no network/CPU cost of its own,
+ * so reusing it here adds nothing to what Browse downloads already cost. [key] re-resets the
+ * selection when a different track's dialog opens (the videoId, not the title, since two
+ * different tracks could share a title). */
 @Composable
-private fun QualityPickerDialog(
-    result: YtDlpSearchResult,
+fun QualityPickerDialog(
+    key: String,
+    title: String,
     initialQuality: DownloadQuality,
     onDismiss: () -> Unit,
     onConfirm: (DownloadQuality) -> Unit
 ) {
-    var selected by remember(result.videoId) { mutableStateOf(initialQuality) }
+    var selected by remember(key) { mutableStateOf(initialQuality) }
 
     Dialog(onDismissRequest = onDismiss) {
         Column(
@@ -193,7 +307,7 @@ private fun QualityPickerDialog(
         ) {
             Text("Select quality", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
             Text(
-                result.title,
+                title,
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1,
@@ -274,6 +388,7 @@ private fun DownloadResultRow(
     isDownloaded: Boolean,
     onDownloadClick: () -> Unit
 ) {
+    val context = LocalContext.current
     Row(
         modifier = Modifier.fillMaxWidth().height(72.dp).padding(horizontal = 16.dp, vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically
@@ -283,7 +398,10 @@ private fun DownloadResultRow(
             contentAlignment = Alignment.Center
         ) {
             if (result.thumbnailUrl != null) {
-                AsyncImage(model = result.thumbnailUrl, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+                val request = remember(result.thumbnailUrl) {
+                    coil.request.ImageRequest.Builder(context).data(result.thumbnailUrl).size(150, 150).build()
+                }
+                AsyncImage(model = request, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
             } else {
                 Icon(Icons.Default.MusicNote, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
             }

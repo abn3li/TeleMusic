@@ -22,7 +22,10 @@
 ## ✨ Features
 
 - **🎵 Telegram-native library** — syncs audio from any channel/chat you already belong to, no `@username` guessing
-- **📚 Full library UI** — Tracks, Favourites, Playlists, Albums, Artists, sortable by name/artist/album/date added
+- **📚 Full library UI** — Playlists, Tracks, Albums, Artists, sortable by name/artist/album/date added
+- **🔍 YouTube Music Discovery** — real, browsable Home/New Releases/Genres feed for downloading
+- **📥 Smart playlists** — Liked Songs, Telegram Songs, and Downloaded Songs, built in and always up to date
+- **🔄 Update checker** — Settings → About checks GitHub for a newer release
 - **🏷️ Auto metadata & artwork** — fills in missing title/artist/album/art via iTunes → Deezer → MusicBrainz
 - **🎤 Lyrics** — plain and line-synced, from LRCLIB, KuGou, and lyrics.ovh, with manual search as a fallback
 - **▶️ Real playback** — Media3 session with working lock screen, notification, Bluetooth, and Android Auto controls

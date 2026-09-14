@@ -61,6 +61,14 @@ class MusicRepository(
 
     suspend fun setFavorite(song: SongEntity, isFavorite: Boolean) = songDao.setFavorite(song.telegramMessageId, isFavorite)
 
+    // ---- Smart (built-in) playlists: Liked/Telegram/Downloaded - not real rows in the
+    // playlists table, just a different filter over the same songs table. ----
+    fun observeTelegramSongs(sortField: SortField, ascending: Boolean): Flow<List<SongEntity>> =
+        songDao.observeTelegramSongs().map { it.sortedByField(sortField, ascending) }
+
+    fun observeDownloadedSongs(sortField: SortField, ascending: Boolean): Flow<List<SongEntity>> =
+        songDao.observeDownloaded().map { it.sortedByField(sortField, ascending) }
+
     // ---- Import from local storage ----
     /** [treeUri] is a folder the user picked via the system file explorer (SAF) - no storage
      * permission needed, that grant is independent of READ_MEDIA_AUDIO/READ_EXTERNAL_STORAGE. */
@@ -162,6 +170,7 @@ class MusicRepository(
 
     // ---- Playlists ----
     fun observePlaylists(): Flow<List<PlaylistEntity>> = playlistDao.observeAll()
+    fun observePlaylistSummaries(): Flow<List<com.abn3li.telemusic.data.local.PlaylistSummary>> = playlistDao.observeAllWithArt()
     fun observeSongsInPlaylist(playlistId: Long): Flow<List<SongEntity>> = playlistDao.observeSongsInPlaylist(playlistId)
     suspend fun createPlaylist(name: String): Long = playlistDao.insert(PlaylistEntity(name = name))
     suspend fun deletePlaylist(playlistId: Long) = playlistDao.delete(playlistId)
