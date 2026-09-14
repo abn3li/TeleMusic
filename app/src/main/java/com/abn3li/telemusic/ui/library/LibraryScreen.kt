@@ -77,21 +77,30 @@ fun LibraryScreen(
     onArtistClick: (String) -> Unit,
     onPlaylistClick: (Long, String) -> Unit,
     onSmartPlaylistClick: (SmartPlaylistKind) -> Unit,
-    onYouTubeDownloadClick: () -> Unit
+    onYouTubeDownloadClick: () -> Unit,
+    // Constructed once at the nav graph root (same pattern as NowPlayingViewModel) and passed
+    // down, rather than a local `remember` here - NavHost disposes this whole composable's
+    // composition every time you navigate to Artist/Album/Playlist and come back, so a locally
+    // `remember`-ed ViewModel was silently recreated on every return trip: selected tab, sort
+    // field, and search state all reset to their defaults, which is what read as "goes back to
+    // Tracks with a broken layout" (an empty-to-populated content jump as the fresh instance's
+    // flows started from empty and re-subscribed to the DB). Defaults to a fresh local instance
+    // so this composable still works with no caller wiring (e.g. previews).
+    viewModel: LibraryViewModel? = null
 ) {
     val app = LocalContext.current.applicationContext as TgMusicApp
-    val viewModel = remember { LibraryViewModel(app.musicRepository) }
+    val resolvedViewModel = viewModel ?: remember { LibraryViewModel(app.musicRepository) }
     val coroutineScope = rememberCoroutineScope()
 
-    val tab by viewModel.tab.collectAsState()
-    val sortField by viewModel.sortField.collectAsState()
-    val ascending by viewModel.ascending.collectAsState()
-    val tracks by viewModel.tracks.collectAsState()
-    val tracksUiModels by viewModel.tracksUiModels.collectAsState()
-    val albums by viewModel.albums.collectAsState()
-    val artists by viewModel.artists.collectAsState()
-    val playlists by viewModel.playlists.collectAsState()
-    val playlistSummaries by viewModel.playlistSummaries.collectAsState()
+    val tab by resolvedViewModel.tab.collectAsState()
+    val sortField by resolvedViewModel.sortField.collectAsState()
+    val ascending by resolvedViewModel.ascending.collectAsState()
+    val tracks by resolvedViewModel.tracks.collectAsState()
+    val tracksUiModels by resolvedViewModel.tracksUiModels.collectAsState()
+    val albums by resolvedViewModel.albums.collectAsState()
+    val artists by resolvedViewModel.artists.collectAsState()
+    val playlists by resolvedViewModel.playlists.collectAsState()
+    val playlistSummaries by resolvedViewModel.playlistSummaries.collectAsState()
 
     // Search state
     var searchQuery by remember { mutableStateOf("") }
@@ -164,7 +173,7 @@ fun LibraryScreen(
 
     // Sync Pager page settlement -> ViewModel selected tab
     LaunchedEffect(pagerState.settledPage) {
-        viewModel.selectTab(LibraryTab.entries[pagerState.settledPage])
+        resolvedViewModel.selectTab(LibraryTab.entries[pagerState.settledPage])
     }
 
     // Sync ViewModel selected tab -> Pager page (Safely guarded against mid-swipe gesture hijacking)
@@ -459,10 +468,10 @@ fun LibraryScreen(
             ) { page ->
                 key(page) {
                     when (LibraryTab.entries[page]) {
-                        LibraryTab.TRACKS -> SongList(filteredTracksUi, tracks, playlists, onSongClick, viewModel, sortField, ascending)
+                        LibraryTab.TRACKS -> SongList(filteredTracksUi, tracks, playlists, onSongClick, resolvedViewModel, sortField, ascending)
                         LibraryTab.ALBUMS -> AlbumsList(filteredAlbums, onAlbumClick)
                         LibraryTab.ARTISTS -> ArtistsList(filteredArtists, onArtistClick)
-                        LibraryTab.PLAYLISTS -> PlaylistsList(playlistSummaries, onPlaylistClick, onSmartPlaylistClick, viewModel)
+                        LibraryTab.PLAYLISTS -> PlaylistsList(playlistSummaries, onPlaylistClick, onSmartPlaylistClick, resolvedViewModel)
                     }
                 }
             }

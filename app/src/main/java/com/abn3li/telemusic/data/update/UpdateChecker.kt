@@ -9,7 +9,16 @@ import java.util.concurrent.TimeUnit
 
 sealed class UpdateCheckResult {
     data object UpToDate : UpdateCheckResult()
-    data class UpdateAvailable(val version: String, val releaseUrl: String, val notes: String?) : UpdateCheckResult()
+    data class UpdateAvailable(
+        val version: String,
+        // The release's own title (GitHub's "name" field, e.g. "Version 1.4.1 (Hotfix)") -
+        // shown instead of the bare version number when set, since that's where a human-written
+        // label like "Hotfix" actually lives; falls back to "Version <version>" when the
+        // release was never given its own title.
+        val title: String,
+        val releaseUrl: String,
+        val notes: String?
+    ) : UpdateCheckResult()
     data class Error(val message: String) : UpdateCheckResult()
 }
 
@@ -30,11 +39,20 @@ class UpdateChecker {
             val request = Request.Builder()
                 .url("https://api.github.com/repos/abn3li/TeleMusic/releases/latest")
                 .addHeader("Accept", "application/vnd.github+json")
+                // GitHub's API rejects any request with no User-Agent header - it returns 403
+                // Forbidden rather than a helpful 4xx-with-explanation, which is exactly what
+                // showed up as an unexplained "HTTP 40x" error with nothing to identify it.
+                .addHeader("User-Agent", "TeleMusic-Android")
                 .build()
 
             client.newCall(request).execute().use { response ->
                 if (!response.isSuccessful) {
-                    return@use UpdateCheckResult.Error("GitHub returned HTTP ${response.code}")
+                    val reason = when (response.code) {
+                        403 -> " (rate limited - try again in a bit)"
+                        404 -> " (no releases published yet)"
+                        else -> ""
+                    }
+                    return@use UpdateCheckResult.Error("GitHub returned HTTP ${response.code}$reason")
                 }
                 val body = JSONObject(response.body?.string().orEmpty())
                 val latestVersion = VERSION_REGEX.find(body.optString("tag_name"))?.value
@@ -43,6 +61,7 @@ class UpdateChecker {
                 } else if (isNewer(latestVersion, currentVersion)) {
                     UpdateCheckResult.UpdateAvailable(
                         version = latestVersion,
+                        title = body.optString("name").trim().takeIf { it.isNotBlank() } ?: "Version $latestVersion",
                         releaseUrl = body.optString("html_url").ifBlank { "https://github.com/abn3li/TeleMusic/releases" },
                         notes = body.optString("body").takeIf { it.isNotBlank() }
                     )

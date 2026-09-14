@@ -109,8 +109,9 @@ class MusicRepository(
     }
 
     // ---- Downloaded from YouTube (via yt-dlp - see data/download) ----
-    /** Moves a just-downloaded file (already sitting in its final [YtDlpRepository.download]
-     * destination) into a row the rest of the app treats like any other song. Marked as an
+    /** Moves a just-downloaded file (already sitting in its final destination from
+     * [com.abn3li.telemusic.data.download.YtDlpRepository.download]) into a row the rest of the
+     * app treats like any other song. Marked as an
      * explicit download (never auto-evicted, shows the "Downloaded" icon) since the whole point
      * of this flow is the user asked for this exact file - see SongEntity.isExplicitDownload's
      * own doc. Left unenriched=false: title/artist already came from yt-dlp's own real metadata,
@@ -464,9 +465,13 @@ class MusicRepository(
     suspend fun stampLastPlayed(song: SongEntity) = songDao.stampLastPlayed(song.telegramMessageId, System.currentTimeMillis())
 
     suspend fun getFreshFileIdForSong(song: SongEntity): Int {
-        // No real Telegram message behind a local import - asking TDLib would just burn a
-        // lookup per channel for a message id that was never real to begin with.
-        if (song.isLocalImport) return song.telegramFileId
+        // No real Telegram message behind a local import OR a YouTube download - telegramFileId
+        // == 0 is this app's own general marker for "not really a Telegram row" (see
+        // SongEntity's own doc, and the same check at line ~400 in this file). Checking only
+        // isLocalImport here missed YouTube downloads, so opening one in Now Playing used to
+        // sweep EVERY channel the user is in (2+ TDLib round-trips each) hunting for a message
+        // id that could never exist, stalling this song's state update the whole time.
+        if (song.isLocalImport || song.telegramFileId == 0) return song.telegramFileId
 
         var channelId = settingsStore.lastSyncedChatId
         if (channelId == 0L) {

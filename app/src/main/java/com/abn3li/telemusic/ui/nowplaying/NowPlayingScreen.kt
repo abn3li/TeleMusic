@@ -88,9 +88,9 @@ import kotlin.math.roundToInt
  * both animate expansionFraction with this, so the two directions feel identical. Tuned to
  * match Spotify's now-playing sheet: quick and snappy with no visible bounce/overshoot at the
  * end, rather than the noticeably slower, softer settle StiffnessMediumLow (400) gave either
- * direction on its own.
+ * direction on its own. Nudged down from 800 - snappy still, just not quite as instant.
  */
-private val SHEET_TRANSITION_SPEC = spring<Float>(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = 800f)
+private val SHEET_TRANSITION_SPEC = spring<Float>(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = 550f)
 
 /**
  * Persistent player overlay, mounted once at the app's navigation root (never inside a
@@ -137,7 +137,20 @@ fun PlayerSheetOverlay(viewModel: NowPlayingViewModel, modifier: Modifier = Modi
         coroutineScope.launch { expansionFraction.animateTo(0f, SHEET_TRANSITION_SPEC) }
     }
 
-    BackHandler(enabled = isExpanded) { collapse() }
+    // Plain BackHandler(enabled=isExpanded) only toggles an already-registered callback's
+    // enabled flag on recomposition - it never moves back to the front of the
+    // OnBackPressedDispatcher's own priority stack. NavHost re-registers ITS pop callback at
+    // the front on every navigation, so if the user reached this song from a pushed screen
+    // (e.g. playing a YouTube download from the Discovery/Browse screen, not Library directly),
+    // NavHost's callback - being the more recently touched one - won the FIRST back press even
+    // while this sheet was expanded, invisibly popping the hidden screen behind this
+    // full-screen overlay; only the second press (once NavHost had nothing left to pop) reached
+    // this handler. Wrapping in key(isExpanded) forces this BackHandler to fully unregister and
+    // re-register - reclaiming front-of-stack priority - every time the sheet expands, so it
+    // wins the very first back press regardless of what's on the NavHost stack underneath.
+    key(isExpanded) {
+        BackHandler(enabled = isExpanded) { collapse() }
+    }
 
     Box(modifier.fillMaxSize()) {
         MiniPlayer(

@@ -828,7 +828,7 @@ fun SettingsScreen(onBack: () -> Unit, onLoggedOut: () -> Unit) {
                             isCheckingUpdate = true
                             updateCheckStatus = null
                             scope.launch {
-                                when (val result = updateChecker.check(versionName ?: "0")) {
+                                when (val result = updateChecker.check(versionName)) {
                                     is UpdateCheckResult.UpdateAvailable -> {
                                         availableUpdate = result
                                     }
@@ -963,7 +963,7 @@ fun SettingsScreen(onBack: () -> Unit, onLoggedOut: () -> Unit) {
         AlertDialog(
             onDismissRequest = { availableUpdate = null },
             icon = { Icon(Icons.Default.Refresh, contentDescription = null) },
-            title = { Text("Update available: v${update.version}") },
+            title = { Text("Update available: ${update.title}") },
             text = {
                 Text(
                     update.notes?.trim()?.takeIf { it.isNotBlank() }

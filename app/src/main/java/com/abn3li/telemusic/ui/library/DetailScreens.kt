@@ -18,6 +18,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.PlatformTextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -120,7 +121,19 @@ private fun SongListScaffold(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text(text = title, style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold)) },
+                title = {
+                    // TopAppBar's own container has a fixed height - an unbounded Text here
+                    // (no maxLines) could try to wrap a long album/artist/playlist name onto a
+                    // 3rd line that the container then just clips mid-glyph instead of growing
+                    // for it. Capped at 2 lines with an ellipsis instead, same treatment every
+                    // other truncated title in this app already gets.
+                    Text(
+                        text = title,
+                        style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")

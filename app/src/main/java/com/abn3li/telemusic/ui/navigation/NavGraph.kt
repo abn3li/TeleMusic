@@ -26,6 +26,7 @@ import com.abn3li.telemusic.ui.download.YouTubeDownloadScreen
 import com.abn3li.telemusic.ui.library.AlbumDetailScreen
 import com.abn3li.telemusic.ui.library.ArtistDetailScreen
 import com.abn3li.telemusic.ui.library.LibraryScreen
+import com.abn3li.telemusic.ui.library.LibraryViewModel
 import com.abn3li.telemusic.ui.library.PlaylistDetailScreen
 import com.abn3li.telemusic.ui.library.SmartPlaylistDetailScreen
 import com.abn3li.telemusic.ui.library.SmartPlaylistKind
@@ -79,6 +80,12 @@ fun TgMusicNavGraph(navController: NavHostController = rememberNavController()) 
     val playerViewModel = remember { NowPlayingViewModel(app.musicRepository, app.playbackController, app.playbackQueue) }
     val playerState by playerViewModel.uiState.collectAsState()
 
+    // Same reasoning as playerViewModel above: constructed once here so it survives navigating
+    // to Artist/Album/Playlist/Settings and back, instead of LibraryScreen creating its own via
+    // a local `remember` that NavHost disposes (and recreates from scratch) every round trip -
+    // see LibraryScreen's own doc on its viewModel param for what that broke.
+    val libraryViewModel = remember { LibraryViewModel(app.musicRepository) }
+
     // Plays the selected song by handing the queue straight to the shared player ViewModel -
     // it's the single place responsible for starting playback, so this never races with it.
     val playSong: (List<Long>, Int) -> Unit = { ids, index ->
@@ -98,7 +105,20 @@ fun TgMusicNavGraph(navController: NavHostController = rememberNavController()) 
             NavHost(
                 navController = navController,
                 startDestination = startDestination,
-                modifier = Modifier.padding(innerPadding)
+                modifier = Modifier.padding(innerPadding),
+                // Every screen in this app snaps instantly rather than sliding/fading - set
+                // once here for all four directions (enter/exit/popEnter/popExit) so every
+                // route pairs consistently with whatever it's pushed from or popped back to.
+                // Individual composable()s used to only override exitTransition/
+                // popEnterTransition (the properties that matter for the SOURCE of a push, e.g.
+                // Library), which left every PUSHED screen (Settings, Artist, Playlist, ...)
+                // still using Navigation Compose's own default animated enter/popExit - a
+                // mismatched pairing (one side instant, one side animated) that showed up as a
+                // visual flash/broken-layout frame on both the way in and the way back.
+                enterTransition = { EnterTransition.None },
+                exitTransition = { ExitTransition.None },
+                popEnterTransition = { EnterTransition.None },
+                popExitTransition = { ExitTransition.None }
             ) {
                 composable(Routes.CREDENTIALS) {
                     CredentialsScreen(onSaved = {
@@ -109,12 +129,9 @@ fun TgMusicNavGraph(navController: NavHostController = rememberNavController()) 
                         navController.navigate(Routes.SYNC)
                     })
                 }
-                composable(
-                    route = Routes.LIBRARY,
-                    exitTransition = { ExitTransition.None },
-                    popEnterTransition = { EnterTransition.None }
-                ) {
+                composable(Routes.LIBRARY) {
                     LibraryScreen(
+                        viewModel = libraryViewModel,
                         onSongClick = playSong,
                         onSyncClick = { navController.navigate(Routes.SYNC) },
                         onSettingsClick = { navController.navigate(Routes.SETTINGS) },
@@ -131,11 +148,7 @@ fun TgMusicNavGraph(navController: NavHostController = rememberNavController()) 
                         onOpenCollection = { c -> navController.navigate(Routes.youtubeBrowse(c.browseId, c.title, c.params)) }
                     )
                 }
-                composable(
-                    route = Routes.YOUTUBE_BROWSE,
-                    exitTransition = { ExitTransition.None },
-                    popEnterTransition = { EnterTransition.None }
-                ) { backStackEntry ->
+                composable(Routes.YOUTUBE_BROWSE) { backStackEntry ->
                     val browseId = backStackEntry.arguments?.getString("browseId")?.let { Uri.decode(it) } ?: ""
                     val title = backStackEntry.arguments?.getString("title")?.let { Uri.decode(it) } ?: ""
                     val params = backStackEntry.arguments?.getString("params")?.let { Uri.decode(it) }?.takeIf { it.isNotBlank() && it != "none" }
@@ -147,51 +160,27 @@ fun TgMusicNavGraph(navController: NavHostController = rememberNavController()) 
                         onOpenCollection = { c -> navController.navigate(Routes.youtubeBrowse(c.browseId, c.title, c.params)) }
                     )
                 }
-                composable(
-                    route = Routes.SYNC,
-                    exitTransition = { ExitTransition.None },
-                    popEnterTransition = { EnterTransition.None }
-                ) { SyncScreen(onBack = { navController.popBackStack() }) }
-                composable(
-                    route = Routes.SETTINGS,
-                    exitTransition = { ExitTransition.None },
-                    popEnterTransition = { EnterTransition.None }
-                ) {
+                composable(Routes.SYNC) { SyncScreen(onBack = { navController.popBackStack() }) }
+                composable(Routes.SETTINGS) {
                     SettingsScreen(
                         onBack = { navController.popBackStack() },
                         onLoggedOut = { navController.navigate(Routes.CREDENTIALS) { popUpTo(0) { inclusive = true } } }
                     )
                 }
-                composable(
-                    route = Routes.ALBUM,
-                    exitTransition = { ExitTransition.None },
-                    popEnterTransition = { EnterTransition.None }
-                ) { backStackEntry ->
+                composable(Routes.ALBUM) { backStackEntry ->
                     val album = backStackEntry.arguments?.getString("album")?.let { Uri.decode(it) } ?: ""
                     AlbumDetailScreen(album, onBack = { navController.popBackStack() }, onSongClick = playSong)
                 }
-                composable(
-                    route = Routes.ARTIST,
-                    exitTransition = { ExitTransition.None },
-                    popEnterTransition = { EnterTransition.None }
-                ) { backStackEntry ->
+                composable(Routes.ARTIST) { backStackEntry ->
                     val artist = backStackEntry.arguments?.getString("artist")?.let { Uri.decode(it) } ?: ""
                     ArtistDetailScreen(artist, onBack = { navController.popBackStack() }, onSongClick = playSong)
                 }
-                composable(
-                    route = Routes.PLAYLIST,
-                    exitTransition = { ExitTransition.None },
-                    popEnterTransition = { EnterTransition.None }
-                ) { backStackEntry ->
+                composable(Routes.PLAYLIST) { backStackEntry ->
                     val id = backStackEntry.arguments?.getString("id")?.toLongOrNull() ?: 0L
                     val name = backStackEntry.arguments?.getString("name")?.let { Uri.decode(it) } ?: "Playlist"
                     PlaylistDetailScreen(id, name, onBack = { navController.popBackStack() }, onSongClick = playSong)
                 }
-                composable(
-                    route = Routes.SMART_PLAYLIST,
-                    exitTransition = { ExitTransition.None },
-                    popEnterTransition = { EnterTransition.None }
-                ) { backStackEntry ->
+                composable(Routes.SMART_PLAYLIST) { backStackEntry ->
                     val kind = backStackEntry.arguments?.getString("kind")
                         ?.let { runCatching { SmartPlaylistKind.valueOf(it) }.getOrNull() } ?: SmartPlaylistKind.LIKED
                     SmartPlaylistDetailScreen(kind, onBack = { navController.popBackStack() }, onSongClick = playSong)
