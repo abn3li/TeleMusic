@@ -8,6 +8,7 @@ import com.abn3li.telemusic.data.local.PlaylistEntity
 import com.abn3li.telemusic.data.local.PlaylistSongCrossRef
 import com.abn3li.telemusic.data.local.SongDao
 import com.abn3li.telemusic.data.local.SongEntity
+import com.abn3li.telemusic.data.download.MediaFolderExporter
 import com.abn3li.telemusic.data.settings.AppSettingsStore
 import com.abn3li.telemusic.data.telegram.TdlibManager
 import kotlinx.coroutines.delay
@@ -18,6 +19,14 @@ import java.io.File
 
 enum class SortField(val label: String) { TITLE("Name"), ARTIST("Artist"), ALBUM("Album"), DATE_ADDED("Date added") }
 
+// Mirrors ytdlp_bridge.py's _ARTIST_SPLIT regex exactly - same separators, same "first segment
+// wins" rule, so a collab credit collapses to the same primary artist regardless of which path
+// (a fresh download vs this cleanup pass) it went through.
+private val ARTIST_SPLIT = Regex("""\s*(?:,|&|/| feat\.?| ft\.?| x )\s*""", RegexOption.IGNORE_CASE)
+
+private fun primaryArtistOf(rawArtist: String): String =
+    ARTIST_SPLIT.split(rawArtist, limit = 2).firstOrNull()?.trim()?.takeIf { it.isNotEmpty() } ?: rawArtist
+
 class MusicRepository(
     private val songDao: SongDao,
     private val playlistDao: PlaylistDao,
@@ -26,8 +35,20 @@ class MusicRepository(
     private val metadataRepository: MetadataRepository,
     private val settingsStore: AppSettingsStore,
     private val thumbnailGenerator: ThumbnailGenerator,
-    private val localAudioImporter: LocalAudioImporter
+    private val localAudioImporter: LocalAudioImporter,
+    private val mediaFolderExporter: MediaFolderExporter
 ) {
+    /** Best-effort copy of [source] into the user's chosen shared-storage download folder, if
+     * they've picked one (AppSettingsStore.downloadFolderUri) - a no-op (returns null) otherwise,
+     * so a song downloads exactly as it did before anyone touches that setting. [displayName]
+     * should already include a real extension (e.g. "Title.m4a"), not the internal songId
+     * filename - this copy is the one the user actually sees in their file manager. The returned
+     * Uri is persisted onto the song's own row (exportedFileUri) so "Delete download" can find
+     * and remove this exact copy later, not just the app-private one. */
+    private fun exportToDownloadFolderIfConfigured(source: File, displayName: String): Uri? {
+        val folderUri = settingsStore.downloadFolderUri?.let { android.net.Uri.parse(it) } ?: return null
+        return mediaFolderExporter.export(source, folderUri, displayName)
+    }
     // ---- Tracks / Favourites, metadata-driven sort ----
     fun observeLibrary(sortField: SortField, ascending: Boolean): Flow<List<SongEntity>> =
         songDao.observeAll().map { it.sortedByField(sortField, ascending) }
@@ -76,6 +97,57 @@ class MusicRepository(
                     metadataEnriched = false
                 )
             )
+        }
+    }
+
+    // ---- Downloaded from YouTube (via yt-dlp - see data/download) ----
+    /** Moves a just-downloaded file (already sitting in its final [YtDlpRepository.download]
+     * destination) into a row the rest of the app treats like any other song. Marked as an
+     * explicit download (never auto-evicted, shows the "Downloaded" icon) since the whole point
+     * of this flow is the user asked for this exact file - see SongEntity.isExplicitDownload's
+     * own doc. Left unenriched=false: title/artist already came from yt-dlp's own real metadata,
+     * only artwork still needs the usual backfillThumbnails pass to turn albumArtUrl into a
+     * cached thumbnailPath. */
+    suspend fun importDownloadedSong(result: com.abn3li.telemusic.data.download.YtDlpDownloadResult, songId: Long) {
+        songDao.upsert(
+            SongEntity(
+                telegramMessageId = songId,
+                telegramFileId = 0,
+                title = result.title,
+                artist = result.artist,
+                durationSeconds = result.durationSeconds,
+                albumArtUrl = result.thumbnailUrl,
+                localFilePath = result.filePath,
+                isExplicitDownload = true,
+                metadataEnriched = true
+            )
+        )
+        val extension = File(result.filePath).extension.ifBlank { "m4a" }
+        val exportedUri = exportToDownloadFolderIfConfigured(File(result.filePath), sanitizedFileName(result.title, result.artist, extension))
+        if (exportedUri != null) {
+            songDao.getById(songId)?.let { songDao.update(it.copy(exportedFileUri = exportedUri.toString())) }
+        }
+    }
+
+    /** A safe, readable filename for the exported copy - real filesystems reject a handful of
+     * characters a song title/artist can legitimately contain (a "/" in a title, for instance). */
+    private fun sanitizedFileName(title: String, artist: String, extension: String): String {
+        val base = "$artist - $title".replace(Regex("""[\\/:*?"<>|]"""), "_").trim().ifBlank { "Untitled" }
+        return "$base.$extension"
+    }
+
+    // ---- One-time cleanup: collapse collab credits into their primary artist ----
+    /** A track credited "The Weeknd, Daft Punk" used to become its own separate Artists-tab
+     * entry next to "The Weeknd"'s solo tracks - same underlying issue as
+     * ytdlp_bridge.py's _primary_artist() (that fix only prevents NEW rows from fragmenting;
+     * this collapses rows already stored that way before that fix existed, e.g. from Telegram
+     * sync's own ID3 tags carrying a collab credit, or downloads made before this cleanup was
+     * added). Idempotent and cheap when there's nothing to fix - only touches rows whose artist
+     * string actually contains a separator. Run once at startup, same as backfillThumbnails(). */
+    suspend fun normalizeArtistCredits() {
+        for (rawArtist in songDao.getDistinctArtists()) {
+            val primary = primaryArtistOf(rawArtist)
+            if (primary != rawArtist) songDao.renameArtist(rawArtist, primary)
         }
     }
 
@@ -290,8 +362,37 @@ class MusicRepository(
         val freshFileId = getFreshFileIdForSong(song)
         val path = tdlibManager.downloadFile(freshFileId)
         check(File(path).let { it.exists() && it.length() > 0 }) { "Download completed but file missing/empty at $path" }
-        songDao.update(song.copy(telegramFileId = freshFileId, localFilePath = path, isExplicitDownload = true))
+        val extension = File(path).extension.ifBlank { "mp3" }
+        val exportedUri = exportToDownloadFolderIfConfigured(File(path), sanitizedFileName(song.title, song.artist, extension))
+        songDao.update(
+            song.copy(
+                telegramFileId = freshFileId, localFilePath = path, isExplicitDownload = true,
+                exportedFileUri = exportedUri?.toString() ?: song.exportedFileUri
+            )
+        )
         return path
+    }
+
+    /** Removes the local downloaded copy of [song] - only ever called for a song that's actually
+     * isExplicitDownload (the row's own "Delete download" menu item only shows up then). Removes
+     * BOTH copies: the app-private file AND the exported copy in the user's own shared-storage
+     * folder, if one was ever made (see SongEntity.exportedFileUri's own doc) - a Telegram-
+     * sourced download then reverts to streaming (the row stays, same as it looked before it was
+     * ever downloaded), but a YouTube-sourced download has no other source to fall back to (no
+     * live streaming resolver, only download - see data/download's own doc), so removing its
+     * only file removes the whole row instead of leaving a dead, unplayable entry behind. */
+    suspend fun removeDownload(song: SongEntity) {
+        song.localFilePath?.let { path -> runCatching { File(path).delete() } }
+        song.exportedFileUri?.let { uri -> mediaFolderExporter.delete(android.net.Uri.parse(uri)) }
+        // telegramFileId == 0 marks a row with no real Telegram file behind it - a YouTube
+        // download (see importDownloadedSong) is the only isExplicitDownload row that's ever
+        // true here, since a local import (the other telegramFileId == 0 case) never becomes an
+        // explicit download in the first place - so this check never misfires on one of those.
+        if (song.telegramFileId == 0) {
+            songDao.delete(song.telegramMessageId)
+        } else {
+            songDao.update(song.copy(localFilePath = null, isExplicitDownload = false, exportedFileUri = null))
+        }
     }
 
     /** Records that a streamed file finished downloading in the background - this is the

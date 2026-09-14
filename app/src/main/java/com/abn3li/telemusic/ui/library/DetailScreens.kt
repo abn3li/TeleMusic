@@ -50,6 +50,7 @@ private class DetailViewModel(private val repository: MusicRepository, songsFlow
         runCatching { repository.downloadExplicitly(song) }
         downloadingIds.value = downloadingIds.value - song.telegramMessageId
     }
+    fun removeDownload(song: SongEntity) = viewModelScope.launch { repository.removeDownload(song) }
 }
 
 private class DetailHolderViewModel(repository: MusicRepository, songsFlow: Flow<List<SongEntity>>) : ViewModel() {
@@ -221,6 +222,7 @@ private fun SongListScaffold(
                             onDownloadClick = { vm.download(song) },
                             onAddToPlaylist = { id -> vm.addToPlaylist(id, song) },
                             onCreatePlaylistAndAdd = { name -> vm.createPlaylistAndAdd(name, song) },
+                            onDeleteDownload = { vm.removeDownload(song) },
                             primaryColor = primaryColor,
                             onSurfaceVariant = onSurfaceVariant,
                             titleStyle = titleStyle,

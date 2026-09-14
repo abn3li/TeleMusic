@@ -5,6 +5,7 @@ plugins {
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.compose")
     id("com.google.devtools.ksp")
+    id("com.chaquo.python")
 }
 
 // Release signing credentials live in local.properties (gitignored, machine-local) - never
@@ -32,6 +33,13 @@ android {
         versionName = "1.3"
         // No Telegram credentials anywhere in the build - user enters them at runtime
         // (see ui/credentials/CredentialsScreen.kt + data/telegram/TelegramCredentialsStore.kt)
+
+        ndk {
+            // Chaquopy ships a real Python interpreter per ABI - restricted to the two ABIs
+            // real devices actually ship (arm64 phones, x86_64 emulators) rather than all four,
+            // since each one adds tens of MB to every APK variant.
+            abiFilters += listOf("arm64-v8a", "x86_64")
+        }
     }
     signingConfigs {
         getByName("debug") {}
@@ -67,6 +75,25 @@ android {
     packaging {
         resources.excludes.add("/META-INF/{AL2.0,LGPL2.1}")
         jniLibs.useLegacyPackaging = true
+    }
+}
+
+chaquopy {
+    defaultConfig {
+        version = "3.13"
+        // Chaquopy needs a real Python on this machine at build time (to resolve/download the
+        // pip packages baked into the APK) - separate from the interpreter it bundles into the
+        // app itself for the device to run. Pointed at the exact install rather than relying on
+        // its own PATH detection, which didn't pick up a install made mid-session.
+        buildPython("C:\\Users\\abn3l\\AppData\\Local\\Python\\pythoncore-3.13-64\\python.exe")
+        pip {
+            // yt-dlp itself (not the GPL-3.0 youtubedl-android wrapper) - see data/download's
+            // own doc. mutagen is yt-dlp's own optional dependency for writing ID3/MP4 tags
+            // straight onto the downloaded file so a track has real metadata with no separate
+            // tagging step.
+            install("yt-dlp")
+            install("mutagen")
+        }
     }
 }
 

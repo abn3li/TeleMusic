@@ -51,8 +51,19 @@ interface SongDao {
     @Query("SELECT * FROM songs WHERE COALESCE(NULLIF(album, ''), 'Unknown Album') = :album ORDER BY title ASC")
     fun observeSongsByAlbum(album: String): Flow<List<SongEntity>>
 
-    @Query("SELECT artist AS artist, COUNT(*) AS songCount FROM songs GROUP BY artist ORDER BY artist ASC")
+    @Query(
+        """
+        SELECT artist AS artist, COUNT(*) AS songCount, MIN(albumArtUrl) AS albumArtUrl
+        FROM songs GROUP BY artist ORDER BY artist ASC
+        """
+    )
     fun observeArtists(): Flow<List<ArtistSummary>>
+
+    @Query("SELECT DISTINCT artist FROM songs")
+    suspend fun getDistinctArtists(): List<String>
+
+    @Query("UPDATE songs SET artist = :newArtist WHERE artist = :oldArtist")
+    suspend fun renameArtist(oldArtist: String, newArtist: String)
 
     @Query("SELECT * FROM songs WHERE artist = :artist ORDER BY title ASC")
     fun observeSongsByArtist(artist: String): Flow<List<SongEntity>>

@@ -63,14 +63,20 @@ class AppSettingsStore(context: Context) {
             val name = prefs.getString(KEY_DNS_RESOLVER, DnsResolver.CLOUDFLARE.name) ?: DnsResolver.CLOUDFLARE.name
             return runCatching { DnsResolver.valueOf(name) }.getOrDefault(DnsResolver.CLOUDFLARE)
         }
+        // commit(), not apply(): the Settings screen calls this right before killing the process
+        // outright (Runtime.getRuntime().exit(0), to force TDLib to reinit with the new DNS from
+        // byte 0) - apply()'s write is asynchronous, so the process could (and reproducibly did)
+        // die before it ever reached disk, and the old value came back on restart.
         set(value) {
-            prefs.edit().putString(KEY_DNS_RESOLVER, value.name).apply()
+            prefs.edit().putString(KEY_DNS_RESOLVER, value.name).commit()
         }
 
     var customDnsIps: String
         get() = prefs.getString(KEY_CUSTOM_DNS_IPS, "") ?: ""
+        // commit(), not apply() - same reasoning as dnsResolver above, written right before the
+        // same process-killing restart.
         set(value) {
-            prefs.edit().putString(KEY_CUSTOM_DNS_IPS, value.trim()).apply()
+            prefs.edit().putString(KEY_CUSTOM_DNS_IPS, value.trim()).commit()
         }
 
     var proxyEnabled: Boolean
@@ -122,6 +128,21 @@ class AppSettingsStore(context: Context) {
         get() = prefs.getLong(KEY_LAST_CHAT_ID, 0L)
         set(value) = prefs.edit().putLong(KEY_LAST_CHAT_ID, value).apply()
 
+    /** A SAF tree the user picked (via ACTION_OPEN_DOCUMENT_TREE) to keep a visible, real copy
+     * of every explicit download in shared/media storage - separate from the app-private copy
+     * every download also keeps for playback (see MusicRepository's own doc on why both exist).
+     * Null until the user has picked one, either from the YouTube download screen's first-run
+     * prompt or from Settings directly. */
+    var downloadFolderUri: String?
+        get() = prefs.getString(KEY_DOWNLOAD_FOLDER_URI, null)
+        set(value) = prefs.edit().putString(KEY_DOWNLOAD_FOLDER_URI, value).apply()
+
+    /** Which yt-dlp format selector new YouTube downloads use - see DownloadQuality. Remembered
+     * across downloads so picking it once doesn't mean re-picking it for every single song. */
+    var downloadQuality: String
+        get() = prefs.getString(KEY_DOWNLOAD_QUALITY, "BEST") ?: "BEST"
+        set(value) = prefs.edit().putString(KEY_DOWNLOAD_QUALITY, value).apply()
+
     companion object {
         private const val KEY_THEME_MODE = "theme_mode"
         private const val KEY_DNS_RESOLVER = "dns_resolver"
@@ -133,6 +154,8 @@ class AppSettingsStore(context: Context) {
         private const val KEY_ENRICH = "enrich_metadata_on_sync"
         private const val KEY_CACHE_LIMIT = "max_cache_size_bytes"
         private const val KEY_LAST_CHAT_ID = "last_synced_chat_id"
+        private const val KEY_DOWNLOAD_FOLDER_URI = "download_folder_uri"
+        private const val KEY_DOWNLOAD_QUALITY = "download_quality"
         const val UNLIMITED = -1L
         const val DEFAULT_CACHE_LIMIT = 2L * 1024 * 1024 * 1024 // 2GB
 

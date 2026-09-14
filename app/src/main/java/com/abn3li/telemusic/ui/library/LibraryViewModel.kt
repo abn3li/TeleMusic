@@ -71,4 +71,7 @@ class LibraryViewModel(private val repository: MusicRepository) : ViewModel() {
         runCatching { repository.downloadExplicitly(song) }
         _downloadingIds.value = _downloadingIds.value - song.telegramMessageId
     }
+
+    /** The row menu's "Delete" item - only ever shown for a song that's actually downloaded. */
+    fun removeDownload(song: SongEntity) = viewModelScope.launch { repository.removeDownload(song) }
 }

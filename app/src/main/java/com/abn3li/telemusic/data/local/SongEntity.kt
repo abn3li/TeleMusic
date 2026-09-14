@@ -32,6 +32,12 @@ data class SongEntity(
     // TDLib with lookups for a message that doesn't exist, and touching localFilePath the way
     // cache eviction does for auto-cached songs would delete a file the app doesn't own.
     val isLocalImport: Boolean = false,
+    // The SAF document Uri of this song's exported copy in the user's chosen shared-storage
+    // folder (see MusicRepository.exportToDownloadFolderIfConfigured), if one was ever made -
+    // null when no download folder was configured at download time. Kept so "Delete download"
+    // can remove that copy too, not just the app-private one - without this, deleting a download
+    // in-app left the shared-storage copy behind with nothing pointing back to it.
+    val exportedFileUri: String? = null,
     // Stamped every time the song actually starts playing - used to pick which auto-cached
     // (non-explicit-download) files to evict first when the cache size limit is hit.
     val lastPlayedAtMillis: Long = 0L,

@@ -4,6 +4,8 @@ import android.app.Application
 import coil.ImageLoader
 import coil.ImageLoaderFactory
 import coil.memory.MemoryCache
+import com.abn3li.telemusic.data.download.MediaFolderExporter
+import com.abn3li.telemusic.data.download.YtDlpRepository
 import com.abn3li.telemusic.data.local.AppDatabase
 import com.abn3li.telemusic.data.settings.AppSettingsStore
 import com.abn3li.telemusic.data.telegram.TdlibManager
@@ -27,6 +29,7 @@ class TgMusicApp : Application(), ImageLoaderFactory {
     lateinit var settingsStore: AppSettingsStore; private set
     lateinit var playbackQueue: PlaybackQueue; private set
     lateinit var playbackController: PlaybackController; private set
+    lateinit var ytDlpRepository: YtDlpRepository; private set
 
     private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
@@ -39,12 +42,14 @@ class TgMusicApp : Application(), ImageLoaderFactory {
         playbackQueue = PlaybackQueue()
         playbackController = PlaybackController(this)
         playbackController.connect(onReady = {})
+        ytDlpRepository = YtDlpRepository(this)
 
         musicRepository = MusicRepository(
             songDao = db.songDao(), playlistDao = db.playlistDao(), tdlibManager = tdlibManager,
             lyricsRepository = LyricsRepository(), metadataRepository = MetadataRepository(),
             settingsStore = settingsStore, thumbnailGenerator = ThumbnailGenerator(this),
-            localAudioImporter = LocalAudioImporter(this)
+            localAudioImporter = LocalAudioImporter(this),
+            mediaFolderExporter = MediaFolderExporter(this)
         )
         if (credentialsStore.hasCredentials()) {
             tdlibManager.start(
@@ -59,6 +64,7 @@ class TgMusicApp : Application(), ImageLoaderFactory {
         // One-shot catch-up for songs enriched before the thumbnail cache existed - runs once
         // in the background at startup rather than blocking the Library screen's first load.
         appScope.launch { musicRepository.backfillThumbnails() }
+        appScope.launch { musicRepository.normalizeArtistCredits() }
     }
 
     /**

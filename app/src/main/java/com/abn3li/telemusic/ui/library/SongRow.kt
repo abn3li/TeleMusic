@@ -9,6 +9,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.CloudDone
 import androidx.compose.material.icons.filled.CloudDownload
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.MoreVert
@@ -64,6 +65,7 @@ fun SongRow(
     onDownloadClick: () -> Unit,
     onAddToPlaylist: (Long) -> Unit,
     onCreatePlaylistAndAdd: (String) -> Unit,
+    onDeleteDownload: () -> Unit,
     modifier: Modifier = Modifier,
     primaryColor: Color = MaterialTheme.colorScheme.primary,
     onSurfaceVariant: Color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -157,6 +159,9 @@ fun SongRow(
                 )
             }
 
+            // Downloading/already-downloaded/local-import are all status indicators only now -
+            // the actual download action lives in the three-dot menu below (moved there to keep
+            // the row itself down to just favorite + status + menu instead of a fourth icon).
             if (song.isDownloading) {
                 Box(modifier = Modifier.padding(6.dp), contentAlignment = Alignment.Center) {
                     CircularProgressIndicator(
@@ -177,12 +182,12 @@ fun SongRow(
                         modifier = Modifier.size(20.dp)
                     )
                 }
-            } else {
-                RowIconButton(onClick = { if (!song.isExplicitDownload) onDownloadClick() }) {
+            } else if (song.isExplicitDownload) {
+                Box(modifier = Modifier.size(36.dp), contentAlignment = Alignment.Center) {
                     Icon(
-                        imageVector = if (song.isExplicitDownload) Icons.Default.CloudDone else Icons.Default.CloudDownload,
-                        contentDescription = null,
-                        tint = if (song.isExplicitDownload) primaryColor else onSurfaceVariant,
+                        imageVector = Icons.Default.CloudDone,
+                        contentDescription = "Downloaded",
+                        tint = primaryColor,
                         modifier = Modifier.size(20.dp)
                     )
                 }
@@ -200,6 +205,20 @@ fun SongRow(
 
                 if (menuExpanded) {
                     DropdownMenu(expanded = true, onDismissRequest = { menuExpanded = false }) {
+                        // Nothing to download for a local import (already fully on-device), an
+                        // already-downloaded song (the row's own CloudDone icon covers that), or
+                        // one currently downloading (its spinner is feedback enough).
+                        if (!song.isLocalImport && !song.isExplicitDownload && !song.isDownloading) {
+                            DropdownMenuItem(
+                                leadingIcon = { Icon(Icons.Default.CloudDownload, contentDescription = null) },
+                                text = { Text("Download") },
+                                onClick = {
+                                    menuExpanded = false
+                                    onDownloadClick()
+                                }
+                            )
+                            HorizontalDivider()
+                        }
                         if (playlists.isNotEmpty()) {
                             Text(
                                 text = "Add to playlist",
@@ -226,6 +245,23 @@ fun SongRow(
                                 showCreateDialog = true
                             }
                         )
+                        // Only for a song actually downloaded - removes just the local file,
+                        // the song reverts to streaming (or, for a YouTube-only track with no
+                        // other source, the whole row goes with it - see removeDownload's own
+                        // doc). Never touches the row's Telegram/YouTube library entry otherwise.
+                        if (song.isExplicitDownload) {
+                            HorizontalDivider()
+                            DropdownMenuItem(
+                                leadingIcon = {
+                                    Icon(Icons.Default.Delete, contentDescription = null, tint = MaterialTheme.colorScheme.error)
+                                },
+                                text = { Text("Delete download", color = MaterialTheme.colorScheme.error) },
+                                onClick = {
+                                    menuExpanded = false
+                                    onDeleteDownload()
+                                }
+                            )
+                        }
                     }
                 }
             }

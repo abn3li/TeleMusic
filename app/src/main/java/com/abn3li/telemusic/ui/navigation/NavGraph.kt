@@ -21,6 +21,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import com.abn3li.telemusic.TgMusicApp
 import com.abn3li.telemusic.ui.credentials.CredentialsScreen
+import com.abn3li.telemusic.ui.download.YouTubeDownloadScreen
 import com.abn3li.telemusic.ui.library.AlbumDetailScreen
 import com.abn3li.telemusic.ui.library.ArtistDetailScreen
 import com.abn3li.telemusic.ui.library.LibraryScreen
@@ -39,6 +40,7 @@ object Routes {
     const val ALBUM = "album/{album}"
     const val ARTIST = "artist/{artist}"
     const val PLAYLIST = "playlist/{id}/{name}"
+    const val YOUTUBE_DOWNLOAD = "youtube_download"
 
     fun album(name: String) = "album/${Uri.encode(name)}"
     fun artist(name: String) = "artist/${Uri.encode(name)}"
@@ -104,9 +106,11 @@ fun TgMusicNavGraph(navController: NavHostController = rememberNavController()) 
                         onSettingsClick = { navController.navigate(Routes.SETTINGS) },
                         onAlbumClick = { album -> navController.navigate(Routes.album(album)) },
                         onArtistClick = { artist -> navController.navigate(Routes.artist(artist)) },
-                        onPlaylistClick = { id, name -> navController.navigate(Routes.playlist(id, name)) }
+                        onPlaylistClick = { id, name -> navController.navigate(Routes.playlist(id, name)) },
+                        onYouTubeDownloadClick = { navController.navigate(Routes.YOUTUBE_DOWNLOAD) }
                     )
                 }
+                composable(Routes.YOUTUBE_DOWNLOAD) { YouTubeDownloadScreen(onBack = { navController.popBackStack() }) }
                 composable(Routes.SYNC) { SyncScreen(onBack = { navController.popBackStack() }) }
                 composable(Routes.SETTINGS) {
                     SettingsScreen(

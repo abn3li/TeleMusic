@@ -1,6 +1,7 @@
 package com.abn3li.telemusic.ui.settings
 
 import android.content.Intent
+import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.animateColorAsState
@@ -33,6 +34,12 @@ import com.abn3li.telemusic.repository.LocalAudioFile
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+
+/** A SAF tree URI's own document id looks like "primary:Music/TeleMusic" - the part after the
+ * last "/" is the actual folder name a user picked, which reads far better in Settings than the
+ * raw content:// URI string. */
+private fun readableFolderName(uri: Uri): String =
+    uri.lastPathSegment?.substringAfterLast('/')?.takeIf { it.isNotBlank() } ?: "Folder selected"
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -93,6 +100,25 @@ fun SettingsScreen(onBack: () -> Unit, onLoggedOut: () -> Unit) {
                 alreadyImportedSongIds = withContext(Dispatchers.IO) { app.musicRepository.getLocalImportSongIds() }
                 isScanningLocalFolder = false
             }
+        }
+    }
+
+    // Where every explicit download (YouTube or Telegram) also keeps a visible, real copy in
+    // shared storage - see MusicRepository.exportToDownloadFolderIfConfigured's own doc. Needs
+    // both read and write permission, unlike importFolderLauncher above which only ever reads.
+    var downloadFolderUri by remember { mutableStateOf(app.settingsStore.downloadFolderUri?.let { Uri.parse(it) }) }
+    val downloadFolderLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocumentTree()
+    ) { treeUri ->
+        if (treeUri != null) {
+            runCatching {
+                context.contentResolver.takePersistableUriPermission(
+                    treeUri,
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+                )
+            }
+            app.settingsStore.downloadFolderUri = treeUri.toString()
+            downloadFolderUri = treeUri
         }
     }
 
@@ -622,6 +648,33 @@ fun SettingsScreen(onBack: () -> Unit, onLoggedOut: () -> Unit) {
                             Icon(Icons.Default.LibraryMusic, contentDescription = null, modifier = Modifier.size(18.dp))
                             Spacer(Modifier.width(6.dp))
                             Text("Import")
+                        }
+                    }
+
+                    Spacer(Modifier.height(16.dp))
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
+                    Spacer(Modifier.height(16.dp))
+
+                    // Download Location (shared/media storage - see MediaFolderExporter)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("Download location", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
+                            Text(
+                                downloadFolderUri?.let { uri -> readableFolderName(uri) }
+                                    ?: "Not set - downloaded songs stay app-private only",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        Spacer(Modifier.width(8.dp))
+                        OutlinedButton(onClick = { downloadFolderLauncher.launch(null) }) {
+                            Icon(Icons.Default.Folder, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(Modifier.width(6.dp))
+                            Text(if (downloadFolderUri == null) "Choose" else "Change")
                         }
                     }
 

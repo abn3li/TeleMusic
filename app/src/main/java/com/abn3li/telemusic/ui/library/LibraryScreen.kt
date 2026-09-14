@@ -8,7 +8,6 @@ import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.shrinkVertically
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -31,6 +30,7 @@ import androidx.compose.material.icons.filled.ArrowDownward
 import androidx.compose.material.icons.filled.ArrowUpward
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.automirrored.filled.PlaylistPlay
 import androidx.compose.material.icons.filled.Refresh
@@ -72,7 +72,8 @@ fun LibraryScreen(
     onSettingsClick: () -> Unit,
     onAlbumClick: (String) -> Unit,
     onArtistClick: (String) -> Unit,
-    onPlaylistClick: (Long, String) -> Unit
+    onPlaylistClick: (Long, String) -> Unit,
+    onYouTubeDownloadClick: () -> Unit
 ) {
     val app = LocalContext.current.applicationContext as TgMusicApp
     val viewModel = remember { LibraryViewModel(app.musicRepository) }
@@ -237,56 +238,60 @@ fun LibraryScreen(
         topBar = {
             Surface(color = MaterialTheme.colorScheme.background) {
                 Column {
-                    TopAppBar(
-                        title = {
-                            Column {
-                                Text(
-                                    text = "Library",
-                                    style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Medium)
-                                )
-                                Spacer(Modifier.height(2.dp))
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                ) {
-                                    Box(
-                                        modifier = Modifier
-                                            .size(8.dp)
-                                            .clip(CircleShape)
-                                            .background(statusColor)
-                                    )
-                                    Text(
-                                        text = statusText,
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    Column(modifier = Modifier.padding(start = 18.dp, end = 18.dp, top = 20.dp, bottom = 14.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "Library",
+                                style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Medium)
+                            )
+                            Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                                IconButton(onClick = { isSearchActive = !isSearchActive }, modifier = Modifier.size(24.dp)) {
+                                    Icon(
+                                        Icons.Default.Search,
+                                        contentDescription = "Search songs",
+                                        tint = if (isSearchActive) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
                                     )
                                 }
+                                IconButton(onClick = onSyncClick, modifier = Modifier.size(24.dp)) {
+                                    Icon(
+                                        Icons.Default.Sync,
+                                        contentDescription = "Sync from channel",
+                                        tint = if (isSyncing) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                                        modifier = Modifier.graphicsLayer {
+                                            rotationZ = if (isSyncing) syncRotationAngle.value else 0f
+                                        }
+                                    )
+                                }
+                                IconButton(onClick = onYouTubeDownloadClick, modifier = Modifier.size(24.dp)) {
+                                    Icon(Icons.Default.Download, contentDescription = "Download from YouTube")
+                                }
+                                IconButton(onClick = onSettingsClick, modifier = Modifier.size(24.dp)) {
+                                    Icon(Icons.Default.Settings, contentDescription = "Settings")
+                                }
                             }
-                        },
-                        actions = {
-                            IconButton(onClick = { isSearchActive = !isSearchActive }) {
-                                Icon(
-                                    Icons.Default.Search,
-                                    contentDescription = "Search songs",
-                                    tint = if (isSearchActive) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
-                                )
-                            }
-                            IconButton(onClick = onSyncClick) {
-                                Icon(
-                                    Icons.Default.Sync,
-                                    contentDescription = "Sync from channel",
-                                    tint = if (isSyncing) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
-                                    modifier = Modifier.graphicsLayer {
-                                        rotationZ = if (isSyncing) syncRotationAngle.value else 0f
-                                    }
-                                )
-                            }
-                            IconButton(onClick = onSettingsClick) {
-                                Icon(Icons.Default.Settings, contentDescription = "Settings")
-                            }
-                        },
-                        colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent)
-                    )
+                        }
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            modifier = Modifier.padding(top = 4.dp)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(6.dp)
+                                    .clip(CircleShape)
+                                    .background(statusColor)
+                            )
+                            Text(
+                                text = statusText,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
 
                     // Expandable Animated Search Bar
                     AnimatedVisibility(
@@ -418,9 +423,9 @@ fun LibraryScreen(
         }
     ) { padding ->
         Column(modifier = Modifier.padding(padding).fillMaxSize()) {
-            // Flat filter chips row - filled white pill when selected, thin outline otherwise.
-            // "Selected" here means whichever tab is CLOSEST to the pager's live drag position,
-            // not the settled tab - see the LaunchedEffect above for why.
+            // Pill-shaped filter chips - filled primary color when selected, plain transparent
+            // otherwise (no outline). "Selected" here means whichever tab is CLOSEST to the
+            // pager's live drag position, not the settled tab - see the LaunchedEffect above.
             LazyRow(
                 state = filterChipsListState,
                 modifier = Modifier.fillMaxWidth(),
@@ -436,17 +441,16 @@ fun LibraryScreen(
                                 pagerState.animateScrollToPage(t.ordinal)
                             }
                         },
-                        shape = RoundedCornerShape(16.dp),
-                        color = if (selected) MaterialTheme.colorScheme.onSurface else Color.Transparent,
-                        border = if (!selected) BorderStroke(0.5.dp, MaterialTheme.colorScheme.outline) else null
+                        shape = RoundedCornerShape(100),
+                        color = if (selected) MaterialTheme.colorScheme.primary else Color.Transparent
                     ) {
                         Text(
                             text = t.label,
-                            color = if (selected) MaterialTheme.colorScheme.surface else MaterialTheme.colorScheme.onSurface,
+                            color = if (selected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
                             style = MaterialTheme.typography.labelMedium,
                             maxLines = 1,
                             softWrap = false,
-                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp)
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 7.dp)
                         )
                     }
                 }
@@ -583,6 +587,7 @@ private fun SongList(
                     onDownloadClick = remember(songEntity) { { viewModel.downloadSong(songEntity) } },
                     onAddToPlaylist = remember(songEntity) { { id -> viewModel.addSongToPlaylist(id, songEntity) } },
                     onCreatePlaylistAndAdd = remember(songEntity) { { name -> viewModel.createPlaylistAndAddSong(name, songEntity) } },
+                    onDeleteDownload = remember(songEntity) { { viewModel.removeDownload(songEntity) } },
                     primaryColor = primaryColor,
                     onSurfaceVariant = onSurfaceVariant,
                     titleStyle = titleStyle,
@@ -700,6 +705,7 @@ private fun AlbumsList(albums: List<AlbumSummary>, onAlbumClick: (String) -> Uni
 
 @Composable
 private fun ArtistsList(artists: List<ArtistSummary>, onArtistClick: (String) -> Unit) {
+    val context = LocalContext.current
     if (artists.isEmpty()) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             Text(
@@ -727,6 +733,15 @@ private fun ArtistsList(artists: List<ArtistSummary>, onArtistClick: (String) ->
                     { onArtistClick(artist.artist) }
                 }
 
+                val artistImageRequest = remember(artist.albumArtUrl, context) {
+                    ImageRequest.Builder(context)
+                        .data(artist.albumArtUrl)
+                        .allowHardware(true)
+                        .size(150, 150)
+                        .build()
+                }
+                val artistPainter = rememberAsyncImagePainter(artistImageRequest)
+
                 // Flat list item row
                 Row(
                     modifier = Modifier
@@ -744,11 +759,20 @@ private fun ArtistsList(artists: List<ArtistSummary>, onArtistClick: (String) ->
                             .background(MaterialTheme.colorScheme.primaryContainer),
                         contentAlignment = Alignment.Center
                     ) {
-                        Icon(
-                            imageVector = Icons.Default.Person,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.onPrimaryContainer
-                        )
+                        if (!artist.albumArtUrl.isNullOrEmpty()) {
+                            Image(
+                                painter = artistPainter,
+                                contentDescription = null,
+                                contentScale = ContentScale.Crop,
+                                modifier = Modifier.fillMaxSize()
+                            )
+                        } else {
+                            Icon(
+                                imageVector = Icons.Default.Person,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.onPrimaryContainer
+                            )
+                        }
                     }
 
                     Spacer(Modifier.width(12.dp))
