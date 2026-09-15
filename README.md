@@ -60,6 +60,10 @@
 Requires Android 8.0 (API 26) or newer.
 
 ---
+community support 
+https://t.me/telemusicco
+---
+
 
 ## 📄 License
 
