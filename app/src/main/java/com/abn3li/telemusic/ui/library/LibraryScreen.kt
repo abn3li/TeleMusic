@@ -30,14 +30,14 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Sort
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Album
-import androidx.compose.material.icons.filled.ArrowDownward
-import androidx.compose.material.icons.filled.ArrowUpward
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Send
+import androidx.compose.material.icons.filled.Shuffle
 import androidx.compose.material.icons.automirrored.filled.PlaylistPlay
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
@@ -68,6 +68,7 @@ import com.abn3li.telemusic.data.local.PlaylistEntity
 import com.abn3li.telemusic.data.local.PlaylistSummary
 import com.abn3li.telemusic.data.local.SongEntity
 import com.abn3li.telemusic.data.telegram.TelegramConnectionState
+import com.abn3li.telemusic.ui.nowplaying.LocalMiniPlayerInset
 import com.abn3li.telemusic.repository.SortField
 import com.abn3li.telemusic.sync.SyncService
 import kotlinx.coroutines.delay
@@ -77,7 +78,7 @@ import kotlin.math.roundToInt
 // The redesign's own dark palette - deliberately local to this screen (hardcoded, not routed
 // through MaterialTheme) so it matches the pasted mockup exactly rather than approximating it
 // with the app's existing MonochromeDarkColorScheme tokens.
-private val BgColor = Color(0xFF0E0E10)
+private val BgColor = Color(0xFF000000)
 private val CardColor = Color(0xFF19191C)
 private val TextSecondary = Color(0xFFA9A9A6)
 private val TextMuted = Color(0xFF8B8B88)
@@ -113,7 +114,6 @@ fun LibraryScreen(
 
     val tab by resolvedViewModel.tab.collectAsState()
     val sortField by resolvedViewModel.sortField.collectAsState()
-    val ascending by resolvedViewModel.ascending.collectAsState()
     val tracks by resolvedViewModel.tracks.collectAsState()
     val tracksUiModels by resolvedViewModel.tracksUiModels.collectAsState()
     val albums by resolvedViewModel.albums.collectAsState()
@@ -374,44 +374,41 @@ fun LibraryScreen(
         }
     ) { padding ->
         Column(modifier = Modifier.padding(padding).fillMaxSize().background(BgColor)) {
+            // Samsung Music-style tabs: no pill/chip background at all - the selected tab is
+            // just bigger, bolder, and brighter than the rest, which read/unread size contrast
+            // alone is what carries the selection state.
             LazyRow(
                 state = filterChipsListState,
                 modifier = Modifier.fillMaxWidth(),
-                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
+                horizontalArrangement = Arrangement.spacedBy(18.dp)
             ) {
                 itemsIndexed(LibraryTab.entries) { index, t ->
                     val liveIndex = (pagerState.currentPage + pagerState.currentPageOffsetFraction).roundToInt()
                     val selected = index == liveIndex
-                    Box(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(20.dp))
-                            .background(if (selected) Color(0xFFF2F2F0) else Color.Transparent)
-                            .clickableNoRipple {
-                                coroutineScope.launch { pagerState.animateScrollToPage(t.ordinal) }
-                            }
-                            .padding(horizontal = 18.dp, vertical = 8.dp)
-                    ) {
-                        Text(
-                            text = t.label,
-                            color = if (selected) BgColor else TextSecondary,
-                            fontSize = 14.sp,
-                            fontWeight = if (selected) FontWeight.Medium else FontWeight.Normal,
-                            maxLines = 1,
-                            softWrap = false
-                        )
-                    }
+                    Text(
+                        text = t.label,
+                        color = if (selected) Color.White else TextMuted,
+                        fontSize = if (selected) 22.sp else 16.sp,
+                        fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
+                        maxLines = 1,
+                        softWrap = false,
+                        modifier = Modifier.clickableNoRipple {
+                            coroutineScope.launch { pagerState.animateScrollToPage(t.ordinal) }
+                        }
+                    )
                 }
             }
 
             HorizontalPager(
                 state = pagerState,
                 beyondBoundsPageCount = 0,
+                pageSpacing = 12.dp,
                 modifier = Modifier.weight(1f).fillMaxWidth()
             ) { page ->
                 key(page) {
                     when (LibraryTab.entries[page]) {
-                        LibraryTab.TRACKS -> SongList(filteredTracksUi, tracks, playlists, onSongClick, resolvedViewModel, sortField, ascending)
+                        LibraryTab.TRACKS -> SongList(filteredTracksUi, tracks, playlists, onSongClick, resolvedViewModel, sortField)
                         LibraryTab.ALBUMS -> AlbumsList(filteredAlbums, onAlbumClick)
                         LibraryTab.ARTISTS -> ArtistsList(filteredArtists, onArtistClick)
                         LibraryTab.PLAYLISTS -> PlaylistsList(
@@ -430,48 +427,52 @@ fun LibraryScreen(
     }
 }
 
+/** The sort field + shuffle/play controls row, same spot the Samsung Music reference has its
+ * "Name" sort chip and its two round shuffle/play buttons. */
 @Composable
-private fun SortBar(
+private fun SongListHeaderRow(
     sortField: SortField,
-    ascending: Boolean,
     onFieldSelected: (SortField) -> Unit,
-    onToggleDirection: () -> Unit
+    onShuffle: () -> Unit,
+    onPlayAll: () -> Unit
 ) {
     var menuExpanded by remember { mutableStateOf(false) }
     Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(start = 16.dp, top = 2.dp, end = 16.dp, bottom = 4.dp),
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 16.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceBetween
     ) {
         Box {
-            FilledTonalButton(
-                onClick = { menuExpanded = true },
-                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.clickableNoRipple { menuExpanded = true }
             ) {
-                Icon(Icons.AutoMirrored.Filled.Sort, contentDescription = null, modifier = Modifier.size(18.dp))
-                Spacer(Modifier.width(6.dp))
-                Text("Sort: ${sortField.label}", style = MaterialTheme.typography.labelMedium)
+                Icon(Icons.AutoMirrored.Filled.Sort, contentDescription = null, tint = TextSecondary, modifier = Modifier.size(20.dp))
+                Spacer(Modifier.width(8.dp))
+                Text(sortField.label, color = TextSecondary, fontSize = 16.dp.value.sp)
             }
-            DropdownMenu(expanded = menuExpanded, onDismissRequest = { menuExpanded = false }) {
+            DropdownMenu(expanded = menuExpanded, onDismissRequest = { menuExpanded = false }, modifier = Modifier.background(CardColor)) {
                 SortField.entries.forEach { field ->
                     DropdownMenuItem(
-                        text = { Text(field.label) },
-                        onClick = {
-                            onFieldSelected(field)
-                            menuExpanded = false
-                        }
+                        text = { Text(field.label, color = Color.White) },
+                        onClick = { onFieldSelected(field); menuExpanded = false }
                     )
                 }
             }
         }
-        IconButton(onClick = onToggleDirection) {
-            Icon(
-                imageVector = if (ascending) Icons.Default.ArrowUpward else Icons.Default.ArrowDownward,
-                contentDescription = "Toggle sort direction",
-                tint = MaterialTheme.colorScheme.primary
-            )
+        Row(horizontalArrangement = Arrangement.spacedBy(14.dp), verticalAlignment = Alignment.CenterVertically) {
+            Box(
+                modifier = Modifier.size(44.dp).clip(CircleShape).background(DividerColor).clickableNoRipple(onShuffle),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(Icons.Default.Shuffle, contentDescription = "Shuffle", tint = Color.White, modifier = Modifier.size(20.dp))
+            }
+            Box(
+                modifier = Modifier.size(44.dp).clip(CircleShape).background(AccentGreen).clickableNoRipple(onPlayAll),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(Icons.Default.PlayArrow, contentDescription = "Play all", tint = OnAccentGreen, modifier = Modifier.size(24.dp))
+            }
         }
     }
 }
@@ -483,15 +484,13 @@ private fun SongList(
     playlists: List<PlaylistEntity>,
     onSongClick: (List<Long>, Int) -> Unit,
     viewModel: LibraryViewModel,
-    sortField: SortField,
-    ascending: Boolean
+    sortField: SortField
 ) {
     val app = LocalContext.current.applicationContext as TgMusicApp
     val entitiesById = remember(songsEntities) { songsEntities.associateBy { it.telegramMessageId } }
     val songIds = remember(songsUi) { songsUi.map { it.id } }
 
     val onFieldSelected = remember(viewModel) { { f: SortField -> viewModel.selectSortField(f) } }
-    val onToggleDir = remember(viewModel) { { viewModel.toggleSortDirection() } }
 
     val primaryColor = MaterialTheme.colorScheme.primary
     val onSurfaceVariant = MaterialTheme.colorScheme.onSurfaceVariant
@@ -505,26 +504,39 @@ private fun SongList(
         typography.bodySmall.copy(platformStyle = PlatformTextStyle(includeFontPadding = false))
     }
 
-    if (songsUi.isEmpty()) {
-        Column(Modifier.fillMaxSize()) {
-            SortBar(sortField, ascending, onFieldSelected, onToggleDir)
-            Box(Modifier.weight(1f).fillMaxSize(), contentAlignment = Alignment.Center) {
-                Text(
-                    text = "No songs found",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
+    val onShuffle = remember(songIds) {
+        {
+            if (songIds.isNotEmpty()) onSongClick(songIds, (0 until songIds.size).random())
+            Unit
         }
-    } else {
-        // Clean flat LazyColumn - rows are separated by a plain thin divider rather than a
-        // gap, matching a plain list feel instead of a card-per-row one.
+    }
+    val onPlayAll = remember(songIds) {
+        { if (songIds.isNotEmpty()) onSongClick(songIds, 0); Unit }
+    }
+
+    // The whole list sits inside one big rounded-top card - the Samsung Music reference this
+    // was copied from has the sort/shuffle/play row and every song row inside a single
+    // container, not a plain background behind separate per-row cards.
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .clip(RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp))
+            .background(CardColor)
+    ) {
+        if (songsUi.isEmpty()) {
+            Column(Modifier.fillMaxSize()) {
+                SongListHeaderRow(sortField, onFieldSelected, onShuffle, onPlayAll)
+                Box(Modifier.weight(1f).fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Text(text = "No songs found", color = TextMuted, style = MaterialTheme.typography.bodyMedium)
+                }
+            }
+        } else {
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(horizontal = 16.dp)
+            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = LocalMiniPlayerInset.current)
         ) {
             item(key = "sort_bar", contentType = "sort_bar") {
-                SortBar(sortField, ascending, onFieldSelected, onToggleDir)
+                SongListHeaderRow(sortField, onFieldSelected, onShuffle, onPlayAll)
             }
 
             itemsIndexed(
@@ -564,12 +576,21 @@ private fun SongList(
                 }
             }
         }
+        }
     }
 }
 
 @Composable
 private fun AlbumsList(albums: List<AlbumSummary>, onAlbumClick: (String) -> Unit) {
     val context = LocalContext.current
+    // Same big rounded-top card every other tab uses now (see SongList's own doc) - consistent
+    // across Playlists/Tracks/Albums/Artists rather than just the one tab.
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .clip(RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp))
+            .background(CardColor)
+    ) {
     if (albums.isEmpty()) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             Text(text = "No albums found", color = TextMuted, style = MaterialTheme.typography.bodyMedium)
@@ -577,8 +598,8 @@ private fun AlbumsList(albums: List<AlbumSummary>, onAlbumClick: (String) -> Uni
     } else {
         LazyVerticalGrid(
             columns = GridCells.Fixed(2),
-            modifier = Modifier.fillMaxSize().background(BgColor),
-            contentPadding = PaddingValues(16.dp),
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(start = 16.dp, top = 16.dp, end = 16.dp, bottom = 16.dp + LocalMiniPlayerInset.current),
             horizontalArrangement = Arrangement.spacedBy(14.dp),
             verticalArrangement = Arrangement.spacedBy(18.dp)
         ) {
@@ -637,11 +658,18 @@ private fun AlbumsList(albums: List<AlbumSummary>, onAlbumClick: (String) -> Uni
             }
         }
     }
+    }
 }
 
 @Composable
 private fun ArtistsList(artists: List<ArtistSummary>, onArtistClick: (String) -> Unit) {
     val context = LocalContext.current
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .clip(RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp))
+            .background(CardColor)
+    ) {
     if (artists.isEmpty()) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             Text(text = "No artists found", color = TextMuted, style = MaterialTheme.typography.bodyMedium)
@@ -649,8 +677,8 @@ private fun ArtistsList(artists: List<ArtistSummary>, onArtistClick: (String) ->
     } else {
         LazyVerticalGrid(
             columns = GridCells.Fixed(2),
-            modifier = Modifier.fillMaxSize().background(BgColor),
-            contentPadding = PaddingValues(16.dp),
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(start = 16.dp, top = 16.dp, end = 16.dp, bottom = 16.dp + LocalMiniPlayerInset.current),
             horizontalArrangement = Arrangement.spacedBy(14.dp),
             verticalArrangement = Arrangement.spacedBy(18.dp)
         ) {
@@ -712,6 +740,7 @@ private fun ArtistsList(artists: List<ArtistSummary>, onArtistClick: (String) ->
             }
         }
     }
+    }
 }
 
 @Composable
@@ -727,7 +756,7 @@ private fun SmartPlaylistRow(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(16.dp))
-            .background(CardColor)
+            .background(DividerColor)
             .clickableNoRipple(onClick)
             .padding(horizontal = 14.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically
@@ -768,9 +797,15 @@ private fun PlaylistsList(
 
     fun trackWord(count: Int) = "$count ${if (count == 1) "track" else "tracks"}"
 
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .clip(RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp))
+            .background(CardColor)
+    ) {
     LazyColumn(
-        modifier = Modifier.fillMaxSize().background(BgColor),
-        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(start = 16.dp, top = 12.dp, end = 16.dp, bottom = 12.dp + LocalMiniPlayerInset.current),
         verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
         item(key = "new_playlist_button") {
@@ -840,13 +875,13 @@ private fun PlaylistsList(
                 modifier = Modifier
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(16.dp))
-                    .background(CardColor)
+                    .background(DividerColor)
                     .clickableNoRipple(onPlaylistClicked)
                     .padding(horizontal = 14.dp, vertical = 12.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Box(
-                    modifier = Modifier.size(48.dp).clip(RoundedCornerShape(12.dp)).background(DividerColor),
+                    modifier = Modifier.size(48.dp).clip(RoundedCornerShape(12.dp)).background(BgColor),
                     contentAlignment = Alignment.Center
                 ) {
                     if (!playlist.albumArtUrl.isNullOrEmpty()) {
@@ -883,6 +918,7 @@ private fun PlaylistsList(
                 }
             }
         }
+    }
     }
 
     if (showCreateDialog) {

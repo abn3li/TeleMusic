@@ -22,6 +22,7 @@ import androidx.compose.ui.unit.dp
 import com.abn3li.telemusic.TgMusicApp
 import com.abn3li.telemusic.data.telegram.TelegramAuthState
 import com.abn3li.telemusic.data.telegram.TelegramChatInfo
+import com.abn3li.telemusic.ui.nowplaying.LocalMiniPlayerInset
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -248,7 +249,10 @@ private fun ChannelPickerStep(state: SyncUiState, syncing: Boolean, onRetry: () 
     } else if (state.chats.isEmpty()) {
         Text("No channels found. Create a private channel in Telegram and upload some songs to it first.")
     } else {
-        LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        LazyColumn(
+            contentPadding = PaddingValues(bottom = LocalMiniPlayerInset.current),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
             items(state.chats, key = { it.id }) { chat ->
                 Surface(
                     shape = RoundedCornerShape(16.dp),

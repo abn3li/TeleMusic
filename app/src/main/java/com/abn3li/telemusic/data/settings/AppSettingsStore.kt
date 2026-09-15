@@ -8,8 +8,7 @@ import kotlinx.coroutines.flow.StateFlow
 enum class AppThemeMode(val displayName: String, val subtitle: String) {
     SYSTEM("System Default", "Follow system settings"),
     LIGHT("Light", "Clean light theme"),
-    DARK("Dark", "Comfortable dark theme"),
-    AMOLED("AMOLED Black", "Pure black for OLED screens")
+    DARK("Dark", "Comfortable dark theme")
 }
 
 enum class DnsResolver(

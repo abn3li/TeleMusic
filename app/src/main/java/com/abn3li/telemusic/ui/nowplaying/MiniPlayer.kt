@@ -12,6 +12,7 @@ import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -23,8 +24,17 @@ import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
 import com.abn3li.telemusic.data.local.SongEntity
 
-/** Approximate height of a visible MiniPlayer, reserved as bottom padding in the nav Scaffold. */
+/** Approximate rendered height of the floating MiniPlayer, incl. its own vertical margins. */
 val MiniPlayerHeight: Dp = 78.dp
+
+/**
+ * How much extra bottom space a scrollable list should reserve (as content padding, not a
+ * layout-shrinking inset) so its last item isn't hidden under the floating MiniPlayer - which
+ * floats on top of content rather than pushing it up, see NavGraph's own doc on why. Provided
+ * once at the navigation root from the same playback state MiniPlayer itself reads, and
+ * defaults to 0 for any screen composed outside that provider (e.g. previews).
+ */
+val LocalMiniPlayerInset = compositionLocalOf { 0.dp }
 
 /**
  * Pure presentational component - all state comes from the shared NowPlayingViewModel owned

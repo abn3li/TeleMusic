@@ -26,6 +26,7 @@ import coil.compose.AsyncImage
 import com.abn3li.telemusic.TgMusicApp
 import com.abn3li.telemusic.data.local.PlaylistEntity
 import com.abn3li.telemusic.data.local.SongEntity
+import com.abn3li.telemusic.ui.nowplaying.LocalMiniPlayerInset
 import com.abn3li.telemusic.repository.MusicRepository
 import com.abn3li.telemusic.repository.SortField
 import kotlinx.coroutines.flow.Flow
@@ -158,7 +159,7 @@ private fun SongListScaffold(
                 }
             } else {
                 LazyColumn(
-                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp)
+                    contentPadding = PaddingValues(start = 16.dp, top = 8.dp, end = 16.dp, bottom = 8.dp + LocalMiniPlayerInset.current)
                 ) {
                     // Header section with Samsung rounded album art & Play All / Shuffle buttons
                     item {

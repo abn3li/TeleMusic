@@ -33,6 +33,7 @@ import com.abn3li.telemusic.data.settings.AppSettingsStore
 import com.abn3li.telemusic.data.settings.AppThemeMode
 import com.abn3li.telemusic.data.settings.DnsResolver
 import com.abn3li.telemusic.data.update.UpdateChecker
+import com.abn3li.telemusic.ui.nowplaying.LocalMiniPlayerInset
 import com.abn3li.telemusic.data.update.UpdateCheckResult
 import com.abn3li.telemusic.repository.LocalAudioFile
 import kotlinx.coroutines.Dispatchers
@@ -159,7 +160,7 @@ fun SettingsScreen(onBack: () -> Unit, onLoggedOut: () -> Unit) {
                 .fillMaxSize()
                 .padding(padding)
                 .verticalScroll(rememberScrollState())
-                .padding(horizontal = 16.dp, vertical = 8.dp),
+                .padding(start = 16.dp, top = 8.dp, end = 16.dp, bottom = 8.dp + LocalMiniPlayerInset.current),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
             // ---- APPEARANCE & THEME SECTION ----
@@ -195,48 +196,33 @@ fun SettingsScreen(onBack: () -> Unit, onLoggedOut: () -> Unit) {
 
                     Spacer(Modifier.height(8.dp))
 
-                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Row(
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            modifier = Modifier.fillMaxWidth()
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        ThemeModeChip(
+                            mode = AppThemeMode.SYSTEM,
+                            isSelected = selectedThemeMode == AppThemeMode.SYSTEM,
+                            modifier = Modifier.weight(1f)
                         ) {
-                            ThemeModeChip(
-                                mode = AppThemeMode.SYSTEM,
-                                isSelected = selectedThemeMode == AppThemeMode.SYSTEM,
-                                modifier = Modifier.weight(1f)
-                            ) {
-                                selectedThemeMode = AppThemeMode.SYSTEM
-                                app.settingsStore.themeMode = AppThemeMode.SYSTEM
-                            }
-                            ThemeModeChip(
-                                mode = AppThemeMode.LIGHT,
-                                isSelected = selectedThemeMode == AppThemeMode.LIGHT,
-                                modifier = Modifier.weight(1f)
-                            ) {
-                                selectedThemeMode = AppThemeMode.LIGHT
-                                app.settingsStore.themeMode = AppThemeMode.LIGHT
-                            }
+                            selectedThemeMode = AppThemeMode.SYSTEM
+                            app.settingsStore.themeMode = AppThemeMode.SYSTEM
                         }
-                        Row(
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            modifier = Modifier.fillMaxWidth()
+                        ThemeModeChip(
+                            mode = AppThemeMode.LIGHT,
+                            isSelected = selectedThemeMode == AppThemeMode.LIGHT,
+                            modifier = Modifier.weight(1f)
                         ) {
-                            ThemeModeChip(
-                                mode = AppThemeMode.DARK,
-                                isSelected = selectedThemeMode == AppThemeMode.DARK,
-                                modifier = Modifier.weight(1f)
-                            ) {
-                                selectedThemeMode = AppThemeMode.DARK
-                                app.settingsStore.themeMode = AppThemeMode.DARK
-                            }
-                            ThemeModeChip(
-                                mode = AppThemeMode.AMOLED,
-                                isSelected = selectedThemeMode == AppThemeMode.AMOLED,
-                                modifier = Modifier.weight(1f)
-                            ) {
-                                selectedThemeMode = AppThemeMode.AMOLED
-                                app.settingsStore.themeMode = AppThemeMode.AMOLED
-                            }
+                            selectedThemeMode = AppThemeMode.LIGHT
+                            app.settingsStore.themeMode = AppThemeMode.LIGHT
+                        }
+                        ThemeModeChip(
+                            mode = AppThemeMode.DARK,
+                            isSelected = selectedThemeMode == AppThemeMode.DARK,
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            selectedThemeMode = AppThemeMode.DARK
+                            app.settingsStore.themeMode = AppThemeMode.DARK
                         }
                     }
                 }
@@ -1140,7 +1126,6 @@ private fun ThemeModeChip(
                 AppThemeMode.SYSTEM -> Icons.Default.SettingsSuggest
                 AppThemeMode.LIGHT -> Icons.Default.LightMode
                 AppThemeMode.DARK -> Icons.Default.DarkMode
-                AppThemeMode.AMOLED -> Icons.Default.Contrast
             }
             Icon(icon, contentDescription = null, modifier = Modifier.size(18.dp))
             Spacer(Modifier.width(6.dp))

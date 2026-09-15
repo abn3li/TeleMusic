@@ -21,9 +21,9 @@ private val MonochromeDarkColorScheme = darkColorScheme(
     onSecondary = Color.Black,
     secondaryContainer = Color.White,
     onSecondaryContainer = Color.Black,
-    background = Color(0xFF121212),
+    background = Color(0xFF000000),
     onBackground = Color.White,
-    surface = Color(0xFF121212),
+    surface = Color(0xFF000000),
     onSurface = Color.White,
     surfaceVariant = Color(0xFF1C1C1E),
     onSurfaceVariant = Color(0xFFB3B3B3),
@@ -57,19 +57,13 @@ fun TgMusicTheme(
     val isDark = when (themeMode) {
         AppThemeMode.SYSTEM -> systemDark
         AppThemeMode.LIGHT -> false
-        AppThemeMode.DARK, AppThemeMode.AMOLED -> true
+        AppThemeMode.DARK -> true
     }
-    val isAmoled = themeMode == AppThemeMode.AMOLED
 
-    val baseColorScheme = if (isDark) MonochromeDarkColorScheme else MonochromeLightColorScheme
-    val finalColorScheme = if (isAmoled) {
-        baseColorScheme.copy(background = Color.Black, surface = Color.Black)
-    } else {
-        baseColorScheme
-    }
+    val colorScheme = if (isDark) MonochromeDarkColorScheme else MonochromeLightColorScheme
 
     MaterialTheme(
-        colorScheme = finalColorScheme,
+        colorScheme = colorScheme,
         shapes = AppShapes,
         content = content
     )

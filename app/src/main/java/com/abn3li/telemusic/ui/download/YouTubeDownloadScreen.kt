@@ -61,6 +61,7 @@ import com.abn3li.telemusic.TgMusicApp
 import com.abn3li.telemusic.data.browse.BrowseCollection
 import com.abn3li.telemusic.data.browse.HomeSection
 import com.abn3li.telemusic.data.download.YtDlpSearchResult
+import com.abn3li.telemusic.ui.nowplaying.LocalMiniPlayerInset
 
 /**
  * "Search a song by name, download it" - the Seal-style flow the user asked for instead of the
@@ -147,7 +148,7 @@ fun YouTubeDownloadScreen(onBack: () -> Unit, onOpenCollection: (BrowseCollectio
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
-                else -> LazyColumn {
+                else -> LazyColumn(contentPadding = PaddingValues(bottom = LocalMiniPlayerInset.current)) {
                     items(state.results, key = { it.videoId }) { result ->
                         DownloadResultRow(
                             result = result,
@@ -178,7 +179,9 @@ private fun DiscoveryHome(
         sections.isEmpty() && genres.isEmpty() -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             Text("Couldn't load Discovery - check your connection", color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
-        else -> androidx.compose.foundation.lazy.LazyColumn(contentPadding = PaddingValues(vertical = 8.dp)) {
+        else -> androidx.compose.foundation.lazy.LazyColumn(
+            contentPadding = PaddingValues(top = 8.dp, bottom = 8.dp + LocalMiniPlayerInset.current)
+        ) {
             if (genres.isNotEmpty()) {
                 item(key = "genres_header") {
                     Text(

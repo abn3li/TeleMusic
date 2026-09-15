@@ -54,6 +54,7 @@ import coil.compose.AsyncImage
 import com.abn3li.telemusic.TgMusicApp
 import com.abn3li.telemusic.data.browse.BrowseCollection
 import com.abn3li.telemusic.data.browse.BrowseTrack
+import com.abn3li.telemusic.ui.nowplaying.LocalMiniPlayerInset
 
 /**
  * A single Discovery destination - a playlist, chart, or artist's own page reached by tapping a
@@ -107,7 +108,7 @@ fun BrowseCollectionScreen(
         Box(Modifier.fillMaxSize().padding(padding)) {
             when {
                 state.isLoading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
-                state.tracks.isNotEmpty() -> LazyColumn {
+                state.tracks.isNotEmpty() -> LazyColumn(contentPadding = PaddingValues(bottom = LocalMiniPlayerInset.current)) {
                     items(state.tracks, key = { it.videoId }) { track ->
                         BrowseTrackRow(
                             track = track,
@@ -119,7 +120,7 @@ fun BrowseCollectionScreen(
                 }
                 state.collections.isNotEmpty() -> LazyVerticalGrid(
                     columns = GridCells.Fixed(2),
-                    contentPadding = PaddingValues(16.dp),
+                    contentPadding = PaddingValues(start = 16.dp, top = 16.dp, end = 16.dp, bottom = 16.dp + LocalMiniPlayerInset.current),
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {

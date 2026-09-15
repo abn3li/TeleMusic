@@ -4,17 +4,17 @@ import android.net.Uri
 import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.EnterTransition
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Scaffold
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.unit.dp
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -30,6 +30,7 @@ import com.abn3li.telemusic.ui.library.LibraryViewModel
 import com.abn3li.telemusic.ui.library.PlaylistDetailScreen
 import com.abn3li.telemusic.ui.library.SmartPlaylistDetailScreen
 import com.abn3li.telemusic.ui.library.SmartPlaylistKind
+import com.abn3li.telemusic.ui.nowplaying.LocalMiniPlayerInset
 import com.abn3li.telemusic.ui.nowplaying.MiniPlayerHeight
 import com.abn3li.telemusic.ui.nowplaying.NowPlayingViewModel
 import com.abn3li.telemusic.ui.nowplaying.PlayerSheetOverlay
@@ -78,7 +79,6 @@ fun TgMusicNavGraph(navController: NavHostController = rememberNavController()) 
     // inside PlayerSheetOverlay, so there's exactly one poller/one source of truth for
     // playback state for the whole app session instead of a fresh instance per navigation.
     val playerViewModel = remember { NowPlayingViewModel(app.musicRepository, app.playbackController, app.playbackQueue) }
-    val playerState by playerViewModel.uiState.collectAsState()
 
     // Same reasoning as playerViewModel above: constructed once here so it survives navigating
     // to Artist/Album/Playlist/Settings and back, instead of LibraryScreen creating its own via
@@ -92,16 +92,16 @@ fun TgMusicNavGraph(navController: NavHostController = rememberNavController()) 
         playerViewModel.playFromQueue(ids, index)
     }
 
+    // stableUiState (not the fast-ticking uiState) so this only recomposes on an actual song
+    // swap/stop, not every 300ms tick - see its own doc in NowPlayingViewModel. Drives how much
+    // bottom padding every scrollable list reserves so its last item clears the floating
+    // MiniPlayer, which overlaps content rather than pushing it up (see below).
+    val playerState by playerViewModel.stableUiState.collectAsState()
+    val miniPlayerInset = if (playerState.song != null) MiniPlayerHeight else 0.dp
+
     Box(Modifier.fillMaxSize()) {
-        Scaffold(
-            bottomBar = {
-                // Reserves space for the floating MiniPlayer (rendered in the overlay below,
-                // not here) so list content in the NavHost isn't covered by it.
-                if (playerState.song != null) {
-                    Spacer(Modifier.height(MiniPlayerHeight))
-                }
-            }
-        ) { innerPadding ->
+        Scaffold { innerPadding ->
+            CompositionLocalProvider(LocalMiniPlayerInset provides miniPlayerInset) {
             NavHost(
                 navController = navController,
                 startDestination = startDestination,
@@ -185,6 +185,7 @@ fun TgMusicNavGraph(navController: NavHostController = rememberNavController()) 
                         ?.let { runCatching { SmartPlaylistKind.valueOf(it) }.getOrNull() } ?: SmartPlaylistKind.LIKED
                     SmartPlaylistDetailScreen(kind, onBack = { navController.popBackStack() }, onSongClick = playSong)
                 }
+            }
             }
         }
 
