@@ -21,10 +21,6 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import java.io.File
 
-/** A download in progress between the row's Download tap and it actually starting - carries the
- * quality along so it survives a folder-prompt round trip in between. */
-data class PendingDownload(val result: YtDlpSearchResult, val quality: DownloadQuality)
-
 data class YouTubeDownloadUiState(
     val query: String = "",
     val isSearching: Boolean = false,
@@ -34,15 +30,10 @@ data class YouTubeDownloadUiState(
     // icon, and a finished one shows a checkmark instead, without needing a full re-search.
     val downloadingIds: Set<String> = emptySet(),
     val downloadedIds: Set<String> = emptySet(),
-    // The quality dialog's own default selection - last quality actually used, not just tapped.
-    val lastUsedQuality: DownloadQuality = DownloadQuality.BEST,
-    // The row whose Download icon was just tapped - the screen reacts by showing the quality
-    // picker dialog for exactly this result. Null the rest of the time.
-    val qualityPickerResult: YtDlpSearchResult? = null,
-    // Set the moment a download is confirmed but no folder is saved yet - the screen reacts by
-    // launching the system folder picker. The result+quality waiting behind that prompt is kept
-    // here rather than re-requested, so picking a folder resumes the exact song the user tapped.
-    val pendingFolderPrompt: PendingDownload? = null,
+    // Set the moment a download is tapped but no folder is saved yet - the screen reacts by
+    // launching the system folder picker. The result waiting behind that prompt is kept here
+    // rather than re-requested, so picking a folder resumes the exact song the user tapped.
+    val pendingFolderPrompt: YtDlpSearchResult? = null,
     // The Home feed - shown whenever the query is blank instead of a plain "search for a song"
     // placeholder, same as YouTube Music's own Home tab doubling as pre-search browse.
     val isLoadingHome: Boolean = true,
@@ -63,9 +54,7 @@ class YouTubeDownloadViewModel(
     private val settingsStore: AppSettingsStore,
     private val discoveryRepository: DiscoveryRepository
 ) : ViewModel() {
-    private val _uiState = MutableStateFlow(
-        YouTubeDownloadUiState(lastUsedQuality = DownloadQuality.fromStoredName(settingsStore.downloadQuality))
-    )
+    private val _uiState = MutableStateFlow(YouTubeDownloadUiState())
     val uiState: StateFlow<YouTubeDownloadUiState> = _uiState
 
     init {
@@ -100,29 +89,18 @@ class YouTubeDownloadViewModel(
         }
     }
 
-    /** Entry point from a row's Download tap - opens the quality picker dialog for that result
-     * rather than downloading immediately, so quality is chosen per-download. */
+    /** Entry point from a row's Download tap - always grabs the best real audio yt-dlp/YouTube
+     * can offer (Opus preferred, see DownloadQuality's own doc), no quality picker any more. The
+     * very first download ever (no folder saved yet) doesn't start immediately: it parks itself
+     * as [YouTubeDownloadUiState.pendingFolderPrompt] so the screen can ask where to save
+     * downloads first. Every later tap - once a folder is saved, or after Skip - goes straight
+     * to [startDownload]. */
     fun onDownloadIconClick(result: YtDlpSearchResult) {
         if (result.videoId in _uiState.value.downloadingIds || result.videoId in _uiState.value.downloadedIds) return
-        _uiState.update { it.copy(qualityPickerResult = result) }
-    }
-
-    fun dismissQualityPicker() {
-        _uiState.update { it.copy(qualityPickerResult = null) }
-    }
-
-    /** The user picked a quality in the dialog and confirmed. The very first download (ever, on
-     * this device - no folder saved yet) doesn't start immediately: it parks itself as
-     * [YouTubeDownloadUiState.pendingFolderPrompt] so the screen can ask where to save downloads
-     * first. Every later confirm - once a folder is saved, or after Skip - goes straight to
-     * [startDownload]. */
-    fun confirmDownload(result: YtDlpSearchResult, quality: DownloadQuality) {
-        settingsStore.downloadQuality = quality.name
-        _uiState.update { it.copy(qualityPickerResult = null, lastUsedQuality = quality) }
         if (settingsStore.downloadFolderUri == null) {
-            _uiState.update { it.copy(pendingFolderPrompt = PendingDownload(result, quality)) }
+            _uiState.update { it.copy(pendingFolderPrompt = result) }
         } else {
-            startDownload(result, quality)
+            startDownload(result)
         }
     }
 
@@ -151,15 +129,15 @@ class YouTubeDownloadViewModel(
     private fun resumePendingDownload() {
         val pending = _uiState.value.pendingFolderPrompt ?: return
         _uiState.update { it.copy(pendingFolderPrompt = null) }
-        startDownload(pending.result, pending.quality)
+        startDownload(pending)
     }
 
-    private fun startDownload(result: YtDlpSearchResult, quality: DownloadQuality) {
+    private fun startDownload(result: YtDlpSearchResult) {
         viewModelScope.launch {
             _uiState.update { it.copy(downloadingIds = it.downloadingIds + result.videoId) }
             val destDir = File(context.filesDir, "youtube_downloads")
             val songId = ytDlpStableSongId(result.videoId)
-            val outcome = ytDlpRepository.download(result.videoId, destDir, songId.toString(), quality.formatSelector)
+            val outcome = ytDlpRepository.download(result.videoId, destDir, songId.toString(), DownloadQuality.BEST.formatSelector)
             outcome.onSuccess { downloaded ->
                 musicRepository.importDownloadedSong(downloaded, songId)
                 // Turns the real YouTube thumbnail URL already on the row into a cached

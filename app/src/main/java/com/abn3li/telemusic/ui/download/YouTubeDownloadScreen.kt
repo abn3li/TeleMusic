@@ -2,9 +2,7 @@ package com.abn3li.telemusic.ui.download
 
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -12,7 +10,6 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -20,9 +17,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.grid.GridCells
-import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
@@ -51,9 +45,7 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -63,20 +55,18 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.window.Dialog
 import coil.compose.AsyncImage
 import com.abn3li.telemusic.TgMusicApp
 import com.abn3li.telemusic.data.browse.BrowseCollection
 import com.abn3li.telemusic.data.browse.HomeSection
-import com.abn3li.telemusic.data.download.DownloadQuality
 import com.abn3li.telemusic.data.download.YtDlpSearchResult
 
 /**
  * "Search a song by name, download it" - the Seal-style flow the user asked for instead of the
- * full YouTube Music browsing experience: type a name, pick the right result, tap Download, pick
- * a quality in the popup. Real playback still only ever happens through the normal library once
- * a song lands there. The quality popup only ever appears from here - Telegram's own download
- * button downloads at whatever quality the source file already is, there's no format to choose.
+ * full YouTube Music browsing experience: type a name, pick the right result, tap Download.
+ * Always grabs the best real audio available - no quality picker any more (see DownloadQuality's
+ * own doc). Real playback still only ever happens through the normal library once a song lands
+ * there.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -89,16 +79,6 @@ fun YouTubeDownloadScreen(onBack: () -> Unit, onOpenCollection: (BrowseCollectio
 
     val folderPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
         if (uri != null) viewModel.onFolderPicked(uri) else viewModel.skipFolderPrompt()
-    }
-
-    state.qualityPickerResult?.let { result ->
-        QualityPickerDialog(
-            key = result.videoId,
-            title = result.title,
-            initialQuality = state.lastUsedQuality,
-            onDismiss = viewModel::dismissQualityPicker,
-            onConfirm = { quality -> viewModel.confirmDownload(result, quality) }
-        )
     }
 
     if (state.pendingFolderPrompt != null) {
@@ -276,108 +256,6 @@ private fun DiscoveryCard(card: BrowseCollection, onClick: () -> Unit) {
         card.subtitle?.let {
             Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
-    }
-}
-
-/** Per-download quality/format choice, styled as a grid of selectable boxes rather than a plain
- * dropdown/list - matches what the user asked for, and reads faster than text rows since every
- * option's size/label is visible at once instead of one at a time in a menu. Shared between the
- * search results screen and Discovery/Browse (see BrowseCollectionScreen) so both offer the same
- * per-download choice - just a Compose dialog with local state, no network/CPU cost of its own,
- * so reusing it here adds nothing to what Browse downloads already cost. [key] re-resets the
- * selection when a different track's dialog opens (the videoId, not the title, since two
- * different tracks could share a title). */
-@Composable
-fun QualityPickerDialog(
-    key: String,
-    title: String,
-    initialQuality: DownloadQuality,
-    onDismiss: () -> Unit,
-    onConfirm: (DownloadQuality) -> Unit
-) {
-    var selected by remember(key) { mutableStateOf(initialQuality) }
-
-    Dialog(onDismissRequest = onDismiss) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(24.dp))
-                .background(MaterialTheme.colorScheme.surfaceContainerHigh)
-                .padding(20.dp)
-        ) {
-            Text("Select quality", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-            Text(
-                title,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.padding(top = 2.dp, bottom = 16.dp)
-            )
-
-            LazyVerticalGrid(
-                columns = GridCells.Fixed(2),
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
-                modifier = Modifier.height(140.dp)
-            ) {
-                items(DownloadQuality.entries) { quality ->
-                    QualityOptionBox(
-                        quality = quality,
-                        isSelected = quality == selected,
-                        onClick = { selected = quality }
-                    )
-                }
-            }
-
-            Spacer(Modifier.height(20.dp))
-
-            Button(
-                onClick = { onConfirm(selected) },
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Icon(Icons.Default.Download, contentDescription = null, modifier = Modifier.size(18.dp))
-                Spacer(Modifier.width(8.dp))
-                Text("Download (${selected.label})")
-            }
-        }
-    }
-}
-
-@Composable
-private fun QualityOptionBox(quality: DownloadQuality, isSelected: Boolean, onClick: () -> Unit) {
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .aspectRatio(2.2f)
-            .clip(RoundedCornerShape(14.dp))
-            .background(
-                if (isSelected) MaterialTheme.colorScheme.primaryContainer
-                else MaterialTheme.colorScheme.surfaceContainer
-            )
-            .then(
-                if (isSelected) {
-                    Modifier.border(BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary), RoundedCornerShape(14.dp))
-                } else {
-                    Modifier
-                }
-            )
-            .clickable(onClick = onClick)
-            .padding(12.dp),
-        verticalArrangement = Arrangement.Center
-    ) {
-        Text(
-            quality.label,
-            style = MaterialTheme.typography.bodyMedium,
-            fontWeight = FontWeight.Bold,
-            color = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface
-        )
-        Spacer(Modifier.height(2.dp))
-        Text(
-            quality.subtitle,
-            style = MaterialTheme.typography.labelSmall,
-            color = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant
-        )
     }
 }
 

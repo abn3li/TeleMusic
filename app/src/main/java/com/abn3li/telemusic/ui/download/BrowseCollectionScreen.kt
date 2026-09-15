@@ -83,16 +83,6 @@ fun BrowseCollectionScreen(
         if (uri != null) viewModel.onFolderPicked(uri) else viewModel.skipFolderPrompt()
     }
 
-    state.qualityPickerTrack?.let { track ->
-        QualityPickerDialog(
-            key = track.videoId,
-            title = track.title,
-            initialQuality = state.lastUsedQuality,
-            onDismiss = viewModel::dismissQualityPicker,
-            onConfirm = { quality -> viewModel.confirmDownload(track, quality) }
-        )
-    }
-
     if (state.pendingFolderPrompt != null) {
         AlertDialog(
             onDismissRequest = viewModel::skipFolderPrompt,

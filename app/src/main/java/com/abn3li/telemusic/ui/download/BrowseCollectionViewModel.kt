@@ -18,12 +18,6 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import java.io.File
 
-/** A download in progress between the row's Download tap and it actually starting - carries the
- * quality along so it survives a folder-prompt round trip in between (same shape as
- * YouTubeDownloadViewModel's own PendingDownload, just over a BrowseTrack instead of a
- * YtDlpSearchResult). */
-data class PendingBrowseDownload(val track: BrowseTrack, val quality: DownloadQuality)
-
 data class BrowseCollectionUiState(
     val title: String,
     val isLoading: Boolean = true,
@@ -32,21 +26,15 @@ data class BrowseCollectionUiState(
     val errorMessage: String? = null,
     val downloadingIds: Set<String> = emptySet(),
     val downloadedIds: Set<String> = emptySet(),
-    val lastUsedQuality: DownloadQuality = DownloadQuality.BEST,
-    // The row whose Download icon was just tapped - the screen reacts by showing the same
-    // quality picker dialog the search screen uses (see QualityPickerDialog). Null the rest of
-    // the time.
-    val qualityPickerTrack: BrowseTrack? = null,
     // Same folder-prompt flow YouTubeDownloadViewModel uses - kept here too since a user could
     // reach a downloadable track from Discovery without ever visiting the search screen first.
-    val pendingFolderPrompt: PendingBrowseDownload? = null
+    val pendingFolderPrompt: BrowseTrack? = null
 )
 
 /** Backs a single browse destination - a playlist's, chart's, or artist's own page reached by
- * tapping a Discovery card. Shares the exact same quality-picker dialog and folder-prompt flow
- * the search screen uses (see QualityPickerDialog and YouTubeDownloadViewModel) rather than a
- * separate copy of either - both are cheap, local-state-only UI, so reusing them costs nothing
- * extra over what a Browse download already does. */
+ * tapping a Discovery card. Shares the exact same folder-prompt flow the search screen uses (see
+ * YouTubeDownloadViewModel) rather than a separate copy - that's cheap, local-state-only UI, so
+ * reusing it costs nothing extra over what a Browse download already does. */
 class BrowseCollectionViewModel(
     private val context: Context,
     title: String,
@@ -57,9 +45,7 @@ class BrowseCollectionViewModel(
     private val musicRepository: MusicRepository,
     private val settingsStore: AppSettingsStore
 ) : ViewModel() {
-    private val _uiState = MutableStateFlow(
-        BrowseCollectionUiState(title = title, lastUsedQuality = DownloadQuality.fromStoredName(settingsStore.downloadQuality))
-    )
+    private val _uiState = MutableStateFlow(BrowseCollectionUiState(title = title))
     val uiState: StateFlow<BrowseCollectionUiState> = _uiState
 
     init {
@@ -78,24 +64,15 @@ class BrowseCollectionViewModel(
         }
     }
 
-    /** Entry point from a row's Download tap - opens the quality picker dialog rather than
-     * downloading immediately, matching the search screen's own flow. */
+    /** Entry point from a row's Download tap - always grabs the best real audio available (see
+     * DownloadQuality's own doc), no quality picker any more. Matches the search screen's own
+     * folder-prompt flow otherwise. */
     fun onDownloadClick(track: BrowseTrack) {
         if (track.videoId in _uiState.value.downloadingIds || track.videoId in _uiState.value.downloadedIds) return
-        _uiState.update { it.copy(qualityPickerTrack = track) }
-    }
-
-    fun dismissQualityPicker() {
-        _uiState.update { it.copy(qualityPickerTrack = null) }
-    }
-
-    fun confirmDownload(track: BrowseTrack, quality: DownloadQuality) {
-        settingsStore.downloadQuality = quality.name
-        _uiState.update { it.copy(qualityPickerTrack = null, lastUsedQuality = quality) }
         if (settingsStore.downloadFolderUri == null) {
-            _uiState.update { it.copy(pendingFolderPrompt = PendingBrowseDownload(track, quality)) }
+            _uiState.update { it.copy(pendingFolderPrompt = track) }
         } else {
-            startDownload(track, quality)
+            startDownload(track)
         }
     }
 
@@ -117,15 +94,15 @@ class BrowseCollectionViewModel(
     private fun resumePendingDownload() {
         val pending = _uiState.value.pendingFolderPrompt ?: return
         _uiState.update { it.copy(pendingFolderPrompt = null) }
-        startDownload(pending.track, pending.quality)
+        startDownload(pending)
     }
 
-    private fun startDownload(track: BrowseTrack, quality: DownloadQuality) {
+    private fun startDownload(track: BrowseTrack) {
         viewModelScope.launch {
             _uiState.update { it.copy(downloadingIds = it.downloadingIds + track.videoId) }
             val destDir = File(context.filesDir, "youtube_downloads")
             val songId = ytDlpStableSongId(track.videoId)
-            val outcome = ytDlpRepository.download(track.videoId, destDir, songId.toString(), quality.formatSelector)
+            val outcome = ytDlpRepository.download(track.videoId, destDir, songId.toString(), DownloadQuality.BEST.formatSelector)
             outcome.onSuccess { downloaded ->
                 musicRepository.importDownloadedSong(downloaded, songId)
                 musicRepository.backfillThumbnails()

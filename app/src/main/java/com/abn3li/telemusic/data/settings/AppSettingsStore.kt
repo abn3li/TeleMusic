@@ -137,12 +137,6 @@ class AppSettingsStore(context: Context) {
         get() = prefs.getString(KEY_DOWNLOAD_FOLDER_URI, null)
         set(value) = prefs.edit().putString(KEY_DOWNLOAD_FOLDER_URI, value).apply()
 
-    /** Which yt-dlp format selector new YouTube downloads use - see DownloadQuality. Remembered
-     * across downloads so picking it once doesn't mean re-picking it for every single song. */
-    var downloadQuality: String
-        get() = prefs.getString(KEY_DOWNLOAD_QUALITY, "BEST") ?: "BEST"
-        set(value) = prefs.edit().putString(KEY_DOWNLOAD_QUALITY, value).apply()
-
     companion object {
         private const val KEY_THEME_MODE = "theme_mode"
         private const val KEY_DNS_RESOLVER = "dns_resolver"
@@ -155,7 +149,6 @@ class AppSettingsStore(context: Context) {
         private const val KEY_CACHE_LIMIT = "max_cache_size_bytes"
         private const val KEY_LAST_CHAT_ID = "last_synced_chat_id"
         private const val KEY_DOWNLOAD_FOLDER_URI = "download_folder_uri"
-        private const val KEY_DOWNLOAD_QUALITY = "download_quality"
         const val UNLIMITED = -1L
         const val DEFAULT_CACHE_LIMIT = 2L * 1024 * 1024 * 1024 // 2GB
 
