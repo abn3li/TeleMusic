@@ -25,20 +25,24 @@ class InnertubeBrowseClient {
         .readTimeout(15, TimeUnit.SECONDS)
         .build()
 
-    fun browse(browseId: String, params: String? = null): JSONObject =
-        post("browse", JSONObject().apply {
+    // [region] is a plain ISO 3166-1 alpha-2 country code ("US", "GB", "JP", ...) read fresh on
+    // every call rather than baked in at construction - this client is a long-lived singleton
+    // (see DiscoveryRepository), so a region changed in Settings has to take effect on the very
+    // next browse() call without needing a new client instance.
+    fun browse(browseId: String, params: String? = null, region: String = "US"): JSONObject =
+        post("browse", region, JSONObject().apply {
             put("browseId", browseId)
             if (params != null) put("params", params)
         })
 
-    private fun post(endpoint: String, extra: JSONObject): JSONObject {
+    private fun post(endpoint: String, region: String, extra: JSONObject): JSONObject {
         val body = JSONObject().apply {
             put("context", JSONObject().apply {
                 put("client", JSONObject().apply {
                     put("clientName", "WEB_REMIX")
                     put("clientVersion", CLIENT_VERSION)
                     put("hl", "en")
-                    put("gl", "US")
+                    put("gl", region)
                 })
             })
             extra.keys().forEach { key -> put(key, extra.get(key)) }

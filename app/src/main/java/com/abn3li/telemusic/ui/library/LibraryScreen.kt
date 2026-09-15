@@ -12,9 +12,13 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -43,15 +47,18 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.composed
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.PlatformTextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import coil.compose.rememberAsyncImagePainter
 import coil.request.ImageRequest
 import com.abn3li.telemusic.TgMusicApp
@@ -66,6 +73,18 @@ import com.abn3li.telemusic.sync.SyncService
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
+
+// The redesign's own dark palette - deliberately local to this screen (hardcoded, not routed
+// through MaterialTheme) so it matches the pasted mockup exactly rather than approximating it
+// with the app's existing MonochromeDarkColorScheme tokens.
+private val BgColor = Color(0xFF0E0E10)
+private val CardColor = Color(0xFF19191C)
+private val TextSecondary = Color(0xFFA9A9A6)
+private val TextMuted = Color(0xFF8B8B88)
+private val AccentGreen = Color(0xFF1D9E75)
+private val OnAccentGreen = Color(0xFF04342C)
+private val ChevronColor = Color(0xFF5F5F5C)
+private val DividerColor = Color(0xFF232326)
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
@@ -114,7 +133,6 @@ fun LibraryScreen(
         value = searchQuery
     }
 
-    // Real-time filtering based on search query
     val filteredTracksUi = remember(tracksUiModels, debouncedSearchQuery) {
         if (debouncedSearchQuery.isBlank()) tracksUiModels
         else tracksUiModels.filter { song ->
@@ -138,7 +156,12 @@ fun LibraryScreen(
         }
     }
 
-    // Smooth 60/120fps Horizontal Pager state with 1-page pre-rendering for lag-free swiping
+    // Cheaply derived from the SAME already-subscribed `tracks` flow - no extra DB queries just
+    // for a row subtitle count.
+    val likedCount = remember(tracks) { tracks.count { it.isFavorite } }
+    val telegramCount = remember(tracks) { tracks.count { it.telegramFileId != 0 } }
+    val downloadedCount = remember(tracks) { tracks.count { it.isExplicitDownload } }
+
     val pagerState = rememberPagerState(
         initialPage = tab.ordinal,
         pageCount = { LibraryTab.entries.size }
@@ -146,14 +169,6 @@ fun LibraryScreen(
 
     val filterChipsListState = rememberLazyListState()
 
-    // Keeps the chip row's scroll position AND which chip is highlighted tracking the pager's
-    // live drag position (not just where it settles) - this needs to react every frame of the
-    // drag, which is exactly what's needed for the chip row to actually follow your finger
-    // instead of jumping only once the swipe finishes, and for a chip past the edge of the
-    // screen (Artists, the last tab) to actually scroll into view instead of the row staying put
-    // while the page underneath changes. A single snapshotFlow collector (rather than a
-    // LaunchedEffect keyed on the continuously-changing offset fraction) avoids cancelling and
-    // relaunching a coroutine on every single drag frame.
     LaunchedEffect(filterChipsListState) {
         snapshotFlow { pagerState.currentPage + pagerState.currentPageOffsetFraction }
             .collect { rawIndex ->
@@ -171,24 +186,20 @@ fun LibraryScreen(
             }
     }
 
-    // Sync Pager page settlement -> ViewModel selected tab
     LaunchedEffect(pagerState.settledPage) {
         resolvedViewModel.selectTab(LibraryTab.entries[pagerState.settledPage])
     }
 
-    // Sync ViewModel selected tab -> Pager page (Safely guarded against mid-swipe gesture hijacking)
     LaunchedEffect(tab) {
         if (pagerState.currentPage != tab.ordinal && !pagerState.isScrollInProgress) {
             pagerState.animateScrollToPage(tab.ordinal)
         }
     }
 
-    // Live Telegram Connection State & Sync Progress
     val connectionState by app.tdlibManager.connectionState.collectAsState()
     val isSyncing by SyncService.isRunning.collectAsState()
     val syncProgressMessage by SyncService.progress.collectAsState()
 
-    // Reconnect Button visibility logic: shows after 5s of connecting and remains until CONNECTED
     var showReconnectButton by remember { mutableStateOf(false) }
 
     LaunchedEffect(connectionState) {
@@ -204,23 +215,15 @@ fun LibraryScreen(
         }
     }
 
-    // GPU-deferred rotation angle: kept as a State<Float> (no `by` delegate) so reading it
-    // only happens inside the graphicsLayer draw lambdas below, instead of every animation
-    // frame forcing this whole composable (pager + lists included) to recompose.
-    //
-    // Only actually spins up while a sync is running - an infiniteRepeatable animation
-    // registers a Choreographer callback on every vsync for as long as it's composed, so an
-    // unconditional one here was quietly competing with every scroll frame's own vsync
-    // callback for the entire time this screen (Pager + lists included) was on screen, synced
-    // or not - not just while the icon was actually spinning.
+    // Only spins up while a sync is running - see this animation's own doc history: an
+    // unconditional infiniteRepeatable here competes with every scroll frame's vsync callback
+    // for the whole time this screen is on screen, synced or not.
     val syncRotationAngle: State<Float> = if (isSyncing) {
         val infiniteTransition = rememberInfiniteTransition(label = "syncRotation")
         infiniteTransition.animateFloat(
             initialValue = 0f,
             targetValue = 360f,
-            animationSpec = infiniteRepeatable(
-                animation = tween(1200, easing = LinearEasing)
-            ),
+            animationSpec = infiniteRepeatable(animation = tween(1200, easing = LinearEasing)),
             label = "rotation"
         )
     } else {
@@ -239,8 +242,9 @@ fun LibraryScreen(
     }
 
     Scaffold(
+        containerColor = BgColor,
         topBar = {
-            Surface(color = MaterialTheme.colorScheme.background) {
+            Surface(color = BgColor) {
                 Column {
                     Column(modifier = Modifier.padding(start = 18.dp, end = 18.dp, top = 20.dp, bottom = 14.dp)) {
                         Row(
@@ -248,173 +252,116 @@ fun LibraryScreen(
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Text(
-                                text = "Library",
-                                style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Medium)
-                            )
-                            Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                            Text(text = "Library", color = Color.White, fontSize = 26.sp, fontWeight = FontWeight.Medium)
+                            Row(horizontalArrangement = Arrangement.spacedBy(14.dp), verticalAlignment = Alignment.CenterVertically) {
                                 IconButton(onClick = { isSearchActive = !isSearchActive }, modifier = Modifier.size(24.dp)) {
                                     Icon(
                                         Icons.Default.Search,
                                         contentDescription = "Search songs",
-                                        tint = if (isSearchActive) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
+                                        tint = if (isSearchActive) AccentGreen else TextSecondary
                                     )
                                 }
                                 IconButton(onClick = onSyncClick, modifier = Modifier.size(24.dp)) {
                                     Icon(
                                         Icons.Default.Sync,
                                         contentDescription = "Sync from channel",
-                                        tint = if (isSyncing) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                                        tint = if (isSyncing) AccentGreen else TextSecondary,
                                         modifier = Modifier.graphicsLayer {
                                             rotationZ = if (isSyncing) syncRotationAngle.value else 0f
                                         }
                                     )
                                 }
                                 IconButton(onClick = onYouTubeDownloadClick, modifier = Modifier.size(24.dp)) {
-                                    Icon(Icons.Default.Download, contentDescription = "Download from YouTube")
+                                    Icon(Icons.Default.Download, contentDescription = "Download from YouTube", tint = TextSecondary)
                                 }
                                 IconButton(onClick = onSettingsClick, modifier = Modifier.size(24.dp)) {
-                                    Icon(Icons.Default.Settings, contentDescription = "Settings")
+                                    Icon(Icons.Default.Settings, contentDescription = "Settings", tint = TextSecondary)
                                 }
                             }
                         }
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(6.dp),
-                            modifier = Modifier.padding(top = 4.dp)
+                            modifier = Modifier.padding(top = 6.dp)
                         ) {
-                            Box(
-                                modifier = Modifier
-                                    .size(6.dp)
-                                    .clip(CircleShape)
-                                    .background(statusColor)
-                            )
-                            Text(
-                                text = statusText,
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
+                            Box(modifier = Modifier.size(6.dp).clip(CircleShape).background(statusColor))
+                            Text(text = statusText, color = TextSecondary, fontSize = 13.sp)
                         }
                     }
 
-                    // Expandable Animated Search Bar
-                    AnimatedVisibility(
-                        visible = isSearchActive,
-                        enter = expandVertically(),
-                        exit = shrinkVertically()
-                    ) {
+                    AnimatedVisibility(visible = isSearchActive, enter = expandVertically(), exit = shrinkVertically()) {
                         OutlinedTextField(
                             value = searchQuery,
                             onValueChange = { searchQuery = it },
                             placeholder = { Text("Search songs, artists, albums...") },
-                            leadingIcon = {
-                                Icon(Icons.Default.Search, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
-                            },
+                            leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = AccentGreen) },
                             trailingIcon = {
                                 if (searchQuery.isNotEmpty()) {
                                     IconButton(onClick = { searchQuery = "" }) {
-                                        Icon(Icons.Default.Close, contentDescription = "Clear search")
+                                        Icon(Icons.Default.Close, contentDescription = "Clear search", tint = TextSecondary)
                                     }
                                 } else {
                                     IconButton(onClick = { isSearchActive = false; searchQuery = "" }) {
-                                        Icon(Icons.Default.Close, contentDescription = "Close search")
+                                        Icon(Icons.Default.Close, contentDescription = "Close search", tint = TextSecondary)
                                     }
                                 }
                             },
                             singleLine = true,
                             shape = RoundedCornerShape(24.dp),
-                            // Card-like: filled with the same background as the app's other
-                            // cards (surfaceVariant), no visible outline - instead of the
-                            // previous bordered/transparent look.
                             colors = OutlinedTextFieldDefaults.colors(
-                                focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant,
-                                unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant,
+                                focusedContainerColor = CardColor,
+                                unfocusedContainerColor = CardColor,
                                 focusedBorderColor = Color.Transparent,
-                                unfocusedBorderColor = Color.Transparent
+                                unfocusedBorderColor = Color.Transparent,
+                                focusedTextColor = Color.White,
+                                unfocusedTextColor = Color.White
                             ),
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 16.dp, vertical = 6.dp)
+                            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp)
                         )
                     }
 
-                    // Reconnect Banner Bar (Remains visible even when clicked until CONNECTED)
-                    AnimatedVisibility(
-                        visible = showReconnectButton,
-                        enter = expandVertically(),
-                        exit = shrinkVertically()
-                    ) {
+                    AnimatedVisibility(visible = showReconnectButton, enter = expandVertically(), exit = shrinkVertically()) {
                         Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 16.dp, vertical = 6.dp),
+                            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp),
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
-                            Text(
-                                "Connecting taking time...",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
+                            Text("Connecting taking time...", color = TextSecondary, fontSize = 12.sp)
                             FilledTonalButton(
-                                onClick = {
-                                    app.tdlibManager.reconnect(app.settingsStore.proxySettings)
-                                },
+                                onClick = { app.tdlibManager.reconnect(app.settingsStore.proxySettings) },
+                                colors = ButtonDefaults.filledTonalButtonColors(containerColor = CardColor, contentColor = AccentGreen),
                                 contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
                                 modifier = Modifier.height(32.dp)
                             ) {
-                                Icon(
-                                    Icons.Default.Refresh,
-                                    contentDescription = null,
-                                    modifier = Modifier.size(14.dp)
-                                )
+                                Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(14.dp))
                                 Spacer(Modifier.width(6.dp))
-                                Text(
-                                    "Reconnect",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    fontWeight = FontWeight.Bold
-                                )
+                                Text("Reconnect", fontSize = 12.sp, fontWeight = FontWeight.Bold)
                             }
                         }
                     }
 
-                    // Sync Progress Indicator & Status Message Banner
-                    AnimatedVisibility(
-                        visible = isSyncing,
-                        enter = expandVertically(),
-                        exit = shrinkVertically()
-                    ) {
-                        Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .background(MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f))
-                        ) {
+                    AnimatedVisibility(visible = isSyncing, enter = expandVertically(), exit = shrinkVertically()) {
+                        Column(modifier = Modifier.fillMaxWidth().background(CardColor)) {
                             LinearProgressIndicator(
                                 modifier = Modifier.fillMaxWidth(),
-                                color = MaterialTheme.colorScheme.primary,
-                                trackColor = MaterialTheme.colorScheme.surfaceContainerHigh
+                                color = AccentGreen,
+                                trackColor = DividerColor
                             )
                             Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(horizontal = 16.dp, vertical = 6.dp),
+                                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp),
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
                                 Icon(
-                                    Icons.Default.Sync,
+                                    Icons.Default.Send,
                                     contentDescription = null,
-                                    tint = MaterialTheme.colorScheme.primary,
-                                    modifier = Modifier
-                                        .size(16.dp)
-                                        .graphicsLayer {
-                                            rotationZ = if (isSyncing) syncRotationAngle.value else 0f
-                                        }
+                                    tint = AccentGreen,
+                                    modifier = Modifier.size(16.dp).graphicsLayer { rotationZ = syncRotationAngle.value }
                                 )
                                 Text(
                                     text = syncProgressMessage.ifBlank { "Syncing songs from Telegram..." },
-                                    style = MaterialTheme.typography.labelMedium,
-                                    color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                    color = TextSecondary,
+                                    fontSize = 13.sp,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis,
                                     modifier = Modifier.weight(1f)
@@ -426,10 +373,7 @@ fun LibraryScreen(
             }
         }
     ) { padding ->
-        Column(modifier = Modifier.padding(padding).fillMaxSize()) {
-            // Pill-shaped filter chips - filled primary color when selected, plain transparent
-            // otherwise (no outline). "Selected" here means whichever tab is CLOSEST to the
-            // pager's live drag position, not the settled tab - see the LaunchedEffect above.
+        Column(modifier = Modifier.padding(padding).fillMaxSize().background(BgColor)) {
             LazyRow(
                 state = filterChipsListState,
                 modifier = Modifier.fillMaxWidth(),
@@ -439,28 +383,27 @@ fun LibraryScreen(
                 itemsIndexed(LibraryTab.entries) { index, t ->
                     val liveIndex = (pagerState.currentPage + pagerState.currentPageOffsetFraction).roundToInt()
                     val selected = index == liveIndex
-                    Surface(
-                        onClick = {
-                            coroutineScope.launch {
-                                pagerState.animateScrollToPage(t.ordinal)
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(20.dp))
+                            .background(if (selected) Color(0xFFF2F2F0) else Color.Transparent)
+                            .clickableNoRipple {
+                                coroutineScope.launch { pagerState.animateScrollToPage(t.ordinal) }
                             }
-                        },
-                        shape = RoundedCornerShape(100),
-                        color = if (selected) MaterialTheme.colorScheme.primary else Color.Transparent
+                            .padding(horizontal = 18.dp, vertical = 8.dp)
                     ) {
                         Text(
                             text = t.label,
-                            color = if (selected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
-                            style = MaterialTheme.typography.labelMedium,
+                            color = if (selected) BgColor else TextSecondary,
+                            fontSize = 14.sp,
+                            fontWeight = if (selected) FontWeight.Medium else FontWeight.Normal,
                             maxLines = 1,
-                            softWrap = false,
-                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 7.dp)
+                            softWrap = false
                         )
                     }
                 }
             }
 
-            // GPU Hardware Texture Layer Page Transformer - renders 120fps smooth scaling/fading during touch swipes
             HorizontalPager(
                 state = pagerState,
                 beyondBoundsPageCount = 0,
@@ -471,7 +414,15 @@ fun LibraryScreen(
                         LibraryTab.TRACKS -> SongList(filteredTracksUi, tracks, playlists, onSongClick, resolvedViewModel, sortField, ascending)
                         LibraryTab.ALBUMS -> AlbumsList(filteredAlbums, onAlbumClick)
                         LibraryTab.ARTISTS -> ArtistsList(filteredArtists, onArtistClick)
-                        LibraryTab.PLAYLISTS -> PlaylistsList(playlistSummaries, onPlaylistClick, onSmartPlaylistClick, resolvedViewModel)
+                        LibraryTab.PLAYLISTS -> PlaylistsList(
+                            playlists = playlistSummaries,
+                            likedCount = likedCount,
+                            telegramCount = telegramCount,
+                            downloadedCount = downloadedCount,
+                            onPlaylistClick = onPlaylistClick,
+                            onSmartPlaylistClick = onSmartPlaylistClick,
+                            viewModel = resolvedViewModel
+                        )
                     }
                 }
             }
@@ -621,56 +572,33 @@ private fun AlbumsList(albums: List<AlbumSummary>, onAlbumClick: (String) -> Uni
     val context = LocalContext.current
     if (albums.isEmpty()) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            Text(
-                text = "No albums found",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
+            Text(text = "No albums found", color = TextMuted, style = MaterialTheme.typography.bodyMedium)
         }
     } else {
-        LazyColumn(
-            modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(start = 16.dp, top = 2.dp, end = 16.dp, bottom = 12.dp),
-            verticalArrangement = Arrangement.spacedBy(4.dp)
+        LazyVerticalGrid(
+            columns = GridCells.Fixed(2),
+            modifier = Modifier.fillMaxSize().background(BgColor),
+            contentPadding = PaddingValues(16.dp),
+            horizontalArrangement = Arrangement.spacedBy(14.dp),
+            verticalArrangement = Arrangement.spacedBy(18.dp)
         ) {
-            items(
-                items = albums,
-                key = { it.album },
-                contentType = { "album_row" }
-            ) { album ->
+            items(items = albums, key = { it.album }, contentType = { "album_card" }) { album ->
                 val imageRequest = remember(album.albumArtUrl, context) {
-                    ImageRequest.Builder(context)
-                        .data(album.albumArtUrl)
-                        .allowHardware(true)
-                        .size(150, 150)
-                        .build()
+                    ImageRequest.Builder(context).data(album.albumArtUrl).allowHardware(true).size(300, 300).build()
                 }
-
                 val albumPainter = rememberAsyncImagePainter(imageRequest)
-
                 val albumSubtitle = remember(album.artist, album.songCount) {
                     "${album.artist} • ${album.songCount} ${if (album.songCount == 1) "track" else "tracks"}"
                 }
+                val onAlbumClicked = remember(album.album, onAlbumClick) { { onAlbumClick(album.album) } }
 
-                val onAlbumClicked = remember(album.album, onAlbumClick) {
-                    { onAlbumClick(album.album) }
-                }
-
-                // Flat list item row
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(68.dp)
-                        .clip(RoundedCornerShape(14.dp))
-                        .clickable(onClick = onAlbumClicked)
-                        .padding(horizontal = 12.dp, vertical = 6.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
+                Column(modifier = Modifier.clickableNoRipple(onAlbumClicked)) {
                     Box(
                         modifier = Modifier
-                            .size(52.dp)
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(MaterialTheme.colorScheme.surfaceContainerHigh),
+                            .fillMaxWidth()
+                            .aspectRatio(1f)
+                            .clip(RoundedCornerShape(18.dp))
+                            .background(CardColor),
                         contentAlignment = Alignment.Center
                     ) {
                         if (!album.albumArtUrl.isNullOrEmpty()) {
@@ -684,34 +612,27 @@ private fun AlbumsList(albums: List<AlbumSummary>, onAlbumClick: (String) -> Uni
                             Icon(
                                 imageVector = Icons.Default.Album,
                                 contentDescription = null,
-                                tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.8f)
+                                tint = TextMuted,
+                                modifier = Modifier.size(36.dp)
                             )
                         }
                     }
-
-                    Spacer(Modifier.width(12.dp))
-
-                    Column(
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        Text(
-                            text = album.album,
-                            style = MaterialTheme.typography.bodyLarge.copy(
-                                fontWeight = FontWeight.SemiBold,
-                                platformStyle = PlatformTextStyle(includeFontPadding = false)
-                            ),
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                        Spacer(Modifier.height(3.dp))
-                        Text(
-                            text = albumSubtitle,
-                            style = MaterialTheme.typography.bodyMedium.copy(
-                                platformStyle = PlatformTextStyle(includeFontPadding = false)
-                            ),
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        text = album.album,
+                        color = Color.White,
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Medium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Text(
+                        text = albumSubtitle,
+                        color = TextMuted,
+                        fontSize = 12.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
                 }
             }
         }
@@ -723,55 +644,36 @@ private fun ArtistsList(artists: List<ArtistSummary>, onArtistClick: (String) ->
     val context = LocalContext.current
     if (artists.isEmpty()) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            Text(
-                text = "No artists found",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
+            Text(text = "No artists found", color = TextMuted, style = MaterialTheme.typography.bodyMedium)
         }
     } else {
-        LazyColumn(
-            modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(start = 16.dp, top = 2.dp, end = 16.dp, bottom = 12.dp),
-            verticalArrangement = Arrangement.spacedBy(4.dp)
+        LazyVerticalGrid(
+            columns = GridCells.Fixed(2),
+            modifier = Modifier.fillMaxSize().background(BgColor),
+            contentPadding = PaddingValues(16.dp),
+            horizontalArrangement = Arrangement.spacedBy(14.dp),
+            verticalArrangement = Arrangement.spacedBy(18.dp)
         ) {
-            items(
-                items = artists,
-                key = { it.artist },
-                contentType = { "artist_row" }
-            ) { artist ->
+            items(items = artists, key = { it.artist }, contentType = { "artist_card" }) { artist ->
                 val artistSubtitle = remember(artist.songCount) {
                     "${artist.songCount} ${if (artist.songCount == 1) "track" else "tracks"}"
                 }
-
-                val onArtistClicked = remember(artist.artist, onArtistClick) {
-                    { onArtistClick(artist.artist) }
-                }
-
+                val onArtistClicked = remember(artist.artist, onArtistClick) { { onArtistClick(artist.artist) } }
                 val artistImageRequest = remember(artist.albumArtUrl, context) {
-                    ImageRequest.Builder(context)
-                        .data(artist.albumArtUrl)
-                        .allowHardware(true)
-                        .size(150, 150)
-                        .build()
+                    ImageRequest.Builder(context).data(artist.albumArtUrl).allowHardware(true).size(300, 300).build()
                 }
                 val artistPainter = rememberAsyncImagePainter(artistImageRequest)
 
-                // Flat list item row
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(68.dp)
-                        .clip(RoundedCornerShape(14.dp))
-                        .clickable(onClick = onArtistClicked)
-                        .padding(horizontal = 12.dp, vertical = 6.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
+                Column(modifier = Modifier.clickableNoRipple(onArtistClicked)) {
+                    // Square, not circular - matches the same rounded-square treatment every
+                    // other card in this redesign uses (albums, playlists), rather than the
+                    // circular avatar convention most music apps default to for artists.
                     Box(
                         modifier = Modifier
-                            .size(52.dp)
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(MaterialTheme.colorScheme.primaryContainer),
+                            .fillMaxWidth()
+                            .aspectRatio(1f)
+                            .clip(RoundedCornerShape(18.dp))
+                            .background(CardColor),
                         contentAlignment = Alignment.Center
                     ) {
                         if (!artist.albumArtUrl.isNullOrEmpty()) {
@@ -785,32 +687,27 @@ private fun ArtistsList(artists: List<ArtistSummary>, onArtistClick: (String) ->
                             Icon(
                                 imageVector = Icons.Default.Person,
                                 contentDescription = null,
-                                tint = MaterialTheme.colorScheme.onPrimaryContainer
+                                tint = TextMuted,
+                                modifier = Modifier.size(36.dp)
                             )
                         }
                     }
-
-                    Spacer(Modifier.width(12.dp))
-
-                    Column(
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        Text(
-                            text = artist.artist,
-                            style = MaterialTheme.typography.bodyLarge.copy(
-                                fontWeight = FontWeight.SemiBold,
-                                platformStyle = PlatformTextStyle(includeFontPadding = false)
-                            )
-                        )
-                        Spacer(Modifier.height(3.dp))
-                        Text(
-                            text = artistSubtitle,
-                            style = MaterialTheme.typography.bodyMedium.copy(
-                                platformStyle = PlatformTextStyle(includeFontPadding = false)
-                            ),
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        text = artist.artist,
+                        color = Color.White,
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Medium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Text(
+                        text = artistSubtitle,
+                        color = TextMuted,
+                        fontSize = 12.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
                 }
             }
         }
@@ -820,52 +717,48 @@ private fun ArtistsList(artists: List<ArtistSummary>, onArtistClick: (String) ->
 @Composable
 private fun SmartPlaylistRow(
     label: String,
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    subtitle: String,
+    icon: ImageVector,
+    iconTint: Color,
+    iconBg: Color,
     onClick: () -> Unit
 ) {
-    Surface(
-        onClick = onClick,
-        shape = RoundedCornerShape(20.dp),
-        color = MaterialTheme.colorScheme.surfaceContainerLow,
-        modifier = Modifier.fillMaxWidth()
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(16.dp))
+            .background(CardColor)
+            .clickableNoRipple(onClick)
+            .padding(horizontal = 14.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically
     ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(12.dp),
-            verticalAlignment = Alignment.CenterVertically
+        Box(
+            modifier = Modifier.size(48.dp).clip(RoundedCornerShape(12.dp)).background(iconBg),
+            contentAlignment = Alignment.Center
         ) {
-            Surface(
-                shape = RoundedCornerShape(12.dp),
-                color = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.size(52.dp)
-            ) {
-                Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
-                    Icon(
-                        imageVector = icon,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.onPrimary
-                    )
-                }
-            }
-
-            Spacer(Modifier.width(12.dp))
-
-            Text(
-                text = label,
-                style = MaterialTheme.typography.bodyLarge.copy(
-                    fontWeight = FontWeight.SemiBold,
-                    platformStyle = PlatformTextStyle(includeFontPadding = false)
-                ),
-                modifier = Modifier.weight(1f)
-            )
+            Icon(imageVector = icon, contentDescription = null, tint = iconTint, modifier = Modifier.size(22.dp))
         }
+        Spacer(Modifier.width(14.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(text = label, color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Medium)
+            Spacer(Modifier.height(2.dp))
+            Text(text = subtitle, color = TextMuted, fontSize = 13.sp)
+        }
+        Icon(
+            imageVector = Icons.AutoMirrored.Filled.PlaylistPlay,
+            contentDescription = null,
+            tint = ChevronColor,
+            modifier = Modifier.size(18.dp)
+        )
     }
 }
 
 @Composable
 private fun PlaylistsList(
     playlists: List<PlaylistSummary>,
+    likedCount: Int,
+    telegramCount: Int,
+    downloadedCount: Int,
     onPlaylistClick: (Long, String) -> Unit,
     onSmartPlaylistClick: (SmartPlaylistKind) -> Unit,
     viewModel: LibraryViewModel
@@ -873,130 +766,120 @@ private fun PlaylistsList(
     val context = LocalContext.current
     var showCreateDialog by remember { mutableStateOf(false) }
 
-    Column(Modifier.fillMaxSize()) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 8.dp),
-            horizontalArrangement = Arrangement.End
-        ) {
+    fun trackWord(count: Int) = "$count ${if (count == 1) "track" else "tracks"}"
+
+    LazyColumn(
+        modifier = Modifier.fillMaxSize().background(BgColor),
+        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        item(key = "new_playlist_button") {
             Button(
                 onClick = { showCreateDialog = true },
-                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp)
+                modifier = Modifier.fillMaxWidth().height(48.dp),
+                shape = RoundedCornerShape(14.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = AccentGreen, contentColor = OnAccentGreen)
             ) {
                 Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
-                Spacer(Modifier.width(6.dp))
-                Text("New Playlist")
+                Spacer(Modifier.width(8.dp))
+                Text(text = "New playlist", fontSize = 15.sp, fontWeight = FontWeight.Medium)
             }
         }
-        LazyColumn(
-            modifier = Modifier.weight(1f),
-            contentPadding = PaddingValues(start = 16.dp, top = 2.dp, end = 16.dp, bottom = 12.dp),
-            verticalArrangement = Arrangement.spacedBy(4.dp)
-        ) {
-            item(key = "smart_liked", contentType = "smart_playlist_row") {
-                SmartPlaylistRow(
-                    label = SmartPlaylistKind.LIKED.label,
-                    icon = Icons.Default.Favorite,
-                    onClick = remember(onSmartPlaylistClick) { { onSmartPlaylistClick(SmartPlaylistKind.LIKED) } }
+
+        item(key = "smart_liked") {
+            SmartPlaylistRow(
+                label = SmartPlaylistKind.LIKED.label,
+                subtitle = trackWord(likedCount),
+                icon = Icons.Default.Favorite,
+                iconTint = Color(0xFFF0997B),
+                iconBg = Color(0xFF4A1B0C),
+                onClick = remember(onSmartPlaylistClick) { { onSmartPlaylistClick(SmartPlaylistKind.LIKED) } }
+            )
+        }
+        item(key = "smart_telegram") {
+            SmartPlaylistRow(
+                label = SmartPlaylistKind.TELEGRAM.label,
+                subtitle = trackWord(telegramCount),
+                icon = Icons.Default.Send,
+                iconTint = Color(0xFF85B7EB),
+                iconBg = Color(0xFF042C53),
+                onClick = remember(onSmartPlaylistClick) { { onSmartPlaylistClick(SmartPlaylistKind.TELEGRAM) } }
+            )
+        }
+        item(key = "smart_downloaded") {
+            SmartPlaylistRow(
+                label = SmartPlaylistKind.DOWNLOADED.label,
+                subtitle = trackWord(downloadedCount),
+                icon = Icons.Default.Download,
+                iconTint = Color(0xFF97C459),
+                iconBg = Color(0xFF173404),
+                onClick = remember(onSmartPlaylistClick) { { onSmartPlaylistClick(SmartPlaylistKind.DOWNLOADED) } }
+            )
+        }
+
+        if (playlists.isNotEmpty()) {
+            item(key = "your_playlists_header") {
+                Text(
+                    text = "Your playlists",
+                    color = TextMuted,
+                    fontSize = 12.sp,
+                    modifier = Modifier.padding(top = 10.dp, bottom = 2.dp, start = 4.dp)
                 )
             }
-            item(key = "smart_telegram", contentType = "smart_playlist_row") {
-                SmartPlaylistRow(
-                    label = SmartPlaylistKind.TELEGRAM.label,
-                    icon = Icons.Default.Send,
-                    onClick = remember(onSmartPlaylistClick) { { onSmartPlaylistClick(SmartPlaylistKind.TELEGRAM) } }
-                )
+        }
+
+        items(items = playlists, key = { it.id }, contentType = { "playlist_row" }) { playlist ->
+            val onPlaylistClicked = remember(playlist.id, playlist.name, onPlaylistClick) {
+                { onPlaylistClick(playlist.id, playlist.name) }
             }
-            item(key = "smart_downloaded", contentType = "smart_playlist_row") {
-                SmartPlaylistRow(
-                    label = SmartPlaylistKind.DOWNLOADED.label,
-                    icon = Icons.Default.Download,
-                    onClick = remember(onSmartPlaylistClick) { { onSmartPlaylistClick(SmartPlaylistKind.DOWNLOADED) } }
-                )
+            val onDeleteClicked = remember(playlist.id, viewModel) {
+                { viewModel.deletePlaylist(playlist.id); Unit }
             }
 
-            if (playlists.isNotEmpty()) {
-                item(key = "your_playlists_header", contentType = "header") {
-                    Text(
-                        text = "Your playlists",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(top = 12.dp, bottom = 4.dp, start = 4.dp)
-                    )
-                }
-            }
-
-            items(
-                items = playlists,
-                key = { it.id },
-                contentType = { "playlist_row" }
-            ) { playlist ->
-                val onPlaylistClicked = remember(playlist.id, playlist.name, onPlaylistClick) {
-                    { onPlaylistClick(playlist.id, playlist.name) }
-                }
-
-                val onDeleteClicked = remember(playlist.id, viewModel) {
-                    { viewModel.deletePlaylist(playlist.id); Unit }
-                }
-
-                Surface(
-                    onClick = onPlaylistClicked,
-                    shape = RoundedCornerShape(20.dp),
-                    color = MaterialTheme.colorScheme.surfaceContainerLow,
-                    modifier = Modifier.fillMaxWidth()
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(CardColor)
+                    .clickableNoRipple(onPlaylistClicked)
+                    .padding(horizontal = 14.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Box(
+                    modifier = Modifier.size(48.dp).clip(RoundedCornerShape(12.dp)).background(DividerColor),
+                    contentAlignment = Alignment.Center
                 ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(12.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(52.dp)
-                                .clip(RoundedCornerShape(12.dp))
-                                .background(MaterialTheme.colorScheme.secondaryContainer),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            if (!playlist.albumArtUrl.isNullOrEmpty()) {
-                                val request = remember(playlist.albumArtUrl) {
-                                    ImageRequest.Builder(context).data(playlist.albumArtUrl).size(150, 150).build()
-                                }
-                                Image(
-                                    painter = rememberAsyncImagePainter(request),
-                                    contentDescription = null,
-                                    contentScale = ContentScale.Crop,
-                                    modifier = Modifier.fillMaxSize()
-                                )
-                            } else {
-                                Icon(
-                                    imageVector = Icons.AutoMirrored.Filled.PlaylistPlay,
-                                    contentDescription = null,
-                                    tint = MaterialTheme.colorScheme.onSecondaryContainer
-                                )
-                            }
+                    if (!playlist.albumArtUrl.isNullOrEmpty()) {
+                        val request = remember(playlist.albumArtUrl) {
+                            ImageRequest.Builder(context).data(playlist.albumArtUrl).size(150, 150).build()
                         }
-
-                        Spacer(Modifier.width(12.dp))
-
-                        Text(
-                            text = playlist.name,
-                            style = MaterialTheme.typography.bodyLarge.copy(
-                                fontWeight = FontWeight.SemiBold,
-                                platformStyle = PlatformTextStyle(includeFontPadding = false)
-                            ),
-                            modifier = Modifier.weight(1f)
+                        Image(
+                            painter = rememberAsyncImagePainter(request),
+                            contentDescription = null,
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier.fillMaxSize()
                         )
-
-                        IconButton(onClick = onDeleteClicked) {
-                            Icon(
-                                imageVector = Icons.Default.Delete,
-                                contentDescription = "Delete playlist",
-                                tint = MaterialTheme.colorScheme.error
-                            )
-                        }
+                    } else {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.PlaylistPlay,
+                            contentDescription = null,
+                            tint = TextMuted,
+                            modifier = Modifier.size(22.dp)
+                        )
                     }
+                }
+                Spacer(Modifier.width(14.dp))
+                Text(
+                    text = playlist.name,
+                    color = Color.White,
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.Medium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f)
+                )
+                IconButton(onClick = onDeleteClicked) {
+                    Icon(imageVector = Icons.Default.Delete, contentDescription = "Delete playlist", tint = Color(0xFFE0716A))
                 }
             }
         }
@@ -1032,4 +915,13 @@ private fun PlaylistsList(
             }
         )
     }
+}
+
+// Simple click modifier without a ripple, matching the flat redesign's style.
+private fun Modifier.clickableNoRipple(onClick: () -> Unit): Modifier = composed {
+    this.clickable(
+        interactionSource = remember { MutableInteractionSource() },
+        indication = null,
+        onClick = onClick
+    )
 }

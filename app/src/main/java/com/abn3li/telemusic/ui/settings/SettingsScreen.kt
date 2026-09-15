@@ -8,6 +8,8 @@ import androidx.compose.animation.animateColorAsState
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
@@ -110,6 +112,11 @@ fun SettingsScreen(onBack: () -> Unit, onLoggedOut: () -> Unit) {
             }
         }
     }
+
+    // Which region's Home feed/Charts/New Releases/Genres YouTube Music Discovery shows - see
+    // InnertubeBrowseClient's own doc.
+    var youtubeRegion by remember { mutableStateOf(app.settingsStore.youtubeRegion) }
+    var showRegionDialog by remember { mutableStateOf(false) }
 
     // Where every explicit download (YouTube or Telegram) also keeps a visible, real copy in
     // shared storage - see MusicRepository.exportToDownloadFolderIfConfigured's own doc. Needs
@@ -690,6 +697,33 @@ fun SettingsScreen(onBack: () -> Unit, onLoggedOut: () -> Unit) {
                     HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
                     Spacer(Modifier.height(16.dp))
 
+                    // YouTube Discovery Region (see InnertubeBrowseClient's own doc on the `gl`
+                    // field this actually changes)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("YouTube region", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
+                            Text(
+                                "Which country's Home feed, Charts, New Releases, and Genres Discovery shows.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        Spacer(Modifier.width(8.dp))
+                        OutlinedButton(onClick = { showRegionDialog = true }) {
+                            Icon(Icons.Default.Public, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(Modifier.width(6.dp))
+                            Text(AppSettingsStore.YOUTUBE_REGIONS.firstOrNull { it.first == youtubeRegion }?.second ?: youtubeRegion)
+                        }
+                    }
+
+                    Spacer(Modifier.height(16.dp))
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
+                    Spacer(Modifier.height(16.dp))
+
                     // Clear Cache Only Button
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -885,6 +919,37 @@ fun SettingsScreen(onBack: () -> Unit, onLoggedOut: () -> Unit) {
 
             Spacer(Modifier.height(16.dp))
         }
+    }
+
+    if (showRegionDialog) {
+        AlertDialog(
+            onDismissRequest = { showRegionDialog = false },
+            title = { Text("YouTube region") },
+            text = {
+                LazyColumn(modifier = Modifier.heightIn(max = 400.dp)) {
+                    items(AppSettingsStore.YOUTUBE_REGIONS, key = { it.first }) { (code, name) ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    app.settingsStore.youtubeRegion = code
+                                    youtubeRegion = code
+                                    showRegionDialog = false
+                                }
+                                .padding(vertical = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            RadioButton(selected = code == youtubeRegion, onClick = null)
+                            Spacer(Modifier.width(8.dp))
+                            Text(name, style = MaterialTheme.typography.bodyMedium)
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showRegionDialog = false }) { Text("Close") }
+            }
+        )
     }
 
     if (showClearCacheConfirm) {

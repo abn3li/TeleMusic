@@ -44,7 +44,7 @@ class TgMusicApp : Application(), ImageLoaderFactory {
         playbackController = PlaybackController(this)
         playbackController.connect(onReady = {})
         ytDlpRepository = YtDlpRepository(this)
-        discoveryRepository = com.abn3li.telemusic.repository.DiscoveryRepository()
+        discoveryRepository = com.abn3li.telemusic.repository.DiscoveryRepository(settingsStore)
 
         musicRepository = MusicRepository(
             songDao = db.songDao(), playlistDao = db.playlistDao(), tdlibManager = tdlibManager,

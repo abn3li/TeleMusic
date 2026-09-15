@@ -137,6 +137,15 @@ class AppSettingsStore(context: Context) {
         get() = prefs.getString(KEY_DOWNLOAD_FOLDER_URI, null)
         set(value) = prefs.edit().putString(KEY_DOWNLOAD_FOLDER_URI, value).apply()
 
+    /** Plain ISO 3166-1 alpha-2 country code ("US", "GB", "JP", ...) sent as the `gl` field on
+     * every YouTube Music Innertube browse call (see InnertubeBrowseClient's own doc) - changes
+     * which region's Home feed/Charts/New Releases/Genres actually come back, same as picking a
+     * country on music.youtube.com itself. Default US since that's what every request already
+     * used before this was configurable. */
+    var youtubeRegion: String
+        get() = prefs.getString(KEY_YOUTUBE_REGION, "US") ?: "US"
+        set(value) = prefs.edit().putString(KEY_YOUTUBE_REGION, value).apply()
+
     companion object {
         private const val KEY_THEME_MODE = "theme_mode"
         private const val KEY_DNS_RESOLVER = "dns_resolver"
@@ -149,8 +158,24 @@ class AppSettingsStore(context: Context) {
         private const val KEY_CACHE_LIMIT = "max_cache_size_bytes"
         private const val KEY_LAST_CHAT_ID = "last_synced_chat_id"
         private const val KEY_DOWNLOAD_FOLDER_URI = "download_folder_uri"
+        private const val KEY_YOUTUBE_REGION = "youtube_region"
         const val UNLIMITED = -1L
         const val DEFAULT_CACHE_LIMIT = 2L * 1024 * 1024 * 1024 // 2GB
+
+        // Region code -> display name, for the YouTube Region picker in Settings. A short,
+        // common list rather than the full ISO 3166 table - the region only affects Discovery
+        // content (Home/Charts/New Releases/Genres), not search or downloads, so it's not worth
+        // the scroll length of every country YouTube Music technically supports.
+        val YOUTUBE_REGIONS = listOf(
+            "US" to "United States", "GB" to "United Kingdom", "CA" to "Canada",
+            "AU" to "Australia", "DE" to "Germany", "FR" to "France", "ES" to "Spain",
+            "IT" to "Italy", "NL" to "Netherlands", "SE" to "Sweden", "BR" to "Brazil",
+            "MX" to "Mexico", "AR" to "Argentina", "JP" to "Japan", "KR" to "South Korea",
+            "IN" to "India", "ID" to "Indonesia", "PH" to "Philippines", "TH" to "Thailand",
+            "VN" to "Vietnam", "TR" to "Turkey", "EG" to "Egypt", "SA" to "Saudi Arabia",
+            "AE" to "United Arab Emirates", "IQ" to "Iraq", "JO" to "Jordan", "NG" to "Nigeria",
+            "ZA" to "South Africa", "RU" to "Russia", "PL" to "Poland"
+        )
 
         val CACHE_PRESETS = listOf(
             "500 MB" to 500L * 1024 * 1024,

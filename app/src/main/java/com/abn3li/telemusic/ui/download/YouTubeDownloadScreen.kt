@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
@@ -198,7 +199,11 @@ private fun DiscoveryHome(
                     }
                 }
             }
-            items(sections, key = { it.title }) { section ->
+            // Keyed by title+index, not just title - YouTube's own Home feed can legitimately
+            // include a shelf actually titled "New releases" at the same time as the dedicated
+            // New Releases section DiscoveryRepository appends, and a bare title-only key
+            // crashed LazyColumn with a duplicate-key exception the moment that happened.
+            itemsIndexed(sections, key = { index, section -> "${section.title}_$index" }) { _, section ->
                 Text(
                     text = section.title,
                     style = MaterialTheme.typography.titleMedium,
