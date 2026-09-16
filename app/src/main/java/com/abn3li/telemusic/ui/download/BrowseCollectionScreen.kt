@@ -188,15 +188,22 @@ private fun BrowseTrackRow(
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
-        if (isLoadingStream) {
-            CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
-        } else {
-            IconButton(onClick = onPlayClick) { Icon(Icons.Default.PlayArrow, contentDescription = "Play") }
+        // Fixed 48dp slots regardless of state (IconButton's own default touch size) - a bare
+        // CircularProgressIndicator is narrower than an IconButton, so without this the row
+        // visibly shifted left the moment loading started and snapped back once it finished.
+        Box(modifier = Modifier.size(48.dp), contentAlignment = Alignment.Center) {
+            if (isLoadingStream) {
+                CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+            } else {
+                IconButton(onClick = onPlayClick) { Icon(Icons.Default.PlayArrow, contentDescription = "Play") }
+            }
         }
-        when {
-            isDownloading -> CircularProgressIndicator(modifier = Modifier.size(24.dp), strokeWidth = 2.dp)
-            isDownloaded -> Icon(Icons.Default.CheckCircle, contentDescription = "Downloaded", tint = MaterialTheme.colorScheme.primary)
-            else -> IconButton(onClick = onDownloadClick) { Icon(Icons.Default.Download, contentDescription = "Download") }
+        Box(modifier = Modifier.size(48.dp), contentAlignment = Alignment.Center) {
+            when {
+                isDownloading -> CircularProgressIndicator(modifier = Modifier.size(24.dp), strokeWidth = 2.dp)
+                isDownloaded -> Icon(Icons.Default.CheckCircle, contentDescription = "Downloaded", tint = MaterialTheme.colorScheme.primary)
+                else -> IconButton(onClick = onDownloadClick) { Icon(Icons.Default.Download, contentDescription = "Download") }
+            }
         }
     }
 }

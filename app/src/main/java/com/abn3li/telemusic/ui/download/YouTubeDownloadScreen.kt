@@ -474,18 +474,28 @@ private fun DownloadResultRow(
                 color = TextMuted
             )
         }
-        if (isLoadingStream) {
-            CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp, color = AccentGreen)
-        } else {
-            IconButton(onClick = onPlayClick) {
-                Icon(Icons.Default.PlayArrow, contentDescription = "Play", tint = Color.White)
+        // Both trailing slots stay a fixed 48dp (IconButton's own default touch size) regardless
+        // of which state they're showing - a bare CircularProgressIndicator/Icon is narrower
+        // than an IconButton, so without this the slot itself shrank the moment a row started
+        // loading, shoving the Download button (and everything to its right, in a wider row) a
+        // few dp left and snapping back once loading finished - a visible layout jump on every
+        // tap, not just an icon swap in place.
+        Box(modifier = Modifier.size(48.dp), contentAlignment = Alignment.Center) {
+            if (isLoadingStream) {
+                CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp, color = AccentGreen)
+            } else {
+                IconButton(onClick = onPlayClick) {
+                    Icon(Icons.Default.PlayArrow, contentDescription = "Play", tint = Color.White)
+                }
             }
         }
-        when {
-            isDownloading -> CircularProgressIndicator(modifier = Modifier.size(24.dp), strokeWidth = 2.dp, color = AccentGreen)
-            isDownloaded -> Icon(Icons.Default.CheckCircle, contentDescription = "Downloaded", tint = AccentGreen)
-            else -> IconButton(onClick = onDownloadClick) {
-                Icon(Icons.Default.Download, contentDescription = "Download", tint = TextSecondary)
+        Box(modifier = Modifier.size(48.dp), contentAlignment = Alignment.Center) {
+            when {
+                isDownloading -> CircularProgressIndicator(modifier = Modifier.size(24.dp), strokeWidth = 2.dp, color = AccentGreen)
+                isDownloaded -> Icon(Icons.Default.CheckCircle, contentDescription = "Downloaded", tint = AccentGreen)
+                else -> IconButton(onClick = onDownloadClick) {
+                    Icon(Icons.Default.Download, contentDescription = "Download", tint = TextSecondary)
+                }
             }
         }
     }
