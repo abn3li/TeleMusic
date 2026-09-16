@@ -34,19 +34,9 @@ class YtDlpRepository(context: Context) {
             runCatching { service.resolveStreamUrl(videoId, formatSelector) }
         }
 
-    suspend fun searchPlaylists(query: String): List<YtDlpPlaylistResult> = withContext(Dispatchers.IO) {
-        val startedAt = android.os.SystemClock.elapsedRealtime()
-        runCatching { service.searchPlaylists(query) }
-            .onFailure { e -> Log.e("YtDlpRepository", "searchPlaylists(query=$query) failed", e) }
-            .getOrElse { emptyList() }
-            .also { Log.d("YtDlpRepository", "searchPlaylists(query=$query): ${it.size} results in ${android.os.SystemClock.elapsedRealtime() - startedAt}ms") }
-    }
-
-    suspend fun searchArtists(query: String): List<YtDlpArtistResult> = withContext(Dispatchers.IO) {
-        val startedAt = android.os.SystemClock.elapsedRealtime()
-        runCatching { service.searchArtists(query) }
-            .onFailure { e -> Log.e("YtDlpRepository", "searchArtists(query=$query) failed", e) }
-            .getOrElse { emptyList() }
-            .also { Log.d("YtDlpRepository", "searchArtists(query=$query): ${it.size} results in ${android.os.SystemClock.elapsedRealtime() - startedAt}ms") }
+    suspend fun fetchPlaylistMetadata(url: String): YtDlpPlaylistMetadata? = withContext(Dispatchers.IO) {
+        runCatching { service.fetchPlaylistMetadata(url) }
+            .onFailure { e -> Log.e("YtDlpRepository", "fetchPlaylistMetadata(url=$url) failed", e) }
+            .getOrNull()
     }
 }

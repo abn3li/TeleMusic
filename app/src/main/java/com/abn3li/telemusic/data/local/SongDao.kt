@@ -12,9 +12,6 @@ interface SongDao {
     @Query("SELECT * FROM songs WHERE telegramMessageId = :id")
     suspend fun getById(id: Long): SongEntity?
 
-    @Query("SELECT * FROM songs WHERE telegramMessageId = :id")
-    fun observeById(id: Long): Flow<SongEntity?>
-
     @Query("SELECT * FROM songs WHERE LOWER(TRIM(title)) = LOWER(TRIM(:title)) AND LOWER(TRIM(artist)) = LOWER(TRIM(:artist)) LIMIT 1")
     suspend fun findByTitleAndArtist(title: String, artist: String): SongEntity?
 
@@ -89,9 +86,6 @@ interface SongDao {
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsert(song: SongEntity)
-
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
-    suspend fun upsertAll(songs: List<SongEntity>)
 
     @Update
     suspend fun update(song: SongEntity)

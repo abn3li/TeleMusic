@@ -27,17 +27,20 @@ interface PlaylistDao {
     )
     fun observeAllWithArt(): Flow<List<PlaylistSummary>>
 
+    @Query("SELECT * FROM playlists WHERE id = :id")
+    fun observeById(id: Long): Flow<PlaylistEntity?>
+
     @Insert
     suspend fun insert(playlist: PlaylistEntity): Long
 
     @Query("DELETE FROM playlists WHERE id = :id")
     suspend fun delete(id: Long)
 
+    @Query("UPDATE playlists SET hiddenFromTracks = :hidden WHERE id = :id")
+    suspend fun setHiddenFromTracks(id: Long, hidden: Boolean)
+
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun addSong(crossRef: PlaylistSongCrossRef)
-
-    @Query("DELETE FROM playlist_song_cross_ref WHERE playlistId = :playlistId AND songId = :songId")
-    suspend fun removeSong(playlistId: Long, songId: Long)
 
     @Query(
         """
@@ -48,4 +51,15 @@ interface PlaylistDao {
         """
     )
     fun observeSongsInPlaylist(playlistId: Long): Flow<List<SongEntity>>
+
+    // Backs the Tracks tab's exclusion filter - every song id belonging to a playlist that's
+    // had its own "Hide from tracks" button turned on, not every playlisted song in general.
+    @Query(
+        """
+        SELECT DISTINCT playlist_song_cross_ref.songId FROM playlist_song_cross_ref
+        INNER JOIN playlists ON playlists.id = playlist_song_cross_ref.playlistId
+        WHERE playlists.hiddenFromTracks = 1
+        """
+    )
+    fun observeSongIdsInHiddenPlaylists(): Flow<List<Long>>
 }

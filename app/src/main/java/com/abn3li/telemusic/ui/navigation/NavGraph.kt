@@ -78,7 +78,9 @@ fun TgMusicNavGraph(navController: NavHostController = rememberNavController()) 
     // Constructed once here at the navigation root - shared by the mini player and full player
     // inside PlayerSheetOverlay, so there's exactly one poller/one source of truth for
     // playback state for the whole app session instead of a fresh instance per navigation.
-    val playerViewModel = remember { NowPlayingViewModel(app.musicRepository, app.playbackController, app.playbackQueue) }
+    val playerViewModel = remember {
+        NowPlayingViewModel(app.musicRepository, app.playbackController, app.playbackQueue, app.ytDlpRepository, app.applicationContext)
+    }
 
     // Same reasoning as playerViewModel above: constructed once here so it survives navigating
     // to Artist/Album/Playlist/Settings and back, instead of LibraryScreen creating its own via
@@ -146,7 +148,7 @@ fun TgMusicNavGraph(navController: NavHostController = rememberNavController()) 
                     YouTubeDownloadScreen(
                         onBack = { navController.popBackStack() },
                         onOpenCollection = { c -> navController.navigate(Routes.youtubeBrowse(c.browseId, c.title, c.params)) },
-                        onPlayStream = { song, uri -> playerViewModel.playEphemeral(song, uri) }
+                        onPlayStream = { song, uri, videoId -> playerViewModel.playEphemeral(song, uri, videoId) }
                     )
                 }
                 composable(Routes.YOUTUBE_BROWSE) { backStackEntry ->
@@ -159,7 +161,7 @@ fun TgMusicNavGraph(navController: NavHostController = rememberNavController()) 
                         params = params,
                         onBack = { navController.popBackStack() },
                         onOpenCollection = { c -> navController.navigate(Routes.youtubeBrowse(c.browseId, c.title, c.params)) },
-                        onPlayStream = { song, uri -> playerViewModel.playEphemeral(song, uri) }
+                        onPlayStream = { song, uri, videoId -> playerViewModel.playEphemeral(song, uri, videoId) }
                     )
                 }
                 composable(Routes.SYNC) { SyncScreen(onBack = { navController.popBackStack() }) }

@@ -7,6 +7,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.CloudDone
 import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.Delete
@@ -66,6 +67,7 @@ fun SongRow(
     onAddToPlaylist: (Long) -> Unit,
     onCreatePlaylistAndAdd: (String) -> Unit,
     onDeleteDownload: () -> Unit,
+    onClearSong: () -> Unit,
     modifier: Modifier = Modifier,
     primaryColor: Color = MaterialTheme.colorScheme.primary,
     onSurfaceVariant: Color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -245,17 +247,32 @@ fun SongRow(
                                 showCreateDialog = true
                             }
                         )
-                        // Only for a song actually downloaded - removes just the local file,
-                        // the song reverts to streaming (or, for a YouTube-only track with no
-                        // other source, the whole row goes with it - see removeDownload's own
-                        // doc). Never touches the row's Telegram/YouTube library entry otherwise.
-                        if (song.isExplicitDownload) {
-                            HorizontalDivider()
+                        HorizontalDivider()
+                        // Removes this song from the library entirely - the row's own DB entry
+                        // plus any local file it has (a cached stream, an explicit download, or
+                        // a local import's own private copy). Available for every song, not just
+                        // downloaded ones - see MusicRepository.clearSong's own doc.
+                        DropdownMenuItem(
+                            leadingIcon = {
+                                Icon(Icons.Default.Clear, contentDescription = null, tint = MaterialTheme.colorScheme.error)
+                            },
+                            text = { Text("Clear song", color = MaterialTheme.colorScheme.error) },
+                            onClick = {
+                                menuExpanded = false
+                                onClearSong()
+                            }
+                        )
+                        // Shown for a song that actually has a real file behind it - an explicit
+                        // download or a local import - removes just that file (a Telegram
+                        // download reverts to streaming; a YouTube download or local import has
+                        // nowhere to revert to, so the whole row goes with it - see
+                        // removeDownload's own doc).
+                        if (song.isExplicitDownload || song.isLocalImport) {
                             DropdownMenuItem(
                                 leadingIcon = {
                                     Icon(Icons.Default.Delete, contentDescription = null, tint = MaterialTheme.colorScheme.error)
                                 },
-                                text = { Text("Delete download", color = MaterialTheme.colorScheme.error) },
+                                text = { Text("Delete song", color = MaterialTheme.colorScheme.error) },
                                 onClick = {
                                     menuExpanded = false
                                     onDeleteDownload()

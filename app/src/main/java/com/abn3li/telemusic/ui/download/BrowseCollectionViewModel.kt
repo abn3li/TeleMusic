@@ -32,7 +32,14 @@ data class BrowseCollectionUiState(
     val loadingStreamIds: Set<String> = emptySet(),
     // Same folder-prompt flow YouTubeDownloadViewModel uses - kept here too since a user could
     // reach a downloadable track from Discovery without ever visiting the search screen first.
-    val pendingFolderPrompt: BrowseTrack? = null
+    val pendingFolderPrompt: BrowseTrack? = null,
+    // Non-null while "Import to Library" is running - (done, total) so the button can show real
+    // progress instead of just a spinner, since downloading a whole playlist track-by-track can
+    // take a while. Set back to null when it finishes (success or failure alike).
+    val importProgress: Pair<Int, Int>? = null,
+    // The real library playlist this collection became, once imported - lets the button switch
+    // to "Open in Library" instead of staying an inert "Imported" label forever.
+    val importedPlaylistId: Long? = null
 )
 
 /** Backs a single browse destination - a playlist's, chart's, or artist's own page reached by
@@ -48,7 +55,7 @@ class BrowseCollectionViewModel(
     private val ytDlpRepository: YtDlpRepository,
     private val musicRepository: MusicRepository,
     private val settingsStore: AppSettingsStore,
-    private val onPlayStream: (SongEntity, Uri) -> Unit
+    private val onPlayStream: (SongEntity, Uri, String) -> Unit
 ) : ViewModel() {
     private val _uiState = MutableStateFlow(BrowseCollectionUiState(title = title))
     val uiState: StateFlow<BrowseCollectionUiState> = _uiState
@@ -91,7 +98,7 @@ class BrowseCollectionViewModel(
                     albumArtUrl = stream.thumbnailUrl,
                     isLocalImport = true
                 )
-                onPlayStream(song, stream.streamUrl.toUri())
+                onPlayStream(song, stream.streamUrl.toUri(), track.videoId)
             }
             _uiState.update {
                 it.copy(
@@ -139,6 +146,33 @@ class BrowseCollectionViewModel(
         startDownload(pending)
     }
 
+    /** "Import to Library" - turns this whole browse collection into a real, permanent library
+     * playlist: creates the playlist, then adds every track as a real, lightweight library row
+     * (see MusicRepository.importPlaylistTrackAsStreamable's own doc) - NOT a forced download.
+     * Each song plays by streaming on demand, exactly like the search screen's own Play button,
+     * and can still be downloaded for real later, one at a time, via the ordinary Download
+     * action - importing a whole playlist should be near-instant, not a bulk download the user
+     * never asked for. Sequential, not parallel, purely to keep [BrowseCollectionUiState.importProgress]
+     * a steadily-advancing count rather than a burst of out-of-order DB writes. Already-imported
+     * tracks (re-importing the same playlist, or a track shared with another one) are added to
+     * the new playlist as-is, untouched. */
+    fun importToLibrary() {
+        if (_uiState.value.importProgress != null || _uiState.value.importedPlaylistId != null) return
+        val tracks = _uiState.value.tracks
+        if (tracks.isEmpty()) return
+        viewModelScope.launch {
+            _uiState.update { it.copy(importProgress = 0 to tracks.size) }
+            val playlistId = musicRepository.createPlaylist(_uiState.value.title)
+            tracks.forEachIndexed { index, track ->
+                val song = musicRepository.importPlaylistTrackAsStreamable(track)
+                musicRepository.addSongToPlaylist(playlistId, song)
+                _uiState.update { it.copy(importProgress = (index + 1) to tracks.size) }
+            }
+            musicRepository.backfillThumbnails()
+            _uiState.update { it.copy(importProgress = null, importedPlaylistId = playlistId) }
+        }
+    }
+
     private fun startDownload(track: BrowseTrack) {
         viewModelScope.launch {
             _uiState.update { it.copy(downloadingIds = it.downloadingIds + track.videoId) }
@@ -146,7 +180,7 @@ class BrowseCollectionViewModel(
             val songId = ytDlpStableSongId(track.videoId)
             val outcome = ytDlpRepository.download(track.videoId, destDir, songId.toString(), DownloadQuality.BEST.formatSelector)
             outcome.onSuccess { downloaded ->
-                musicRepository.importDownloadedSong(downloaded, songId)
+                musicRepository.importDownloadedSong(downloaded, songId, track.videoId)
                 musicRepository.backfillThumbnails()
             }
             _uiState.update {

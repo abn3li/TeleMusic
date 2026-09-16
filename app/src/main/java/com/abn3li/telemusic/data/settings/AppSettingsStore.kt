@@ -124,6 +124,23 @@ class AppSettingsStore(context: Context) {
         get() = prefs.getString(KEY_YOUTUBE_REGION, "US") ?: "US"
         set(value) = prefs.edit().putString(KEY_YOUTUBE_REGION, value).apply()
 
+    // The three smart (dynamic) playlists' own "Hide from tracks" button - Liked/Telegram/
+    // Downloaded aren't real PlaylistEntity rows (see SmartPlaylistKind's own doc), just a
+    // different filter over the same songs table, so their own hidden-from-tracks flag lives
+    // here instead of on a playlist row. Default OFF for all three (Tracks shows everything,
+    // same as before this existed).
+    var hideLikedFromTracks: Boolean
+        get() = prefs.getBoolean(KEY_HIDE_LIKED, false)
+        set(value) = prefs.edit().putBoolean(KEY_HIDE_LIKED, value).apply()
+
+    var hideTelegramFromTracks: Boolean
+        get() = prefs.getBoolean(KEY_HIDE_TELEGRAM, false)
+        set(value) = prefs.edit().putBoolean(KEY_HIDE_TELEGRAM, value).apply()
+
+    var hideDownloadedFromTracks: Boolean
+        get() = prefs.getBoolean(KEY_HIDE_DOWNLOADED, false)
+        set(value) = prefs.edit().putBoolean(KEY_HIDE_DOWNLOADED, value).apply()
+
     companion object {
         private const val KEY_DNS_RESOLVER = "dns_resolver"
         private const val KEY_CUSTOM_DNS_IPS = "custom_dns_ips"
@@ -136,6 +153,9 @@ class AppSettingsStore(context: Context) {
         private const val KEY_LAST_CHAT_ID = "last_synced_chat_id"
         private const val KEY_DOWNLOAD_FOLDER_URI = "download_folder_uri"
         private const val KEY_YOUTUBE_REGION = "youtube_region"
+        private const val KEY_HIDE_LIKED = "hide_liked_from_tracks"
+        private const val KEY_HIDE_TELEGRAM = "hide_telegram_from_tracks"
+        private const val KEY_HIDE_DOWNLOADED = "hide_downloaded_from_tracks"
         const val UNLIMITED = -1L
         const val DEFAULT_CACHE_LIMIT = 2L * 1024 * 1024 * 1024 // 2GB
 

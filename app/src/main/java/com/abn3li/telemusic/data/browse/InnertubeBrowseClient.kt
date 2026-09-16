@@ -35,6 +35,12 @@ class InnertubeBrowseClient {
             if (params != null) put("params", params)
         })
 
+    /** The next page of a browse response that had a [BrowseParser.findContinuationToken] -
+     * same `/browse` endpoint, just a continuation token instead of a browseId (this is
+     * Innertube's own convention for paging any shelf, not something specific to this client). */
+    fun browseContinuation(continuation: String, region: String = "US"): JSONObject =
+        post("browse", region, JSONObject().apply { put("continuation", continuation) })
+
     private fun post(endpoint: String, region: String, extra: JSONObject): JSONObject {
         val body = JSONObject().apply {
             put("context", JSONObject().apply {

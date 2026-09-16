@@ -89,11 +89,21 @@ class MusicService : MediaSessionService() {
         val song = withContext(Dispatchers.IO) { app.musicRepository.getSongById(songId) } ?: return
 
         val localPath = song.localFilePath
-        val uri = if (localPath != null && File(localPath).let { it.exists() && it.length() > 0 }) {
-            File(localPath).toURI().toString().toUri()
-        } else {
-            val freshFileId = withContext(Dispatchers.IO) { app.musicRepository.getFreshFileIdForSong(song) }
-            TdlibDataSource.uriFor(freshFileId)
+        val uri = when {
+            localPath != null && File(localPath).let { it.exists() && it.length() > 0 } ->
+                File(localPath).toURI().toString().toUri()
+            // A real library row backed by a YouTube video that hasn't been downloaded (see
+            // MusicRepository.importPlaylistTrackAsStreamable's own doc) - same resolution
+            // NowPlayingViewModel.startPlayback uses, needed here too so the system
+            // notification's own next/previous buttons work for one of these rows.
+            song.youtubeVideoId != null -> {
+                val resolved = withContext(Dispatchers.IO) { app.musicRepository.resolveDirectPlaybackUri(song) }
+                resolved ?: return
+            }
+            else -> {
+                val freshFileId = withContext(Dispatchers.IO) { app.musicRepository.getFreshFileIdForSong(song) }
+                TdlibDataSource.uriFor(freshFileId)
+            }
         }
 
         val item = MediaItem.Builder()

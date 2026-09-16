@@ -25,6 +25,17 @@ enum class SmartPlaylistKind(val label: String) {
     LIKED("Liked Songs"), TELEGRAM("Telegram Songs"), DOWNLOADED("Downloaded Songs")
 }
 
+// The Tracks tab's exclusion filter, gathered from every "Hide from tracks" toggle across the
+// app (each real playlist's own, plus the three smart playlists' - see MusicRepository's own
+// doc) into one bundle so the LazyColumn only recomputes once per actual change, not once per
+// underlying flow.
+private data class TrackVisibilityFilter(
+    val hiddenPlaylistSongIds: Set<Long>,
+    val hideLiked: Boolean,
+    val hideTelegram: Boolean,
+    val hideDownloaded: Boolean
+)
+
 class LibraryViewModel(private val repository: MusicRepository) : ViewModel() {
     private val _tab = MutableStateFlow(LibraryTab.PLAYLISTS)
     val tab: StateFlow<LibraryTab> = _tab
@@ -39,7 +50,27 @@ class LibraryViewModel(private val repository: MusicRepository) : ViewModel() {
 
     private val sortParams = combine(_sortField, _ascending) { f, a -> f to a }
 
-    val tracks: StateFlow<List<SongEntity>> = sortParams.flatMapLatest { (f, a) -> repository.observeLibrary(f, a) }
+    private val visibilityFilter = combine(
+        repository.observeHiddenPlaylistSongIds(),
+        repository.observeHideLikedFromTracks(),
+        repository.observeHideTelegramFromTracks(),
+        repository.observeHideDownloadedFromTracks()
+    ) { hiddenIds, hideLiked, hideTelegram, hideDownloaded ->
+        TrackVisibilityFilter(hiddenIds.toSet(), hideLiked, hideTelegram, hideDownloaded)
+    }
+
+    val tracks: StateFlow<List<SongEntity>> = combine(sortParams, visibilityFilter) { params, filter -> params to filter }
+        .flatMapLatest { (params, filter) ->
+            val (f, a) = params
+            repository.observeLibrary(f, a).map { songs ->
+                songs.filterNot { song ->
+                    song.telegramMessageId in filter.hiddenPlaylistSongIds ||
+                        (filter.hideLiked && song.isFavorite) ||
+                        (filter.hideTelegram && song.telegramFileId != 0) ||
+                        (filter.hideDownloaded && song.isExplicitDownload)
+                }
+            }
+        }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     // Pre-computed @Immutable SongUiModels offloaded to background Dispatchers.Default threads for 120fps UI rendering
@@ -56,7 +87,6 @@ class LibraryViewModel(private val repository: MusicRepository) : ViewModel() {
 
     fun selectTab(t: LibraryTab) { _tab.value = t }
     fun selectSortField(f: SortField) { _sortField.value = f }
-    fun toggleSortDirection() { _ascending.value = !_ascending.value }
     fun toggleFavorite(song: SongEntity) = viewModelScope.launch { repository.setFavorite(song, !song.isFavorite) }
     fun addSongToPlaylist(playlistId: Long, song: SongEntity) = viewModelScope.launch { repository.addSongToPlaylist(playlistId, song) }
     fun createPlaylistAndAddSong(name: String, song: SongEntity) = viewModelScope.launch {
@@ -72,6 +102,9 @@ class LibraryViewModel(private val repository: MusicRepository) : ViewModel() {
         _downloadingIds.value = _downloadingIds.value - song.telegramMessageId
     }
 
-    /** The row menu's "Delete" item - only ever shown for a song that's actually downloaded. */
+    /** The row menu's "Delete song" item - only ever shown for a song that's actually downloaded. */
     fun removeDownload(song: SongEntity) = viewModelScope.launch { repository.removeDownload(song) }
+
+    /** The row menu's "Clear song" item - removes the song from the library entirely. */
+    fun clearSong(song: SongEntity) = viewModelScope.launch { repository.clearSong(song) }
 }

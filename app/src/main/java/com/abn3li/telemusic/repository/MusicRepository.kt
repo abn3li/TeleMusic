@@ -1,6 +1,9 @@
 package com.abn3li.telemusic.repository
 
+import android.content.Context
 import android.net.Uri
+import androidx.core.net.toUri
+import com.abn3li.telemusic.data.browse.BrowseTrack
 import com.abn3li.telemusic.data.local.AlbumSummary
 import com.abn3li.telemusic.data.local.ArtistSummary
 import com.abn3li.telemusic.data.local.PlaylistDao
@@ -8,11 +11,19 @@ import com.abn3li.telemusic.data.local.PlaylistEntity
 import com.abn3li.telemusic.data.local.PlaylistSongCrossRef
 import com.abn3li.telemusic.data.local.SongDao
 import com.abn3li.telemusic.data.local.SongEntity
+import com.abn3li.telemusic.data.download.DownloadQuality
 import com.abn3li.telemusic.data.download.MediaFolderExporter
+import com.abn3li.telemusic.data.download.YtDlpRepository
+import com.abn3li.telemusic.data.download.ytDlpStableSongId
 import com.abn3li.telemusic.data.settings.AppSettingsStore
 import com.abn3li.telemusic.data.telegram.TdlibManager
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.flow.map
 import java.io.File
@@ -36,8 +47,29 @@ class MusicRepository(
     private val settingsStore: AppSettingsStore,
     private val thumbnailGenerator: ThumbnailGenerator,
     private val localAudioImporter: LocalAudioImporter,
-    private val mediaFolderExporter: MediaFolderExporter
+    private val mediaFolderExporter: MediaFolderExporter,
+    private val ytDlpRepository: YtDlpRepository,
+    context: Context
 ) {
+    private val appContext = context.applicationContext
+
+    // Live mirrors of the three smart playlists' own "Hide from tracks" flags (see
+    // AppSettingsStore's own doc - they're settings, not DB rows, so they need their own
+    // reactive holder here) - this repository is a single app-wide instance, so a toggle made
+    // from a Smart Playlist detail screen is immediately visible to the Tracks tab's own
+    // LibraryViewModel instance without either one needing to know about the other directly.
+    private val _hideLiked = MutableStateFlow(settingsStore.hideLikedFromTracks)
+    private val _hideTelegram = MutableStateFlow(settingsStore.hideTelegramFromTracks)
+    private val _hideDownloaded = MutableStateFlow(settingsStore.hideDownloadedFromTracks)
+
+    fun observeHideLikedFromTracks(): StateFlow<Boolean> = _hideLiked
+    fun observeHideTelegramFromTracks(): StateFlow<Boolean> = _hideTelegram
+    fun observeHideDownloadedFromTracks(): StateFlow<Boolean> = _hideDownloaded
+
+    fun setHideLikedFromTracks(hidden: Boolean) { settingsStore.hideLikedFromTracks = hidden; _hideLiked.value = hidden }
+    fun setHideTelegramFromTracks(hidden: Boolean) { settingsStore.hideTelegramFromTracks = hidden; _hideTelegram.value = hidden }
+    fun setHideDownloadedFromTracks(hidden: Boolean) { settingsStore.hideDownloadedFromTracks = hidden; _hideDownloaded.value = hidden }
+
     /** Best-effort copy of [source] into the user's chosen shared-storage download folder, if
      * they've picked one (AppSettingsStore.downloadFolderUri) - a no-op (returns null) otherwise,
      * so a song downloads exactly as it did before anyone touches that setting. [displayName]
@@ -117,7 +149,8 @@ class MusicRepository(
      * own doc. Left unenriched=false: title/artist already came from yt-dlp's own real metadata,
      * only artwork still needs the usual backfillThumbnails pass to turn albumArtUrl into a
      * cached thumbnailPath. */
-    suspend fun importDownloadedSong(result: com.abn3li.telemusic.data.download.YtDlpDownloadResult, songId: Long) {
+    suspend fun importDownloadedSong(result: com.abn3li.telemusic.data.download.YtDlpDownloadResult, songId: Long, videoId: String? = null) {
+        val existing = songDao.getById(songId)
         songDao.upsert(
             SongEntity(
                 telegramMessageId = songId,
@@ -128,7 +161,13 @@ class MusicRepository(
                 albumArtUrl = result.thumbnailUrl,
                 localFilePath = result.filePath,
                 isExplicitDownload = true,
-                metadataEnriched = true
+                metadataEnriched = true,
+                // Keeps a lightweight streamable row's own videoId (or the caller's, for a fresh
+                // download) so removeDownload() can revert this back to streaming later instead
+                // of deleting the row outright - see removeDownload's own doc.
+                youtubeVideoId = videoId ?: existing?.youtubeVideoId,
+                isFavorite = existing?.isFavorite ?: false,
+                addedAtMillis = existing?.addedAtMillis ?: System.currentTimeMillis()
             )
         )
         val extension = File(result.filePath).extension.ifBlank { "m4a" }
@@ -143,6 +182,43 @@ class MusicRepository(
     private fun sanitizedFileName(title: String, artist: String, extension: String): String {
         val base = "$artist - $title".replace(Regex("""[\\/:*?"<>|]"""), "_").trim().ifBlank { "Untitled" }
         return "$base.$extension"
+    }
+
+    /** "Import to Library"'s real per-track step - adds [track] as a genuine library row WITHOUT
+     * downloading anything, unlike [importDownloadedSong]. Plays by resolving a fresh stream URL
+     * from [SongEntity.youtubeVideoId] on demand (see [resolveDirectPlaybackUri]), and can be
+     * downloaded for real later via the ordinary Download action ([downloadExplicitly]) - exactly
+     * the same played-or-downloaded shape a Telegram-synced song already has, just backed by a
+     * YouTube video instead of a Telegram message. Idempotent: re-importing a playlist that
+     * shares a track with one already in the library returns the existing row untouched instead
+     * of overwriting it (which would have wiped a real download back down to a bare stream). */
+    suspend fun importPlaylistTrackAsStreamable(track: BrowseTrack): SongEntity {
+        val songId = ytDlpStableSongId(track.videoId)
+        songDao.getById(songId)?.let { return it }
+        val song = SongEntity(
+            telegramMessageId = songId,
+            telegramFileId = 0,
+            title = track.title,
+            artist = track.artist,
+            albumArtUrl = track.thumbnailUrl,
+            youtubeVideoId = track.videoId,
+            metadataEnriched = true
+        )
+        songDao.upsert(song)
+        return song
+    }
+
+    /** Resolves a playable URI for [song] WITHOUT touching disk - the streaming counterpart to
+     * [downloadExplicitly], for a [SongEntity.youtubeVideoId] row that hasn't been (or isn't)
+     * downloaded. Null for anything else (already has a localFilePath, or isn't YouTube-sourced
+     * at all), so callers can try this first and fall back to their existing local/TDLib logic
+     * unchanged - see NowPlayingViewModel/MusicService's own playback resolution. */
+    suspend fun resolveDirectPlaybackUri(song: SongEntity): Uri? {
+        val videoId = song.youtubeVideoId ?: return null
+        if (song.localFilePath != null) return null
+        val outcome = ytDlpRepository.resolveStreamUrl(videoId, DownloadQuality.BEST.formatSelector)
+        val stream = outcome.getOrNull()?.takeIf { it.streamUrl.isNotBlank() } ?: return null
+        return stream.streamUrl.toUri()
     }
 
     // ---- One-time cleanup: collapse collab credits into their primary artist ----
@@ -172,10 +248,15 @@ class MusicRepository(
     // ---- Playlists ----
     fun observePlaylists(): Flow<List<PlaylistEntity>> = playlistDao.observeAll()
     fun observePlaylistSummaries(): Flow<List<com.abn3li.telemusic.data.local.PlaylistSummary>> = playlistDao.observeAllWithArt()
+    fun observePlaylistById(playlistId: Long): Flow<PlaylistEntity?> = playlistDao.observeById(playlistId)
     fun observeSongsInPlaylist(playlistId: Long): Flow<List<SongEntity>> = playlistDao.observeSongsInPlaylist(playlistId)
     suspend fun createPlaylist(name: String): Long = playlistDao.insert(PlaylistEntity(name = name))
     suspend fun deletePlaylist(playlistId: Long) = playlistDao.delete(playlistId)
     suspend fun addSongToPlaylist(playlistId: Long, song: SongEntity) = playlistDao.addSong(PlaylistSongCrossRef(playlistId, song.telegramMessageId))
+    suspend fun setPlaylistHiddenFromTracks(playlistId: Long, hidden: Boolean) = playlistDao.setHiddenFromTracks(playlistId, hidden)
+    // Every song id belonging to a playlist that's had its own "Hide from tracks" turned on -
+    // see PlaylistDao.observeSongIdsInHiddenPlaylists' own doc.
+    fun observeHiddenPlaylistSongIds(): Flow<List<Long>> = playlistDao.observeSongIdsInHiddenPlaylists()
 
     private fun List<SongEntity>.sortedByField(field: SortField, ascending: Boolean): List<SongEntity> {
         val comparator = when (field) {
@@ -366,9 +447,18 @@ class MusicRepository(
     /** EXPLICIT download only - triggered by the download button. Sets isExplicitDownload =
      * true, meaning enforceCacheLimit() will never touch this file. A local import is already
      * fully on-device - nothing to download, and there's no real Telegram file behind it to ask
-     * TDLib for. */
+     * TDLib for. A YouTube-sourced streamable row (youtubeVideoId set, no localFilePath yet -
+     * see importPlaylistTrackAsStreamable) goes through yt-dlp instead of TDLib, same real
+     * download [importDownloadedSong] already does for a search-result row. */
     suspend fun downloadExplicitly(song: SongEntity): String {
         if (song.isLocalImport) return song.localFilePath ?: error("Local import ${song.telegramMessageId} has no file path")
+        if (song.youtubeVideoId != null && song.localFilePath == null) {
+            val destDir = File(appContext.filesDir, "youtube_downloads")
+            val outcome = ytDlpRepository.download(song.youtubeVideoId, destDir, song.telegramMessageId.toString(), DownloadQuality.BEST.formatSelector)
+            val downloaded = outcome.getOrThrow()
+            importDownloadedSong(downloaded, song.telegramMessageId, song.youtubeVideoId)
+            return downloaded.filePath
+        }
         val freshFileId = getFreshFileIdForSong(song)
         val path = tdlibManager.downloadFile(freshFileId)
         check(File(path).let { it.exists() && it.length() > 0 }) { "Download completed but file missing/empty at $path" }
@@ -383,25 +473,33 @@ class MusicRepository(
         return path
     }
 
-    /** Removes the local downloaded copy of [song] - only ever called for a song that's actually
-     * isExplicitDownload (the row's own "Delete download" menu item only shows up then). Removes
-     * BOTH copies: the app-private file AND the exported copy in the user's own shared-storage
-     * folder, if one was ever made (see SongEntity.exportedFileUri's own doc) - a Telegram-
-     * sourced download then reverts to streaming (the row stays, same as it looked before it was
-     * ever downloaded), but a YouTube-sourced download has no other source to fall back to (no
-     * live streaming resolver, only download - see data/download's own doc), so removing its
-     * only file removes the whole row instead of leaving a dead, unplayable entry behind. */
+    /** Removes a single song from the library entirely - the row's own "Clear song" menu item.
+     * Unlike [removeDownload] (which, for a Telegram-sourced download, only strips the local
+     * file and reverts the row back to streaming), this always deletes the row itself, plus any
+     * local copy it has - an auto-cached stream, an explicit download, or a local import's own
+     * private copy - and any exported shared-storage copy, so nothing orphaned is left behind. */
+    suspend fun clearSong(song: SongEntity) {
+        song.localFilePath?.let { path -> runCatching { File(path).delete() } }
+        song.exportedFileUri?.let { uri -> runCatching { mediaFolderExporter.delete(android.net.Uri.parse(uri)) } }
+        songDao.delete(song.telegramMessageId)
+    }
+
+    /** Removes the local downloaded copy of [song] - the row's own "Delete song" menu item,
+     * shown for an isExplicitDownload OR a local import (both have a real file to remove).
+     * Removes BOTH copies: the app-private file AND the exported copy in the user's own shared-
+     * storage folder, if one was ever made (see SongEntity.exportedFileUri's own doc). A
+     * Telegram-sourced OR YouTube-streamable (youtubeVideoId set - see
+     * importPlaylistTrackAsStreamable) download reverts to streaming, the row stays, same as it
+     * looked before it was ever downloaded - only a local import, or a legacy YouTube download
+     * from before youtubeVideoId existed, has nowhere to fall back to, so removing its only file
+     * removes the whole row instead of leaving a dead, unplayable entry behind. */
     suspend fun removeDownload(song: SongEntity) {
         song.localFilePath?.let { path -> runCatching { File(path).delete() } }
         song.exportedFileUri?.let { uri -> mediaFolderExporter.delete(android.net.Uri.parse(uri)) }
-        // telegramFileId == 0 marks a row with no real Telegram file behind it - a YouTube
-        // download (see importDownloadedSong) is the only isExplicitDownload row that's ever
-        // true here, since a local import (the other telegramFileId == 0 case) never becomes an
-        // explicit download in the first place - so this check never misfires on one of those.
-        if (song.telegramFileId == 0) {
-            songDao.delete(song.telegramMessageId)
-        } else {
+        if (song.youtubeVideoId != null || song.telegramFileId != 0) {
             songDao.update(song.copy(localFilePath = null, isExplicitDownload = false, exportedFileUri = null))
+        } else {
+            songDao.delete(song.telegramMessageId)
         }
     }
 
@@ -440,19 +538,20 @@ class MusicRepository(
         return count
     }
 
-    /** Deletes ALL Telegram-synced songs, playlists, and cached audio files from local DB and
-     * disk for a 100% fresh sync reset. Local imports are deliberately left untouched - this
-     * reset is about Telegram sync state, and their localFilePath is the user's own file on
-     * shared storage, never safe to delete. */
+    /** Deletes EVERY song - Telegram-synced, YouTube-downloaded, and local imports alike - plus
+     * playlists and every cached/downloaded/exported audio file on disk, for a 100% fresh start.
+     * A local import's localFilePath is the app's own private COPY (see importLocalSongs - the
+     * original file the user picked is never touched, it's copied into app storage on import),
+     * so deleting it here is exactly as safe as deleting any other row's file. */
     suspend fun clearAllLibrarySongs() {
         val allSongs = songDao.observeAll().firstOrNull().orEmpty()
         for (song in allSongs) {
-            if (song.isLocalImport) continue
             val path = song.localFilePath
             if (path != null) {
                 val file = File(path)
                 if (file.exists()) file.delete()
             }
+            song.exportedFileUri?.let { uri -> runCatching { mediaFolderExporter.delete(android.net.Uri.parse(uri)) } }
             songDao.delete(song.telegramMessageId)
         }
         val playlists = playlistDao.observeAll().firstOrNull().orEmpty()
@@ -473,6 +572,25 @@ class MusicRepository(
         // id that could never exist, stalling this song's state update the whole time.
         if (song.isLocalImport || song.telegramFileId == 0) return song.telegramFileId
 
+        // This song's OWN remembered chat, from a previous resolve (see SongEntity.resolvedChatId's
+        // own doc) - tried FIRST, ahead of the app-wide lastSyncedChatId, since that single global
+        // value only ever reflects whichever chat was resolved MOST RECENTLY across every song,
+        // not this specific one. Without this, a library with songs from several different chats
+        // re-ran the full candidate sweep below on every single play of any song that wasn't from
+        // the one chat lastSyncedChatId currently happens to point at - not just once after a
+        // channel switch, but forever, every time. A resolved chat only ever needs the sweep
+        // again if the message truly moves/disappears from it, which the fallthrough below still
+        // handles.
+        song.resolvedChatId?.let { resolvedChatId ->
+            val freshId = tdlibManager.getFreshFileId(resolvedChatId, song.telegramMessageId)
+            if (freshId != null) {
+                if (freshId != song.telegramFileId) {
+                    songDao.update(song.copy(telegramFileId = freshId))
+                }
+                return freshId
+            }
+        }
+
         var channelId = settingsStore.lastSyncedChatId
         if (channelId == 0L) {
             val found = tdlibManager.findFirstChannelId()
@@ -482,27 +600,42 @@ class MusicRepository(
             }
         }
 
-        if (channelId != 0L) {
+        if (channelId != 0L && channelId != song.resolvedChatId) {
             val freshId = tdlibManager.getFreshFileId(channelId, song.telegramMessageId)
             if (freshId != null) {
-                if (freshId != song.telegramFileId) {
-                    songDao.update(song.copy(telegramFileId = freshId))
-                }
+                songDao.update(song.copy(telegramFileId = freshId, resolvedChatId = channelId))
                 return freshId
             }
         }
 
-        val chats = runCatching { tdlibManager.listMyChats(resolvePublicStatus = false).filter { it.isChannel } }.getOrDefault(emptyList())
-        for (chat in chats) {
-            if (chat.id == channelId) continue
-            val freshId = tdlibManager.getFreshFileId(chat.id, song.telegramMessageId)
-            if (freshId != null) {
-                settingsStore.lastSyncedChatId = chat.id
-                if (freshId != song.telegramFileId) {
-                    songDao.update(song.copy(telegramFileId = freshId))
-                }
-                return freshId
-            }
+        // Not filtered to isChannel-only - sync can also come from Saved Messages (a private
+        // chat, never a "channel"), so a song synced from there would otherwise never be
+        // re-resolvable once lastSyncedChatId moved on to a real channel: this whole fallback
+        // exists BECAUSE the source chat can change between syncs, and Saved Messages is exactly
+        // as valid a source as any channel is.
+        val channels = runCatching { tdlibManager.listMyChats(resolvePublicStatus = false) }.getOrDefault(emptyList())
+        val savedMessages = runCatching { tdlibManager.getSavedMessagesChat() }.getOrNull()
+        val candidates = (channels + listOfNotNull(savedMessages)).distinctBy { it.id }
+            .filter { it.id != channelId && it.id != song.resolvedChatId }
+
+        // Fired in parallel, not one chat after another - a real account with a couple dozen
+        // chats meant a sequential sweep could take 20-30+ seconds (each lookup is its own
+        // network round trip), which is exactly what read as "the song just doesn't play for
+        // half a minute". These are all independent, network-bound lookups against different
+        // chats, same tradeoff listMyChats' own per-chat GetChat fetch already makes - the whole
+        // sweep now takes about as long as its single slowest lookup instead of their sum. This
+        // sweep only has to run once per song now (see resolvedChatId above), not on every play.
+        val found = coroutineScope {
+            candidates
+                .map { chat -> async { chat.id to tdlibManager.getFreshFileId(chat.id, song.telegramMessageId) } }
+                .awaitAll()
+                .firstOrNull { it.second != null }
+        }
+        if (found != null) {
+            val (chatId, freshId) = found
+            settingsStore.lastSyncedChatId = chatId
+            songDao.update(song.copy(telegramFileId = freshId!!, resolvedChatId = chatId))
+            return freshId!!
         }
 
         return song.telegramFileId

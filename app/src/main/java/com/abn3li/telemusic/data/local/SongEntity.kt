@@ -26,11 +26,13 @@ data class SongEntity(
     // and what cache eviction must NEVER touch.
     val isExplicitDownload: Boolean = false,
     // True for a song imported directly from the device's own storage rather than synced from
-    // Telegram - telegramFileId is meaningless (0) for these, and localFilePath points at the
-    // user's OWN file on shared storage, not an app-managed cache/download copy. Cache eviction
-    // and getFreshFileIdForSong() must NEVER touch these: touching telegramFileId would spam
-    // TDLib with lookups for a message that doesn't exist, and touching localFilePath the way
-    // cache eviction does for auto-cached songs would delete a file the app doesn't own.
+    // Telegram - telegramFileId is meaningless (0) for these. localFilePath points at the app's
+    // OWN private copy (see LocalAudioImporter.importToPrivateStorage - the original file the
+    // user picked is copied in, never referenced directly), so it's exactly as safe to delete as
+    // any other row's file (see MusicRepository.clearSong/clearAllLibrarySongs). Cache eviction
+    // and getFreshFileIdForSong() must still NEVER touch these: touching telegramFileId would
+    // spam TDLib with lookups for a message that doesn't exist, and cache eviction only ever
+    // targets auto-cached (non-explicit, non-import) files in the first place.
     val isLocalImport: Boolean = false,
     // The SAF document Uri of this song's exported copy in the user's chosen shared-storage
     // folder (see MusicRepository.exportToDownloadFolderIfConfigured), if one was ever made -
@@ -45,5 +47,19 @@ data class SongEntity(
     val lyricsSynced: String? = null,
     val metadataEnriched: Boolean = false,
     val isFavorite: Boolean = false,
-    val addedAtMillis: Long = System.currentTimeMillis()
+    val addedAtMillis: Long = System.currentTimeMillis(),
+    // Non-null for a real library row backed by a YouTube video rather than a Telegram message
+    // or a local import - telegramFileId is meaningless (0) for these too, same as isLocalImport.
+    // UNLIKE isLocalImport, this row often has NO localFilePath: it plays by resolving a fresh
+    // stream URL from this video id on demand (see NowPlayingViewModel/MusicService's playback
+    // resolution), and can be downloaded for real later via the ordinary Download action - see
+    // MusicRepository.downloadExplicitly's own doc. Set once, at import time, and never cleared.
+    val youtubeVideoId: String? = null,
+    // Which chat this Telegram-sourced song's message actually lives in, once resolved - lets
+    // getFreshFileIdForSong() go straight to the right chat on every later play instead of
+    // re-running its whole parallel candidate-chat sweep every single time a song from a
+    // different chat than the current lastSyncedChatId is played (see that function's own doc).
+    // Null until the first successful resolve; a stale/wrong value here just means one sweep to
+    // correct it, never worse than not caching at all.
+    val resolvedChatId: Long? = null
 )

@@ -44,14 +44,16 @@ class TgMusicApp : Application(), ImageLoaderFactory {
         playbackController = PlaybackController(this)
         playbackController.connect(onReady = {})
         ytDlpRepository = YtDlpRepository(this)
-        discoveryRepository = com.abn3li.telemusic.repository.DiscoveryRepository(settingsStore)
+        discoveryRepository = com.abn3li.telemusic.repository.DiscoveryRepository(settingsStore, db.importedPlaylistDao())
 
         musicRepository = MusicRepository(
             songDao = db.songDao(), playlistDao = db.playlistDao(), tdlibManager = tdlibManager,
             lyricsRepository = LyricsRepository(), metadataRepository = MetadataRepository(),
             settingsStore = settingsStore, thumbnailGenerator = ThumbnailGenerator(this),
             localAudioImporter = LocalAudioImporter(this),
-            mediaFolderExporter = MediaFolderExporter(this)
+            mediaFolderExporter = MediaFolderExporter(this),
+            ytDlpRepository = ytDlpRepository,
+            context = this
         )
         if (credentialsStore.hasCredentials()) {
             tdlibManager.start(

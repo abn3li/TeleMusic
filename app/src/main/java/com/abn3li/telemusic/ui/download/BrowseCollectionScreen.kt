@@ -24,11 +24,13 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.PlaylistAdd
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Shuffle
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -73,7 +75,7 @@ fun BrowseCollectionScreen(
     params: String?,
     onBack: () -> Unit,
     onOpenCollection: (BrowseCollection) -> Unit,
-    onPlayStream: (SongEntity, Uri) -> Unit
+    onPlayStream: (SongEntity, Uri, String) -> Unit
 ) {
     val app = LocalContext.current.applicationContext as TgMusicApp
     val viewModel = remember(browseId, params) {
@@ -112,16 +114,112 @@ fun BrowseCollectionScreen(
         Box(Modifier.fillMaxSize().padding(padding)) {
             when {
                 state.isLoading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
-                state.tracks.isNotEmpty() -> LazyColumn(contentPadding = PaddingValues(bottom = LocalMiniPlayerInset.current)) {
-                    items(state.tracks, key = { it.videoId }) { track ->
-                        BrowseTrackRow(
-                            track = track,
-                            isDownloading = track.videoId in state.downloadingIds,
-                            isDownloaded = track.videoId in state.downloadedIds,
-                            isLoadingStream = track.videoId in state.loadingStreamIds,
-                            onDownloadClick = { viewModel.onDownloadClick(track) },
-                            onPlayClick = { viewModel.onPlayClick(track) }
-                        )
+                state.tracks.isNotEmpty() -> {
+                    val coverUrl = remember(state.tracks) { state.tracks.firstOrNull { !it.thumbnailUrl.isNullOrEmpty() }?.thumbnailUrl }
+                    LazyColumn(contentPadding = PaddingValues(bottom = LocalMiniPlayerInset.current)) {
+                        // Same header shape as a real library playlist (see DetailScreens.kt's
+                        // SongListScaffold) - cover art + track count + Play/Shuffle, so opening
+                        // an imported playlist feels the same as opening one of your own.
+                        item(key = "collection_header") {
+                            Column(
+                                modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                androidx.compose.material3.Surface(
+                                    shape = RoundedCornerShape(24.dp),
+                                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                                    shadowElevation = 4.dp,
+                                    modifier = Modifier.size(160.dp)
+                                ) {
+                                    if (!coverUrl.isNullOrEmpty()) {
+                                        AsyncImage(model = coverUrl, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+                                    } else {
+                                        Box(
+                                            modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surfaceContainerHighest),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.MusicNote,
+                                                contentDescription = null,
+                                                modifier = Modifier.size(64.dp),
+                                                tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.8f)
+                                            )
+                                        }
+                                    }
+                                }
+                                Spacer(Modifier.height(12.dp))
+                                Text(
+                                    text = "${state.tracks.size} ${if (state.tracks.size == 1) "track" else "tracks"}",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Spacer(Modifier.height(12.dp))
+                                Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                                    androidx.compose.material3.Button(
+                                        onClick = { state.tracks.firstOrNull()?.let { viewModel.onPlayClick(it) } },
+                                        contentPadding = PaddingValues(horizontal = 20.dp, vertical = 10.dp)
+                                    ) {
+                                        Icon(Icons.Default.PlayArrow, contentDescription = null, modifier = Modifier.size(20.dp))
+                                        Spacer(Modifier.width(6.dp))
+                                        Text("Play All")
+                                    }
+                                    androidx.compose.material3.FilledTonalButton(
+                                        onClick = { state.tracks.randomOrNull()?.let { viewModel.onPlayClick(it) } },
+                                        contentPadding = PaddingValues(horizontal = 20.dp, vertical = 10.dp)
+                                    ) {
+                                        Icon(Icons.Default.Shuffle, contentDescription = null, modifier = Modifier.size(20.dp))
+                                        Spacer(Modifier.width(6.dp))
+                                        Text("Shuffle")
+                                    }
+                                }
+                                Spacer(Modifier.height(10.dp))
+                                // A separate row below Play/Shuffle, not a third pill squeezed
+                                // into the same row - this is a slower, heavier action (a real
+                                // download per track) and deserves its own visual weight instead
+                                // of competing with two one-tap playback buttons.
+                                when {
+                                    state.importedPlaylistId != null -> Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Icon(Icons.Default.CheckCircle, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(16.dp))
+                                        Spacer(Modifier.width(6.dp))
+                                        Text(
+                                            "Imported to your Library playlists",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.primary
+                                        )
+                                    }
+                                    state.importProgress != null -> {
+                                        val (done, total) = state.importProgress!!
+                                        androidx.compose.material3.OutlinedButton(
+                                            onClick = {},
+                                            enabled = false,
+                                            contentPadding = PaddingValues(horizontal = 20.dp, vertical = 10.dp)
+                                        ) {
+                                            CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                                            Spacer(Modifier.width(8.dp))
+                                            Text("Importing $done/$total…")
+                                        }
+                                    }
+                                    else -> androidx.compose.material3.OutlinedButton(
+                                        onClick = { viewModel.importToLibrary() },
+                                        contentPadding = PaddingValues(horizontal = 20.dp, vertical = 10.dp)
+                                    ) {
+                                        Icon(Icons.AutoMirrored.Filled.PlaylistAdd, contentDescription = null, modifier = Modifier.size(18.dp))
+                                        Spacer(Modifier.width(6.dp))
+                                        Text("Import to Library")
+                                    }
+                                }
+                            }
+                        }
+                        items(state.tracks, key = { it.videoId }) { track ->
+                            BrowseTrackRow(
+                                track = track,
+                                isDownloading = track.videoId in state.downloadingIds,
+                                isDownloaded = track.videoId in state.downloadedIds,
+                                isLoadingStream = track.videoId in state.loadingStreamIds,
+                                onDownloadClick = { viewModel.onDownloadClick(track) },
+                                onPlayClick = { viewModel.onPlayClick(track) }
+                            )
+                        }
                     }
                 }
                 state.collections.isNotEmpty() -> LazyVerticalGrid(

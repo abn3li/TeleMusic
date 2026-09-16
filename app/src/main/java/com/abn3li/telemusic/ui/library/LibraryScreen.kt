@@ -566,6 +566,14 @@ private fun SongList(
                             viewModel.removeDownload(songEntity)
                         }
                     },
+                    onClearSong = remember(songEntity, app) {
+                        {
+                            if (app.playbackQueue.currentSongId() == songEntity.telegramMessageId && app.playbackController.isPlaying()) {
+                                app.playbackController.togglePlayPause()
+                            }
+                            viewModel.clearSong(songEntity)
+                        }
+                    },
                     primaryColor = primaryColor,
                     onSurfaceVariant = onSurfaceVariant,
                     titleStyle = titleStyle,

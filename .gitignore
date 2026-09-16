@@ -11,3 +11,4 @@ app/build
 app/release
 *.apk
 .kotlin/
+__pycache__/

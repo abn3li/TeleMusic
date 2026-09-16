@@ -41,7 +41,7 @@ def _entry_from_info(info):
     }
 
 
-def search(query, limit=10):
+def search(query, limit=12):
     """Returns up to [limit] search results for [query] - metadata only, nothing downloaded.
 
     Searches YouTube Music's own "Songs" tab (music.youtube.com/search#songs), not plain
@@ -121,29 +121,6 @@ def _thumbnail_of(entry):
     return thumbs[-1]["url"] if thumbs else None
 
 
-def _flat_search_entries(query, tab, limit):
-    """Shared flat-extraction pass for [search_playlists]/[search_artists] - just enough to get
-    each result's id and its own browse url. Verified against real search results: an entry
-    INSIDE the search results listing carries nothing but {id, url, ie_key} - no title, no
-    thumbnail, nothing else - regardless of flat mode. That's exactly why playlist/artist rows
-    showed "Unknown playlist"/"Unknown artist" before this was traced here: the title was never
-    actually present in this response to begin with, not a parsing bug. A playlist/channel's OWN
-    page (fetched separately per candidate, see _fetch_container_metadata) does carry it."""
-    opts = {
-        "quiet": True,
-        "no_warnings": True,
-        "extract_flat": "in_playlist",
-        "skip_download": True,
-        "noplaylist": True,
-        "playlistend": int(limit),
-    }
-    url = f"https://music.youtube.com/search?q={quote(query)}#{tab}"
-    with yt_dlp.YoutubeDL(opts) as ydl:
-        result = ydl.extract_info(url, download=False)
-    entries = (result or {}).get("entries") or []
-    return [e for e in entries if e and e.get("id") and e.get("url")][: int(limit)]
-
-
 def _fetch_container_metadata(url):
     """A playlist/channel page's OWN title/uploader/thumbnail, still via flat extraction - that
     top-level metadata is resolved as part of loading the page itself, independent of how many
@@ -161,57 +138,6 @@ def _fetch_container_metadata(url):
         return ydl.extract_info(url, download=False)
 
 
-def search_playlists(query, limit=8):
-    """Playlists tab of YouTube Music's own search - one flat pass to find candidate ids (see
-    _flat_search_entries), then one cheap flat metadata fetch per surviving candidate in
-    parallel (see _fetch_container_metadata) - two round trips, same shape [search]'s songs use,
-    but the second pass stays flat instead of a full per-video extract.
-
-    The Playlists tab mixes two very different kinds of "RD"-prefixed tile in with real
-    playlists, and testing against real search results tells them apart clearly:
-    - "RD" + a long CLAK5uy_/TMAK5uy_-style suffix (30+ chars) - a real, curated YouTube Music
-      radio keyed off an album/playlist. Reliably opens anonymously (verified: 5/5 in testing).
-    - "RD" + a bare 11-character video id - "radio starting from this ONE video". This 404s
-      with an empty-looking response and no error at all whenever that single seed video is
-      private/region-locked/deleted (verified: 2/2 failures in testing had exactly this shape) -
-      a real, unfixable YouTube platform limitation, not a parsing bug, and not something worth
-      a per-item pre-check just to filter proactively.
-    A bare video id with no "RD" at all (yt-dlp sometimes reports the mix tile that way instead)
-    is normalized to the same "RD<videoId>" shape first so both are caught by one check.
-    """
-    entries = _flat_search_entries(query, "playlists", limit)
-    candidates = []
-    for e in entries:
-        playlist_id = _normalize_playlist_id(e["id"])
-        if _is_single_video_radio(playlist_id):
-            continue  # unreliable "radio from one video" tile - see doc above
-        if not playlist_id.startswith(("PL", "OLAK5uy_", "RD", "VL")):
-            continue  # not a playlist/radio id at all
-        candidates.append((playlist_id, e["url"]))
-    if not candidates:
-        return []
-
-    def fetch(item):
-        playlist_id, url = item
-        try:
-            return playlist_id, _fetch_container_metadata(url)
-        except Exception:
-            return playlist_id, None
-
-    with ThreadPoolExecutor(max_workers=len(candidates)) as pool:
-        results = list(pool.map(fetch, candidates))
-
-    return [
-        {
-            "id": playlist_id,
-            "title": (info or {}).get("title") or "Unknown playlist",
-            "subtitle": (info or {}).get("uploader") or (info or {}).get("channel"),
-            "thumbnail": _thumbnail_of(info or {}),
-        }
-        for playlist_id, info in results
-    ]
-
-
 def _normalize_playlist_id(raw_id):
     if raw_id.startswith(("PL", "OLAK5uy_", "RD", "VL", "UC", "FL")):
         return raw_id
@@ -220,35 +146,29 @@ def _normalize_playlist_id(raw_id):
     return raw_id
 
 
-def _is_single_video_radio(playlist_id):
-    # "RD" + exactly an 11-character video id, nothing more - see search_playlists's own doc.
-    return playlist_id.startswith("RD") and len(playlist_id) == 13
-
-
-def search_artists(query, limit=4):
-    """Artists tab of YouTube Music's own search - same two-pass shape as [search_playlists]:
-    find candidate channel ids, then fetch each one's own real title/thumbnail in parallel."""
-    entries = _flat_search_entries(query, "artists", limit)
-    if not entries:
-        return []
-
-    def fetch(e):
-        try:
-            return e["id"], _fetch_container_metadata(e["url"])
-        except Exception:
-            return e["id"], None
-
-    with ThreadPoolExecutor(max_workers=len(entries)) as pool:
-        results = list(pool.map(fetch, entries))
-
-    return [
-        {
-            "id": channel_id,
-            "title": (info or {}).get("title") or (info or {}).get("channel") or "Unknown artist",
-            "thumbnail": _thumbnail_of(info or {}),
-        }
-        for channel_id, info in results
-    ]
+def fetch_playlist_metadata(url):
+    """Resolves a pasted YouTube/YouTube Music playlist URL into its id, title, uploader and
+    thumbnail - backs Discovery's "Import playlist by URL" feature. Same flat, cheap container
+    fetch this module always used for a playlist/channel's own page (see
+    _fetch_container_metadata) - yt-dlp handles parsing whatever URL shape the user pasted
+    (youtube.com or music.youtube.com, ?list=... or a bare playlist link) into a real id itself.
+    """
+    try:
+        info = _fetch_container_metadata(url)
+    except Exception:
+        return None
+    if not info:
+        return None
+    raw_id = info.get("id") or ""
+    playlist_id = _normalize_playlist_id(raw_id) if raw_id else ""
+    if not playlist_id:
+        return None
+    return {
+        "id": playlist_id,
+        "title": info.get("title") or "Imported playlist",
+        "subtitle": info.get("uploader") or info.get("channel"),
+        "thumbnail": _thumbnail_of(info),
+    }
 
 
 def download(video_id, dest_dir, dest_filename_stem, format_selector="bestaudio/best"):
@@ -285,6 +205,11 @@ def resolve_stream_url(video_id, format_selector="bestaudio[acodec^=opus]"):
     plain https:// URL exactly like any other source (see PlaybackController.playUri), so there's
     no new playback machinery needed, just a URL instead of a file path.
     """
+    # NOT pinned to the android client (search()'s own per-video fetch is, see its doc) - that
+    # was tried here too for the same latency win, but android's own format list doesn't
+    # reliably include the Opus formats [format_selector] asks for (251/bestaudio[acodec^=opus]),
+    # so pinning to it here made real playback fail outright rather than just resolve faster.
+    # Left as yt-dlp's own default client fallback chain (web first) - slower, but correct.
     opts = {
         "quiet": True,
         "no_warnings": True,

@@ -255,24 +255,15 @@ class TdlibManager(private val context: Context) {
      * that specific completion message and otherwise keeps retrying (with a cap on CONSECUTIVE
      * real failures, so a genuinely broken connection still doesn't loop forever). */
     suspend fun listMyChats(limit: Int = 200, resolvePublicStatus: Boolean = true): List<TelegramChatInfo> {
-        var consecutiveFailures = 0
-        for (i in 0 until 40) {
-            try {
-                sendSuspend(TdApi.LoadChats(TdApi.ChatListMain(), limit))
-                consecutiveFailures = 0
-            } catch (e: Exception) {
-                val message = e.message.orEmpty()
-                if (message.contains("fully loaded", ignoreCase = true) || message.contains("404")) {
-                    break // The documented "nothing left to load" signal - genuinely done.
-                }
-                Log.w("TdlibManager", "LoadChats attempt $i failed (not the completion signal): $message")
-                consecutiveFailures++
-                if (consecutiveFailures >= 3) break // A persistent unrelated failure, not "done" - stop retrying but keep whatever loaded so far.
-            }
-        }
-
-        val chatIds = (sendSuspend(TdApi.GetChats(TdApi.ChatListMain(), limit)) as TdApi.Chats).chatIds
-        Log.d("TdlibManager", "listMyChats: local cache has ${chatIds.size} chats after loading")
+        // Both the main list AND Archive - a channel the user synced from once can end up
+        // archived later (Telegram does this automatically for a quiet chat, and the user can
+        // do it manually too, both very plausible right after moving on to sync a different
+        // channel). ChatListMain-only meant an archived channel's songs silently became
+        // unresolvable forever the moment lastSyncedChatId moved past it - this same list also
+        // backs the Sync screen's own picker, so it was ALSO impossible to select that channel
+        // again to re-sync it, not just a background lookup failure.
+        val chatIds = (loadChatIds(TdApi.ChatListMain(), limit) + loadChatIds(TdApi.ChatListArchive(), limit)).distinct()
+        Log.d("TdlibManager", "listMyChats: local cache has ${chatIds.size} chats (main+archive) after loading")
 
         // Fetched in parallel, not one GetChat round trip after another - with limit raised to
         // 200 (from 100) and a GetSupergroup lookup now added per channel, doing this
@@ -317,6 +308,28 @@ class TdlibManager(private val context: Context) {
         }
     }
 
+    /** Fully loads and returns every chat id in [chatList] - the retry loop LoadChats itself
+     * needs (see listMyChats' own doc above this call site) factored out so it can run once per
+     * chat list instead of just the main one. */
+    private suspend fun loadChatIds(chatList: TdApi.ChatList, limit: Int): List<Long> {
+        var consecutiveFailures = 0
+        for (i in 0 until 40) {
+            try {
+                sendSuspend(TdApi.LoadChats(chatList, limit))
+                consecutiveFailures = 0
+            } catch (e: Exception) {
+                val message = e.message.orEmpty()
+                if (message.contains("fully loaded", ignoreCase = true) || message.contains("404")) {
+                    break // The documented "nothing left to load" signal - genuinely done.
+                }
+                Log.w("TdlibManager", "LoadChats attempt $i failed (not the completion signal): $message")
+                consecutiveFailures++
+                if (consecutiveFailures >= 3) break // A persistent unrelated failure, not "done" - stop retrying but keep whatever loaded so far.
+            }
+        }
+        return (sendSuspend(TdApi.GetChats(chatList, limit)) as TdApi.Chats).chatIds.toList()
+    }
+
     /** The "Saved Messages" chat - just the private chat with your own account, same convention
      * Telegram's own clients use (there's no dedicated chat type for it).
      *
@@ -347,18 +360,33 @@ class TdlibManager(private val context: Context) {
         }
     }
 
-    /** Fetches the current valid session-local file ID for a message from TDLib. */
+    /** Fetches the current valid session-local file ID for a message from TDLib. [chatId] is
+     * always one this client already resolved a real Chat object for (via listMyChats/
+     * getSavedMessagesChat, which built the candidate list this is called against) - a separate
+     * GetChat here would just be a wasted round trip re-confirming something already known,
+     * which mattered: this runs once PER CANDIDATE CHAT in a parallel sweep (see
+     * MusicRepository.getFreshFileIdForSong), so a redundant hop on every candidate raised the
+     * floor of the whole sweep's total time, not just one lookup's. */
     suspend fun getFreshFileId(chatId: Long, messageId: Long): Int? {
         return try {
-            runCatching { sendSuspend(TdApi.GetChat(chatId)) }
+            // TDLib documents GetChatHistory/history-dependent calls as needing the chat opened
+            // first, and testing showed GetMessage/GetMessages themselves can miss for a chat
+            // this client session never opened (e.g. any chat other than the one just synced) -
+            // cheap and idempotent, safe to call on every lookup rather than tracking which
+            // chats are "already open".
+            runCatching { sendSuspend(TdApi.OpenChat(chatId)) }
             var message = runCatching { sendSuspend(TdApi.GetMessage(chatId, messageId)) as? TdApi.Message }.getOrNull()
             if (message == null) {
                 val messages = sendSuspend(TdApi.GetMessages(chatId, longArrayOf(messageId))) as? TdApi.Messages
                 message = messages?.messages?.firstOrNull()
             }
             val audio = (message?.content as? TdApi.MessageAudio)?.audio
+            if (audio == null) {
+                Log.w("TdlibManager", "getFreshFileId(chatId=$chatId, messageId=$messageId): message=${message != null}, not an audio message")
+            }
             audio?.audio?.id
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            Log.w("TdlibManager", "getFreshFileId(chatId=$chatId, messageId=$messageId) failed: ${e.message}")
             null
         }
     }

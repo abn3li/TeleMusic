@@ -203,6 +203,38 @@ object BrowseParser {
         )
     }
 
+    /** The token for a browse page's NEXT page of results, if it has one - a playlist/album
+     * longer than one page (verified: YouTube Music pages a playlist's track list past roughly
+     * its first 100 tracks) carries this so [InnertubeBrowseClient.browseContinuation] can fetch
+     * the rest. Covers both shapes Innertube uses for this depending on the response: an older
+     * `continuations: [{ nextContinuationData: { continuation: "..." } }]` array sitting next to
+     * a shelf's own `contents`, and a newer `continuationItemRenderer` entry trailing the content
+     * list itself (`continuationEndpoint.continuationCommand.token`). Walks the whole response
+     * rather than a fixed path, same tradeoff [collectRenderers] makes - the exact shelf type
+     * (musicPlaylistShelfRenderer/musicShelfRenderer/musicPlaylistShelfContinuation/...) isn't
+     * worth hard-coding when a plain recursive search finds the token regardless. */
+    fun findContinuationToken(response: JSONObject): String? {
+        var found: String? = null
+        fun walk(node: Any?) {
+            if (found != null) return
+            when (node) {
+                is JSONObject -> {
+                    node.opt("continuation")?.let { if (it is String && it.isNotBlank()) found = it }
+                    if (found != null) return
+                    node.opt("continuationCommand").obj()?.optString("token")?.takeIf { it.isNotBlank() }?.let { found = it }
+                    if (found != null) return
+                    node.keys().forEach { key -> if (found == null) walk(node.opt(key)) }
+                }
+                is JSONArray -> for (i in 0 until node.length()) {
+                    if (found != null) break
+                    walk(node.opt(i))
+                }
+            }
+        }
+        walk(response)
+        return found
+    }
+
     private fun collectRenderers(root: Any?, name: String): List<JSONObject> {
         val out = mutableListOf<JSONObject>()
         fun walk(node: Any?) {

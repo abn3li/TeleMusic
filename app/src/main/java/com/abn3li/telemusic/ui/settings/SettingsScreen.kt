@@ -831,6 +831,15 @@ fun SettingsScreen(onBack: () -> Unit, onLoggedOut: () -> Unit) {
                         value = "@hjil_l",
                         url = "https://t.me/hjil_l"
                     )
+
+                    Spacer(Modifier.height(10.dp))
+
+                    AboutLinkRow(
+                        icon = Icons.Default.Groups,
+                        label = "Community",
+                        value = "t.me/telemusicco",
+                        url = "https://t.me/telemusicco"
+                    )
                 }
             }
 

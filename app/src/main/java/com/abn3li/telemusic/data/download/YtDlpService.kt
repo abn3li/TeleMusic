@@ -41,21 +41,14 @@ data class YtDlpStreamResult(
     val streamUrl: String
 )
 
-/** One playlist found by [YtDlpService.searchPlaylists] - [playlistId] is a bare YouTube
- * playlist id (no "VL" prefix), see YouTubeDownloadViewModel for where that prefix gets added
- * to turn it into a real Innertube browseId. */
-data class YtDlpPlaylistResult(
+/** A playlist's own metadata, resolved by [YtDlpService.fetchPlaylistMetadata] from a pasted URL
+ * - backs Discovery's "Import playlist" feature. [playlistId] is a bare YouTube playlist id (no
+ * "VL" prefix), see YouTubeDownloadViewModel.importPlaylist for where that prefix gets added to
+ * turn it into a real Innertube browseId. */
+data class YtDlpPlaylistMetadata(
     val playlistId: String,
     val title: String,
     val subtitle: String?,
-    val thumbnailUrl: String?
-)
-
-/** One artist/channel found by [YtDlpService.searchArtists] - [channelId] (a "UC..." id) is
- * already a valid Innertube browseId as-is, unlike a playlist id. */
-data class YtDlpArtistResult(
-    val channelId: String,
-    val name: String,
     val thumbnailUrl: String?
 )
 
@@ -79,7 +72,7 @@ class YtDlpService(private val context: Context) {
         Python.getInstance().getModule("ytdlp_bridge")
     }
 
-    fun search(query: String, limit: Int = 10): List<YtDlpSearchResult> {
+    fun search(query: String, limit: Int = 12): List<YtDlpSearchResult> {
         val results = bridge.callAttr("search", query, limit)
         return results.asList().map { it.toSearchResult() }
     }
@@ -96,14 +89,14 @@ class YtDlpService(private val context: Context) {
         return result.toStreamResult()
     }
 
-    fun searchPlaylists(query: String, limit: Int = 8): List<YtDlpPlaylistResult> {
-        val results = bridge.callAttr("search_playlists", query, limit)
-        return results.asList().map { it.toPlaylistResult() }
-    }
-
-    fun searchArtists(query: String, limit: Int = 4): List<YtDlpArtistResult> {
-        val results = bridge.callAttr("search_artists", query, limit)
-        return results.asList().map { it.toArtistResult() }
+    /** Resolves a pasted playlist URL into its id/title/uploader/thumbnail, or null if yt-dlp
+     * couldn't recognize it as a playlist - see fetch_playlist_metadata's own doc. */
+    fun fetchPlaylistMetadata(url: String): YtDlpPlaylistMetadata? {
+        val result = bridge.callAttr("fetch_playlist_metadata", url)
+        // Chaquopy's PyObject has no direct "is this Python None" check - str(None) is the
+        // reliable way to tell it apart from a real dict result.
+        if (result.toString() == "None") return null
+        return result.toPlaylistResult()
     }
 
     private fun PyObject.stringKeyedMap(): Map<String, PyObject?> =
@@ -142,21 +135,12 @@ class YtDlpService(private val context: Context) {
         )
     }
 
-    private fun PyObject.toPlaylistResult(): YtDlpPlaylistResult {
+    private fun PyObject.toPlaylistResult(): YtDlpPlaylistMetadata {
         val map = stringKeyedMap()
-        return YtDlpPlaylistResult(
+        return YtDlpPlaylistMetadata(
             playlistId = map["id"]?.toString().orEmpty(),
             title = map["title"]?.toString() ?: "Unknown playlist",
             subtitle = map["subtitle"]?.toString(),
-            thumbnailUrl = map["thumbnail"]?.toString()
-        )
-    }
-
-    private fun PyObject.toArtistResult(): YtDlpArtistResult {
-        val map = stringKeyedMap()
-        return YtDlpArtistResult(
-            channelId = map["id"]?.toString().orEmpty(),
-            name = map["title"]?.toString() ?: "Unknown artist",
             thumbnailUrl = map["thumbnail"]?.toString()
         )
     }

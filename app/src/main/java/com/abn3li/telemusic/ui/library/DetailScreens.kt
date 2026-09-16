@@ -10,6 +10,8 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Shuffle
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -33,13 +35,25 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
-private class DetailViewModel(private val repository: MusicRepository, songsFlow: Flow<List<SongEntity>>) : ViewModel() {
+/** [hiddenFromTracksFlow]/[onToggleHiddenFromTracks] are null for Album/Artist (no "Hide from
+ * tracks" button there - see SongListScaffold's own doc) and provided for a real playlist or a
+ * smart playlist alike, just sourced differently (a PlaylistEntity's own column vs one of
+ * AppSettingsStore's three flags - see MusicRepository's own doc on both). */
+private class DetailViewModel(
+    private val repository: MusicRepository,
+    songsFlow: Flow<List<SongEntity>>,
+    hiddenFromTracksFlow: Flow<Boolean>? = null,
+    private val onToggleHiddenFromTracks: (suspend (Boolean) -> Unit)? = null
+) : ViewModel() {
     val songs: StateFlow<List<SongEntity>> = songsFlow.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
     val playlists: StateFlow<List<PlaylistEntity>> = repository.observePlaylists().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
     val downloadingIds = MutableStateFlow<Set<Long>>(emptySet())
+    val isHiddenFromTracks: StateFlow<Boolean>? =
+        hiddenFromTracksFlow?.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
 
     fun toggleFavorite(song: SongEntity) = viewModelScope.launch { repository.setFavorite(song, !song.isFavorite) }
     fun addToPlaylist(playlistId: Long, song: SongEntity) = viewModelScope.launch { repository.addSongToPlaylist(playlistId, song) }
@@ -53,10 +67,21 @@ private class DetailViewModel(private val repository: MusicRepository, songsFlow
         downloadingIds.value = downloadingIds.value - song.telegramMessageId
     }
     fun removeDownload(song: SongEntity) = viewModelScope.launch { repository.removeDownload(song) }
+    fun clearSong(song: SongEntity) = viewModelScope.launch { repository.clearSong(song) }
+    fun toggleHiddenFromTracks() {
+        val toggle = onToggleHiddenFromTracks ?: return
+        val current = isHiddenFromTracks?.value ?: return
+        viewModelScope.launch { toggle(!current) }
+    }
 }
 
-private class DetailHolderViewModel(repository: MusicRepository, songsFlow: Flow<List<SongEntity>>) : ViewModel() {
-    val detail = DetailViewModel(repository, songsFlow)
+private class DetailHolderViewModel(
+    repository: MusicRepository,
+    songsFlow: Flow<List<SongEntity>>,
+    hiddenFromTracksFlow: Flow<Boolean>? = null,
+    onToggleHiddenFromTracks: (suspend (Boolean) -> Unit)? = null
+) : ViewModel() {
+    val detail = DetailViewModel(repository, songsFlow, hiddenFromTracksFlow, onToggleHiddenFromTracks)
 }
 
 @Composable
@@ -76,7 +101,14 @@ fun ArtistDetailScreen(artist: String, onBack: () -> Unit, onSongClick: (List<Lo
 @Composable
 fun PlaylistDetailScreen(playlistId: Long, playlistName: String, onBack: () -> Unit, onSongClick: (List<Long>, Int) -> Unit) {
     val app = LocalContext.current.applicationContext as TgMusicApp
-    val holder = remember { DetailHolderViewModel(app.musicRepository, app.musicRepository.observeSongsInPlaylist(playlistId)) }
+    val holder = remember(playlistId) {
+        DetailHolderViewModel(
+            repository = app.musicRepository,
+            songsFlow = app.musicRepository.observeSongsInPlaylist(playlistId),
+            hiddenFromTracksFlow = app.musicRepository.observePlaylistById(playlistId).map { it?.hiddenFromTracks == true },
+            onToggleHiddenFromTracks = { hidden -> app.musicRepository.setPlaylistHiddenFromTracks(playlistId, hidden) }
+        )
+    }
     SongListScaffold(playlistName, onBack, holder.detail, onSongClick)
 }
 
@@ -89,7 +121,19 @@ fun SmartPlaylistDetailScreen(kind: SmartPlaylistKind, onBack: () -> Unit, onSon
             SmartPlaylistKind.TELEGRAM -> app.musicRepository.observeTelegramSongs(SortField.TITLE, true)
             SmartPlaylistKind.DOWNLOADED -> app.musicRepository.observeDownloadedSongs(SortField.TITLE, true)
         }
-        DetailHolderViewModel(app.musicRepository, songsFlow)
+        val hiddenFlow = when (kind) {
+            SmartPlaylistKind.LIKED -> app.musicRepository.observeHideLikedFromTracks()
+            SmartPlaylistKind.TELEGRAM -> app.musicRepository.observeHideTelegramFromTracks()
+            SmartPlaylistKind.DOWNLOADED -> app.musicRepository.observeHideDownloadedFromTracks()
+        }
+        val onToggle: suspend (Boolean) -> Unit = { hidden ->
+            when (kind) {
+                SmartPlaylistKind.LIKED -> app.musicRepository.setHideLikedFromTracks(hidden)
+                SmartPlaylistKind.TELEGRAM -> app.musicRepository.setHideTelegramFromTracks(hidden)
+                SmartPlaylistKind.DOWNLOADED -> app.musicRepository.setHideDownloadedFromTracks(hidden)
+            }
+        }
+        DetailHolderViewModel(app.musicRepository, songsFlow, hiddenFlow, onToggle)
     }
     SongListScaffold(kind.label, onBack, holder.detail, onSongClick)
 }
@@ -236,6 +280,27 @@ private fun SongListScaffold(
                                     Text("Shuffle")
                                 }
                             }
+
+                            // Only for a real or smart playlist (vm.isHiddenFromTracks is null
+                            // for Album/Artist - see DetailViewModel's own doc) - a separate row
+                            // below Play/Shuffle, not squeezed into the same one, since this
+                            // toggles a standing state rather than doing something immediately.
+                            vm.isHiddenFromTracks?.let { hiddenFlow ->
+                                val isHidden by hiddenFlow.collectAsState()
+                                Spacer(Modifier.height(10.dp))
+                                OutlinedButton(
+                                    onClick = { vm.toggleHiddenFromTracks() },
+                                    contentPadding = PaddingValues(horizontal = 20.dp, vertical = 10.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = if (isHidden) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                    Spacer(Modifier.width(6.dp))
+                                    Text(if (isHidden) "Hidden from Tracks" else "Hide from Tracks")
+                                }
+                            }
                         }
                     }
 
@@ -256,6 +321,12 @@ private fun SongListScaffold(
                                     app.playbackController.togglePlayPause()
                                 }
                                 vm.removeDownload(song)
+                            },
+                            onClearSong = {
+                                if (app.playbackQueue.currentSongId() == song.telegramMessageId && app.playbackController.isPlaying()) {
+                                    app.playbackController.togglePlayPause()
+                                }
+                                vm.clearSong(song)
                             },
                             primaryColor = primaryColor,
                             onSurfaceVariant = onSurfaceVariant,

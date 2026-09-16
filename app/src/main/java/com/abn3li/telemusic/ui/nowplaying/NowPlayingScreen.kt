@@ -713,11 +713,15 @@ private fun NowPlayingContent(
                             onClick = { viewModel.toggleFavorite() }
                         )
 
-                        // Download Button - hidden entirely for a local import, which is
-                        // already fully on-device and has no Telegram file behind it to
-                        // download.
+                        // Download Button - hidden only for a REAL local import (already fully
+                        // on-device, nothing to download). A YouTube "Play" stream also has
+                        // isLocalImport=true (see SongEntity's own doc) but no localFilePath -
+                        // that combination means "still shows Download", so it can actually be
+                        // saved for real instead of just streamed once (see
+                        // NowPlayingViewModel.downloadEphemeralSong's own doc).
                         val isDownloaded = state.song?.isExplicitDownload == true
-                        if (state.song?.isLocalImport != true) {
+                        val isRealLocalImport = state.song?.isLocalImport == true && state.song?.localFilePath != null
+                        if (!isRealLocalImport) {
                             if (state.isDownloading) {
                                 Box(modifier = Modifier.size(34.dp), contentAlignment = Alignment.Center) {
                                     CircularProgressIndicator(
@@ -917,9 +921,12 @@ private fun NowPlayingContent(
             val (containerFormat, bitrateText) = detectAudioFormat(song.localFilePath, song.durationSeconds)
 
             val storageStatus = when {
-                song.isLocalImport -> "Imported from Device"
+                // isLocalImport is also true for an in-memory YouTube "Play" stream (see
+                // SongEntity's own doc) - only a real local import has a localFilePath.
+                song.isLocalImport && song.localFilePath != null -> "Imported from Device"
                 song.isExplicitDownload -> "Downloaded (Offline)"
                 song.localFilePath != null -> "Cached on Storage"
+                song.isLocalImport -> "Streaming from YouTube"
                 else -> "Streaming via TDLib"
             }
 
