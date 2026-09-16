@@ -2,14 +2,6 @@ package com.abn3li.telemusic.data.settings
 
 import android.content.Context
 import android.net.Uri
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.StateFlow
-
-enum class AppThemeMode(val displayName: String, val subtitle: String) {
-    SYSTEM("System Default", "Follow system settings"),
-    LIGHT("Light", "Clean light theme"),
-    DARK("Dark", "Comfortable dark theme")
-}
 
 enum class DnsResolver(
     val displayName: String,
@@ -41,21 +33,8 @@ data class ProxySettings(
 class AppSettingsStore(context: Context) {
     private val prefs = context.applicationContext.getSharedPreferences("app_settings", Context.MODE_PRIVATE)
 
-    private val _themeModeFlow = MutableStateFlow(themeMode)
-    val themeModeFlow: StateFlow<AppThemeMode> = _themeModeFlow
-
     val proxySettings: ProxySettings
         get() = ProxySettings(proxyEnabled, proxyServer, proxyPort, proxySecret)
-
-    var themeMode: AppThemeMode
-        get() {
-            val name = prefs.getString(KEY_THEME_MODE, AppThemeMode.SYSTEM.name) ?: AppThemeMode.SYSTEM.name
-            return runCatching { AppThemeMode.valueOf(name) }.getOrDefault(AppThemeMode.SYSTEM)
-        }
-        set(value) {
-            prefs.edit().putString(KEY_THEME_MODE, value.name).apply()
-            _themeModeFlow.value = value
-        }
 
     var dnsResolver: DnsResolver
         get() {
@@ -146,7 +125,6 @@ class AppSettingsStore(context: Context) {
         set(value) = prefs.edit().putString(KEY_YOUTUBE_REGION, value).apply()
 
     companion object {
-        private const val KEY_THEME_MODE = "theme_mode"
         private const val KEY_DNS_RESOLVER = "dns_resolver"
         private const val KEY_CUSTOM_DNS_IPS = "custom_dns_ips"
         private const val KEY_PROXY_ENABLED = "proxy_enabled"

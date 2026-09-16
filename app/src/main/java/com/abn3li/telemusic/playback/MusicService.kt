@@ -29,8 +29,7 @@ class MusicService : MediaSessionService() {
     override fun onCreate() {
         super.onCreate()
         val app = application as TgMusicApp
-        val tdlibDataSourceFactory = TdlibDataSource.Factory(app.tdlibManager)
-        val dataSourceFactory = DefaultDataSource.Factory(this, tdlibDataSourceFactory)
+        val dataSourceFactory = DefaultDataSource.Factory(this, ResolvingDataSource.Factory(app.tdlibManager))
 
         val extractorsFactory = DefaultExtractorsFactory()
             .setConstantBitrateSeekingEnabled(true)

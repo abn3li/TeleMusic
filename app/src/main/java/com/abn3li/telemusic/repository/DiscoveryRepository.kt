@@ -52,14 +52,18 @@ class DiscoveryRepository(
         return withContext(Dispatchers.IO) {
             coroutineScope {
                 val home = async {
-                    runCatching { BrowseParser.parseHomeFeed(client.browse(InnertubeBrowseClient.HOME_BROWSE_ID, region = region)) }.getOrElse { emptyList() }
+                    runCatching { BrowseParser.parseHomeFeed(client.browse(InnertubeBrowseClient.HOME_BROWSE_ID, region = region)) }
+                        .onFailure { e -> android.util.Log.e("DiscoveryRepo", "homeFeed(): home page fetch/parse failed", e) }
+                        .getOrElse { emptyList() }
                 }
                 val newReleases = async {
                     runCatching {
                         BrowseParser.parseGridAsSection(client.browse(InnertubeBrowseClient.NEW_RELEASES_BROWSE_ID, region = region), "New releases")
-                    }.getOrNull()
+                    }.onFailure { e -> android.util.Log.e("DiscoveryRepo", "homeFeed(): new releases fetch/parse failed", e) }
+                        .getOrNull()
                 }
                 val merged = home.await() + listOfNotNull(newReleases.await())
+                android.util.Log.d("DiscoveryRepo", "homeFeed(): resolved ${merged.size} sections for region=$region")
                 merged.also { if (it.isNotEmpty()) cachedHome = it }
             }
         }
@@ -73,13 +77,35 @@ class DiscoveryRepository(
         cachedGenres?.let { return it }
         return withContext(Dispatchers.IO) {
             runCatching { BrowseParser.parseGenreChips(client.browse(InnertubeBrowseClient.GENRES_BROWSE_ID, region = region)) }
+                .onFailure { e -> android.util.Log.e("DiscoveryRepo", "genres(): fetch/parse failed", e) }
                 .getOrElse { emptyList() }
                 .also { if (it.isNotEmpty()) cachedGenres = it }
         }
     }
 
     suspend fun browse(browseId: String, params: String?): BrowseContent = withContext(Dispatchers.IO) {
-        runCatching { BrowseParser.parseBrowseContent(client.browse(browseId, params, region = settingsStore.youtubeRegion)) }
+        runCatching {
+            val raw = client.browse(browseId, params, region = settingsStore.youtubeRegion)
+            val content = BrowseParser.parseBrowseContent(raw)
+            if (content.tracks.isEmpty() && content.collections.isEmpty()) {
+                // A real HTTP 200 with a page shape the parser doesn't recognize looks identical
+                // to a genuinely empty page from the outside - this cheap summary (booleans only,
+                // never the raw response body) is what turned "check your connection" reports
+                // into actually diagnosable ones (see this repo's own investigation history).
+                val rawText = raw.toString()
+                android.util.Log.w(
+                    "DiscoveryRepo",
+                    "browse(browseId=$browseId, params=$params): parsed empty. " +
+                        "topLevelKeys=${raw.keys().asSequence().toList()} " +
+                        "hasMusicShelf=${rawText.contains("musicShelfRenderer")} " +
+                        "hasResponsiveListItem=${rawText.contains("musicResponsiveListItemRenderer")} " +
+                        "responseLength=${rawText.length}"
+                )
+            }
+            content
+        }
+            .onFailure { e -> android.util.Log.e("DiscoveryRepo", "browse(browseId=$browseId, params=$params) failed", e) }
             .getOrElse { BrowseContent() }
+            .also { android.util.Log.d("DiscoveryRepo", "browse(browseId=$browseId): ${it.tracks.size} tracks, ${it.collections.size} collections") }
     }
 }

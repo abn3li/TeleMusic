@@ -1,5 +1,6 @@
 package com.abn3li.telemusic.ui.nowplaying
 
+import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.media3.common.MediaItem
@@ -177,6 +178,33 @@ class NowPlayingViewModel(
         loadCurrentQueuePosition(songIdOverride = queue.currentSongId())
     }
 
+    /** Plays a single song that was never added to the library - the YouTube "Play" button (see
+     * YouTubeDownloadViewModel.onPlayClick), which streams a resolved googlevideo.com URL and
+     * keeps nothing afterward, unlike the actual Download button which saves a real library row.
+     * [song] is an in-memory SongEntity built just for display (never inserted into Room) - see
+     * SongEntity.isLocalImport's own doc for why telegramFileId is meaningless (0) here too.
+     *
+     * The shared queue is cleared, not left as whatever it was before: with it untouched, the
+     * mini player's Skip Next button (always enabled, not gated on hasNext - see MiniPlayer.kt)
+     * would silently resume the OLD library queue instead of doing nothing, since nextSong()
+     * reads straight from `queue` rather than the hasNext flag this sets to false. */
+    fun playEphemeral(song: SongEntity, streamUri: Uri) {
+        loadJob?.cancel()
+        queue.clear()
+        _uiState.value = _uiState.value.copy(
+            song = song,
+            lyricLines = emptyList(),
+            currentPositionMs = 0L,
+            durationMs = (song.durationSeconds * 1000L).coerceAtLeast(1L),
+            loadingSongId = null,
+            hasNext = false,
+            hasPrevious = false,
+            errorMessage = null,
+            isDownloading = false
+        )
+        playbackController.playUri(streamUri, song.telegramMessageId, song.title, song.artist, song.albumArtUrl)
+    }
+
     fun fetchLyricsOnDemand() {
         val song = _uiState.value.song ?: return
         viewModelScope.launch {
@@ -267,6 +295,15 @@ class NowPlayingViewModel(
     fun downloadCurrentSong() {
         val song = _uiState.value.song ?: return
         if (song.isExplicitDownload) return
+        // A real local import always has a real localFilePath (see SongEntity's own doc) - the
+        // only way isLocalImport is ever true with localFilePath null is playEphemeral's
+        // in-memory-only stream song (never inserted into Room), which reuses isLocalImport for
+        // the same reason ("telegramFileId is meaningless, skip the Telegram lookup path") but
+        // has no file to fall back to. Without this, tapping Download here would call
+        // repository.downloadExplicitly(song), which errors out for exactly this case (caught,
+        // so no crash) but then still wrote isExplicitDownload = true into this in-memory state
+        // below, showing a "Downloaded" checkmark for a song that was never actually saved.
+        if (song.isLocalImport && song.localFilePath == null) return
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(isDownloading = true)
             runCatching { repository.downloadExplicitly(song) }

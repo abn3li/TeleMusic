@@ -2,6 +2,7 @@ package com.abn3li.telemusic.ui.download
 
 import android.content.Context
 import android.net.Uri
+import androidx.core.net.toUri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.abn3li.telemusic.data.browse.BrowseCollection
@@ -9,6 +10,7 @@ import com.abn3li.telemusic.data.browse.BrowseTrack
 import com.abn3li.telemusic.data.download.DownloadQuality
 import com.abn3li.telemusic.data.download.YtDlpRepository
 import com.abn3li.telemusic.data.download.ytDlpStableSongId
+import com.abn3li.telemusic.data.local.SongEntity
 import com.abn3li.telemusic.data.settings.AppSettingsStore
 import com.abn3li.telemusic.repository.DiscoveryRepository
 import com.abn3li.telemusic.repository.MusicRepository
@@ -26,6 +28,8 @@ data class BrowseCollectionUiState(
     val errorMessage: String? = null,
     val downloadingIds: Set<String> = emptySet(),
     val downloadedIds: Set<String> = emptySet(),
+    // Same idea as downloadingIds - a row streams (not downloads) while its videoId is in here.
+    val loadingStreamIds: Set<String> = emptySet(),
     // Same folder-prompt flow YouTubeDownloadViewModel uses - kept here too since a user could
     // reach a downloadable track from Discovery without ever visiting the search screen first.
     val pendingFolderPrompt: BrowseTrack? = null
@@ -43,7 +47,8 @@ class BrowseCollectionViewModel(
     private val discoveryRepository: DiscoveryRepository,
     private val ytDlpRepository: YtDlpRepository,
     private val musicRepository: MusicRepository,
-    private val settingsStore: AppSettingsStore
+    private val settingsStore: AppSettingsStore,
+    private val onPlayStream: (SongEntity, Uri) -> Unit
 ) : ViewModel() {
     private val _uiState = MutableStateFlow(BrowseCollectionUiState(title = title))
     val uiState: StateFlow<BrowseCollectionUiState> = _uiState
@@ -56,9 +61,46 @@ class BrowseCollectionViewModel(
                     isLoading = false,
                     tracks = content.tracks,
                     collections = content.collections,
+                    // Not "check your connection" - the request almost always succeeds fine
+                    // (see DiscoveryRepository.browse's own diagnostic logging); an empty result
+                    // here is far more often the page genuinely having nothing playable, or a
+                    // page shape this app doesn't parse, than a network failure.
                     errorMessage = if (content.tracks.isEmpty() && content.collections.isEmpty()) {
-                        "Nothing here - check your connection"
+                        "This playlist couldn't be loaded - it may be unavailable"
                     } else null
+                )
+            }
+        }
+    }
+
+    /** Entry point from a row's Play tap - see YouTubeDownloadViewModel.onPlayClick's own doc,
+     * this is the identical flow for a Discovery/playlist track instead of a search result. */
+    fun onPlayClick(track: BrowseTrack) {
+        if (track.videoId in _uiState.value.loadingStreamIds) return
+        viewModelScope.launch {
+            _uiState.update { it.copy(loadingStreamIds = it.loadingStreamIds + track.videoId, errorMessage = null) }
+            val outcome = ytDlpRepository.resolveStreamUrl(track.videoId, DownloadQuality.BEST.formatSelector)
+            val stream = outcome.getOrNull()?.takeIf { it.streamUrl.isNotBlank() }
+            if (stream != null) {
+                val song = SongEntity(
+                    telegramMessageId = ytDlpStableSongId(track.videoId),
+                    telegramFileId = 0,
+                    title = stream.title,
+                    artist = stream.artist,
+                    durationSeconds = stream.durationSeconds,
+                    albumArtUrl = stream.thumbnailUrl,
+                    isLocalImport = true
+                )
+                onPlayStream(song, stream.streamUrl.toUri())
+            }
+            _uiState.update {
+                it.copy(
+                    loadingStreamIds = it.loadingStreamIds - track.videoId,
+                    errorMessage = if (stream == null) {
+                        "Couldn't play \"${track.title}\": ${outcome.exceptionOrNull()?.message ?: "no stream found"}"
+                    } else {
+                        it.errorMessage
+                    }
                 )
             }
         }

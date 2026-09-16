@@ -24,4 +24,12 @@ data class TelegramAudioMessage(
     val title: String, val performer: String, val durationSeconds: Int
 )
 
-data class TelegramChatInfo(val id: Long, val title: String, val isChannel: Boolean)
+data class TelegramChatInfo(
+    val id: Long,
+    val title: String,
+    val isChannel: Boolean,
+    // Only meaningful when isChannel - whether it has a public @username (t.me/name) vs being
+    // invite-link-only. Requires a separate GetSupergroup call per channel (Chat itself doesn't
+    // carry a username), so it's fetched once in listMyChats rather than on every render.
+    val isPublic: Boolean = false
+)

@@ -36,6 +36,17 @@ class PlaybackQueue {
 
     fun currentSongId(): Long? = songIds.getOrNull(currentIndex)
 
+    /** Empties the queue entirely - used when playback moves to something that was never part
+     * of any queue (an ephemeral YouTube stream, see PlaybackController.playUri's callers), so
+     * Next/Previous can't silently fall back to whatever library queue was playing before.
+     * setQueue(emptyList(), 0) is NOT equivalent to this: startIndex.coerceIn(ids.indices) on an
+     * empty list's indices (0..-1, an inverted/empty range) throws IllegalArgumentException. */
+    fun clear() {
+        originalSongIds = emptyList()
+        songIds = emptyList()
+        currentIndex = -1
+    }
+
     fun hasNext(): Boolean {
         if (songIds.size <= 1) return false
         return when (repeatMode) {

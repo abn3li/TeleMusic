@@ -492,7 +492,7 @@ class MusicRepository(
             }
         }
 
-        val chats = runCatching { tdlibManager.listMyChats().filter { it.isChannel } }.getOrDefault(emptyList())
+        val chats = runCatching { tdlibManager.listMyChats(resolvePublicStatus = false).filter { it.isChannel } }.getOrDefault(emptyList())
         for (chat in chats) {
             if (chat.id == channelId) continue
             val freshId = tdlibManager.getFreshFileId(chat.id, song.telegramMessageId)

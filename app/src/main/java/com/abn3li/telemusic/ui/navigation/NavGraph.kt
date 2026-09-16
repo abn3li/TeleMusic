@@ -145,7 +145,8 @@ fun TgMusicNavGraph(navController: NavHostController = rememberNavController()) 
                 composable(Routes.YOUTUBE_DOWNLOAD) {
                     YouTubeDownloadScreen(
                         onBack = { navController.popBackStack() },
-                        onOpenCollection = { c -> navController.navigate(Routes.youtubeBrowse(c.browseId, c.title, c.params)) }
+                        onOpenCollection = { c -> navController.navigate(Routes.youtubeBrowse(c.browseId, c.title, c.params)) },
+                        onPlayStream = { song, uri -> playerViewModel.playEphemeral(song, uri) }
                     )
                 }
                 composable(Routes.YOUTUBE_BROWSE) { backStackEntry ->
@@ -157,7 +158,8 @@ fun TgMusicNavGraph(navController: NavHostController = rememberNavController()) 
                         browseId = browseId,
                         params = params,
                         onBack = { navController.popBackStack() },
-                        onOpenCollection = { c -> navController.navigate(Routes.youtubeBrowse(c.browseId, c.title, c.params)) }
+                        onOpenCollection = { c -> navController.navigate(Routes.youtubeBrowse(c.browseId, c.title, c.params)) },
+                        onPlayStream = { song, uri -> playerViewModel.playEphemeral(song, uri) }
                     )
                 }
                 composable(Routes.SYNC) { SyncScreen(onBack = { navController.popBackStack() }) }

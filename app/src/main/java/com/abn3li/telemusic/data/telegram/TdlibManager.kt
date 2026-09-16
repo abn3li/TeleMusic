@@ -4,6 +4,9 @@ import android.content.Context
 import android.util.Log
 import com.abn3li.telemusic.data.settings.DnsResolver
 import com.abn3li.telemusic.data.settings.ProxySettings
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -239,28 +242,97 @@ class TdlibManager(private val context: Context) {
      * TdApi.GetChats only returns whatever is already sitting in TDLib's LOCAL chat list
      * cache - it never talks to the server itself. TdApi.LoadChats is what actually populates
      * that cache, and per TDLib's own docs it has to be called REPEATEDLY: each call loads
-     * some more chats, and it only throws (its documented signal for "nothing left to load")
+     * some more chats, and it only throws its documented "chat list is fully loaded" error
      * once the list is completely populated. A single LoadChats call, or stopping the moment
      * GetChats returns ANY chats at all, can both return a list that's still missing the
      * specific channel the user wants - especially right after a fresh login, when the cache
-     * starts out completely empty. So this calls LoadChats in a loop until it actually signals
-     * done (or a generous attempt cap, as a safety net against a genuine unrelated failure),
-     * and only THEN calls GetChats once, against a cache that's actually finished loading. */
-    suspend fun listMyChats(limit: Int = 100): List<TelegramChatInfo> {
-        for (i in 0 until 15) {
+     * starts out completely empty.
+     *
+     * The loop used to treat ANY exception from LoadChats - not just that specific "fully
+     * loaded" signal - as "done", so a single transient/unrelated error (a slow connection
+     * right after login, for instance) silently cut the load short after just one batch,
+     * which is exactly what made only a handful of channels ever show up. It now only stops on
+     * that specific completion message and otherwise keeps retrying (with a cap on CONSECUTIVE
+     * real failures, so a genuinely broken connection still doesn't loop forever). */
+    suspend fun listMyChats(limit: Int = 200, resolvePublicStatus: Boolean = true): List<TelegramChatInfo> {
+        var consecutiveFailures = 0
+        for (i in 0 until 40) {
             try {
                 sendSuspend(TdApi.LoadChats(TdApi.ChatListMain(), limit))
+                consecutiveFailures = 0
             } catch (e: Exception) {
-                break // No more chats to load - the local list is now fully populated.
+                val message = e.message.orEmpty()
+                if (message.contains("fully loaded", ignoreCase = true) || message.contains("404")) {
+                    break // The documented "nothing left to load" signal - genuinely done.
+                }
+                Log.w("TdlibManager", "LoadChats attempt $i failed (not the completion signal): $message")
+                consecutiveFailures++
+                if (consecutiveFailures >= 3) break // A persistent unrelated failure, not "done" - stop retrying but keep whatever loaded so far.
             }
         }
 
         val chatIds = (sendSuspend(TdApi.GetChats(TdApi.ChatListMain(), limit)) as TdApi.Chats).chatIds
-        return chatIds.toList().mapNotNull { id ->
-            val chat = try { sendSuspend(TdApi.GetChat(id)) as TdApi.Chat } catch (_: Exception) { null } ?: return@mapNotNull null
-            val isChannel = (chat.type as? TdApi.ChatTypeSupergroup)?.isChannel == true
-            TelegramChatInfo(chat.id, chat.title, isChannel)
+        Log.d("TdlibManager", "listMyChats: local cache has ${chatIds.size} chats after loading")
+
+        // Fetched in parallel, not one GetChat round trip after another - with limit raised to
+        // 200 (from 100) and a GetSupergroup lookup now added per channel, doing this
+        // sequentially made a large account's fetch noticeably slower for no reason: each
+        // sendSuspend is an independent TDLib request/callback pair, so there's nothing for one
+        // chat's fetch to wait on from another's.
+        val chats = coroutineScope {
+            chatIds.map { id -> async { runCatching { sendSuspend(TdApi.GetChat(id)) as TdApi.Chat }.getOrNull() } }
+                .awaitAll()
+                .filterNotNull()
         }
+
+        // Public/private needs a second call per channel (Chat itself doesn't carry a username,
+        // only the linked Supergroup does) - skippable via resolvePublicStatus for callers like
+        // findFirstChannelId() that only want a chat id and would otherwise pay for a
+        // GetSupergroup round trip on every channel just to throw the result away.
+        //
+        // Resolved as its own parallel pass over the DISTINCT supergroup ids first, into a
+        // plain read-only map, rather than a shared mutable cache mutated from inside the
+        // per-chat fetch above: sendSuspend's callback can resume on whichever thread TDLib's
+        // own callback dispatch uses, so concurrent getOrPut()s into a shared HashMap from that
+        // context would be a real race (and a plain HashMap isn't thread-safe to begin with).
+        val publicBySupergroupId = if (resolvePublicStatus) {
+            val supergroupIds = chats.mapNotNull { (it.type as? TdApi.ChatTypeSupergroup)?.takeIf { t -> t.isChannel }?.supergroupId }.distinct()
+            coroutineScope {
+                supergroupIds.map { supergroupId ->
+                    async {
+                        supergroupId to (runCatching { sendSuspend(TdApi.GetSupergroup(supergroupId)) as TdApi.Supergroup }
+                            .getOrNull()?.usernames?.activeUsernames?.isNotEmpty() == true)
+                    }
+                }.awaitAll()
+            }.toMap()
+        } else {
+            emptyMap()
+        }
+
+        return chats.map { chat ->
+            val supergroupType = chat.type as? TdApi.ChatTypeSupergroup
+            val isChannel = supergroupType?.isChannel == true
+            val isPublic = isChannel && publicBySupergroupId[supergroupType.supergroupId] == true
+            TelegramChatInfo(chat.id, chat.title, isChannel, isPublic)
+        }
+    }
+
+    /** The "Saved Messages" chat - just the private chat with your own account, same convention
+     * Telegram's own clients use (there's no dedicated chat type for it).
+     *
+     * Originally used GetChat on your own user id, which only succeeds if that chat object is
+     * ALREADY sitting in TDLib's local cache - true for most accounts (any client opening Saved
+     * Messages once is enough to seed it), but not guaranteed for one that never has, especially
+     * right after a fresh login before anything's been materialized locally. That's exactly why
+     * it worked "for some accounts" and not others. CreatePrivateChat(force = true) is TDLib's
+     * actual documented way to get this chat regardless of whether it already exists locally -
+     * it creates it on the spot if needed, so it can't come back missing the way GetChat did. */
+    suspend fun getSavedMessagesChat(): TelegramChatInfo? = try {
+        val myId = (sendSuspend(TdApi.GetMe()) as TdApi.User).id
+        val chat = sendSuspend(TdApi.CreatePrivateChat(myId, true)) as TdApi.Chat
+        TelegramChatInfo(chat.id, chat.title.ifBlank { "Saved Messages" }, isChannel = false)
+    } catch (_: Exception) {
+        null
     }
 
     suspend fun fetchAudioMessages(chatId: Long, fromMessageId: Long = 0, limit: Int = 50): List<TelegramAudioMessage> {
@@ -306,7 +378,7 @@ class TdlibManager(private val context: Context) {
     /** Finds the first channel chatId in the user's account if lastSyncedChatId isn't stored yet. */
     suspend fun findFirstChannelId(): Long? {
         return try {
-            val chats = listMyChats().filter { it.isChannel }
+            val chats = listMyChats(resolvePublicStatus = false).filter { it.isChannel }
             chats.firstOrNull()?.id
         } catch (_: Exception) {
             null

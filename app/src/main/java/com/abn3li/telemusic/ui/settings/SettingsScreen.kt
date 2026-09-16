@@ -4,8 +4,6 @@ import android.content.Intent
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.animation.animateColorAsState
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -30,7 +28,6 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import com.abn3li.telemusic.TgMusicApp
 import com.abn3li.telemusic.data.settings.AppSettingsStore
-import com.abn3li.telemusic.data.settings.AppThemeMode
 import com.abn3li.telemusic.data.settings.DnsResolver
 import com.abn3li.telemusic.data.update.UpdateChecker
 import com.abn3li.telemusic.ui.nowplaying.LocalMiniPlayerInset
@@ -54,7 +51,6 @@ fun SettingsScreen(onBack: () -> Unit, onLoggedOut: () -> Unit) {
     val scope = rememberCoroutineScope()
     val clipboardManager = LocalClipboardManager.current
 
-    var selectedThemeMode by remember { mutableStateOf(app.settingsStore.themeMode) }
     var enrichEnabled by remember { mutableStateOf(app.settingsStore.enrichMetadataOnSync) }
     var cacheLimit by remember { mutableStateOf(app.settingsStore.maxCacheSizeBytes) }
 
@@ -163,71 +159,6 @@ fun SettingsScreen(onBack: () -> Unit, onLoggedOut: () -> Unit) {
                 .padding(start = 16.dp, top = 8.dp, end = 16.dp, bottom = 8.dp + LocalMiniPlayerInset.current),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            // ---- APPEARANCE & THEME SECTION ----
-            Card(
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
-                shape = RoundedCornerShape(20.dp),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Column(Modifier.padding(16.dp)) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        Icon(
-                            Icons.Default.Palette,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.primary
-                        )
-                        Text(
-                            "Appearance & Theme",
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
-
-                    Spacer(Modifier.height(12.dp))
-
-                    Text(
-                        "Theme Mode",
-                        style = MaterialTheme.typography.labelLarge,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-
-                    Spacer(Modifier.height(8.dp))
-
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        ThemeModeChip(
-                            mode = AppThemeMode.SYSTEM,
-                            isSelected = selectedThemeMode == AppThemeMode.SYSTEM,
-                            modifier = Modifier.weight(1f)
-                        ) {
-                            selectedThemeMode = AppThemeMode.SYSTEM
-                            app.settingsStore.themeMode = AppThemeMode.SYSTEM
-                        }
-                        ThemeModeChip(
-                            mode = AppThemeMode.LIGHT,
-                            isSelected = selectedThemeMode == AppThemeMode.LIGHT,
-                            modifier = Modifier.weight(1f)
-                        ) {
-                            selectedThemeMode = AppThemeMode.LIGHT
-                            app.settingsStore.themeMode = AppThemeMode.LIGHT
-                        }
-                        ThemeModeChip(
-                            mode = AppThemeMode.DARK,
-                            isSelected = selectedThemeMode == AppThemeMode.DARK,
-                            modifier = Modifier.weight(1f)
-                        ) {
-                            selectedThemeMode = AppThemeMode.DARK
-                            app.settingsStore.themeMode = AppThemeMode.DARK
-                        }
-                    }
-                }
-            }
-
             // ---- DNS RESOLVERS SECTION (TELEGRAM X / NAGRAM X) ----
             Card(
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
@@ -1089,51 +1020,5 @@ private fun AboutLinkRow(
             Text(value, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         Icon(Icons.AutoMirrored.Filled.OpenInNew, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(16.dp))
-    }
-}
-
-@Composable
-private fun ThemeModeChip(
-    mode: AppThemeMode,
-    isSelected: Boolean,
-    modifier: Modifier = Modifier,
-    onClick: () -> Unit
-) {
-    val containerColor by animateColorAsState(
-        if (isSelected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerHigh,
-        label = "containerColor"
-    )
-    val contentColor by animateColorAsState(
-        if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface,
-        label = "contentColor"
-    )
-    val border = if (isSelected) BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary) else null
-
-    Surface(
-        onClick = onClick,
-        shape = RoundedCornerShape(12.dp),
-        color = containerColor,
-        contentColor = contentColor,
-        border = border,
-        modifier = modifier
-    ) {
-        Row(
-            modifier = Modifier.padding(vertical = 10.dp, horizontal = 12.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.Center
-        ) {
-            val icon = when (mode) {
-                AppThemeMode.SYSTEM -> Icons.Default.SettingsSuggest
-                AppThemeMode.LIGHT -> Icons.Default.LightMode
-                AppThemeMode.DARK -> Icons.Default.DarkMode
-            }
-            Icon(icon, contentDescription = null, modifier = Modifier.size(18.dp))
-            Spacer(Modifier.width(6.dp))
-            Text(
-                mode.displayName,
-                style = MaterialTheme.typography.bodyMedium,
-                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
-            )
-        }
     }
 }

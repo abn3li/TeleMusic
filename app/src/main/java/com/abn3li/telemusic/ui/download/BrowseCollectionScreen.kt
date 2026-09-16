@@ -28,6 +28,7 @@ import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.MusicNote
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -50,10 +51,12 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import android.net.Uri
 import coil.compose.AsyncImage
 import com.abn3li.telemusic.TgMusicApp
 import com.abn3li.telemusic.data.browse.BrowseCollection
 import com.abn3li.telemusic.data.browse.BrowseTrack
+import com.abn3li.telemusic.data.local.SongEntity
 import com.abn3li.telemusic.ui.nowplaying.LocalMiniPlayerInset
 
 /**
@@ -69,13 +72,14 @@ fun BrowseCollectionScreen(
     browseId: String,
     params: String?,
     onBack: () -> Unit,
-    onOpenCollection: (BrowseCollection) -> Unit
+    onOpenCollection: (BrowseCollection) -> Unit,
+    onPlayStream: (SongEntity, Uri) -> Unit
 ) {
     val app = LocalContext.current.applicationContext as TgMusicApp
     val viewModel = remember(browseId, params) {
         BrowseCollectionViewModel(
             app.applicationContext, title, browseId, params,
-            app.discoveryRepository, app.ytDlpRepository, app.musicRepository, app.settingsStore
+            app.discoveryRepository, app.ytDlpRepository, app.musicRepository, app.settingsStore, onPlayStream
         )
     }
     val state by viewModel.uiState.collectAsState()
@@ -114,7 +118,9 @@ fun BrowseCollectionScreen(
                             track = track,
                             isDownloading = track.videoId in state.downloadingIds,
                             isDownloaded = track.videoId in state.downloadedIds,
-                            onDownloadClick = { viewModel.onDownloadClick(track) }
+                            isLoadingStream = track.videoId in state.loadingStreamIds,
+                            onDownloadClick = { viewModel.onDownloadClick(track) },
+                            onPlayClick = { viewModel.onPlayClick(track) }
                         )
                     }
                 }
@@ -141,11 +147,17 @@ private fun BrowseTrackRow(
     track: BrowseTrack,
     isDownloading: Boolean,
     isDownloaded: Boolean,
-    onDownloadClick: () -> Unit
+    isLoadingStream: Boolean,
+    onDownloadClick: () -> Unit,
+    onPlayClick: () -> Unit
 ) {
     val context = LocalContext.current
     Row(
-        modifier = Modifier.fillMaxWidth().height(68.dp).padding(horizontal = 16.dp, vertical = 6.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(68.dp)
+            .clickable(enabled = !isLoadingStream, onClick = onPlayClick)
+            .padding(horizontal = 16.dp, vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Box(
@@ -175,6 +187,11 @@ private fun BrowseTrackRow(
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
+        }
+        if (isLoadingStream) {
+            CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+        } else {
+            IconButton(onClick = onPlayClick) { Icon(Icons.Default.PlayArrow, contentDescription = "Play") }
         }
         when {
             isDownloading -> CircularProgressIndicator(modifier = Modifier.size(24.dp), strokeWidth = 2.dp)
