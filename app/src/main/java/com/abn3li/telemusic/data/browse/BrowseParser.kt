@@ -140,11 +140,23 @@ object BrowseParser {
      * tradeoff the search-side parser makes for the same reason.
      */
     fun parseBrowseContent(response: JSONObject): BrowseContent {
+        val trackRenderers = collectRenderers(response, "musicResponsiveListItemRenderer")
         val tracks = LinkedHashMap<String, BrowseTrack>()
-        collectRenderers(response, "musicResponsiveListItemRenderer").forEach { renderer ->
+        trackRenderers.forEach { renderer ->
             parseTrackRow(renderer)?.let { tracks[it.videoId] = it }
         }
         if (tracks.isNotEmpty()) return BrowseContent(tracks = tracks.values.toList())
+
+        if (trackRenderers.isNotEmpty()) {
+            // Real renderers were found (an actual JSONObject walk, not a text search) but none
+            // produced a usable track - cheap enough to always log, and was exactly what traced
+            // the OMV/UGC filter bug above (see parseTrackRow's own doc) to a real cause instead
+            // of the misleading "check your connection" this used to surface as.
+            android.util.Log.w(
+                "BrowseParser",
+                "parseBrowseContent(): ${trackRenderers.size} musicResponsiveListItemRenderer found but 0 produced a usable track"
+            )
+        }
 
         val collections = LinkedHashMap<String, BrowseCollection>()
         collectRenderers(response, "musicTwoRowItemRenderer").forEach { renderer ->
@@ -164,10 +176,14 @@ object BrowseParser {
             ?: renderer.opt("navigationEndpoint").obj()?.opt("watchEndpoint").obj()?.optString("videoId")?.takeIf { it.isNotBlank() }
             ?: return null
 
-        val musicVideoType = overlayEndpoint?.opt("watchEndpointMusicSupportedConfigs").obj()
-            ?.opt("watchEndpointMusicConfig").obj()?.optString("musicVideoType").orEmpty()
-        if (musicVideoType == "MUSIC_VIDEO_TYPE_OMV" || musicVideoType == "MUSIC_VIDEO_TYPE_UGC") return null
-
+        // No musicVideoType (OMV/UGC) filter here, on purpose - traced via logcat to a real
+        // album ("Pop Motivation") whose tracks were all correctly found (65
+        // musicResponsiveListItemRenderer entries, real videoId/title present) but then every
+        // single one got silently dropped by that filter, producing 0 tracks with no error at
+        // all. A track being tagged "this also has an official music video" doesn't mean it
+        // isn't a real, playable song - parseTrackRow's only caller is album/playlist browsing
+        // (see parseBrowseContent), never a raw video search, so there's no "real video result
+        // mixed into song results" case here to filter out in the first place.
         val flexColumns = renderer.opt("flexColumns").arr()
         val title = flexColumns?.optJSONObject(0)?.opt("musicResponsiveListItemFlexColumnRenderer").obj()
             ?.opt("text").obj()?.runs().orEmpty().ifBlank { renderer.opt("title").obj()?.runs().orEmpty() }

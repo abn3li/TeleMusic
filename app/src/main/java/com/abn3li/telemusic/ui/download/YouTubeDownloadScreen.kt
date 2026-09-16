@@ -1,6 +1,7 @@
 package com.abn3li.telemusic.ui.download
 
 import android.net.Uri
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -114,6 +115,13 @@ fun YouTubeDownloadScreen(
     val state by viewModel.uiState.collectAsState()
     val pagerState = rememberPagerState(initialPage = state.selectedTab.ordinal) { YouTubeSearchTab.entries.size }
     val pagerScope = rememberCoroutineScope()
+
+    // System/gesture back while showing search results returns to Discovery first, not straight
+    // out of this screen - Discovery vs results is just this screen's own query.isBlank() state,
+    // not a separate nav destination, so without this the very first back press after a search
+    // popped the whole screen back to Library, skipping Discovery entirely. A second back press
+    // (query already blank, this handler disabled) falls through to the normal nav pop.
+    BackHandler(enabled = state.query.isNotBlank()) { viewModel.onQueryChange("") }
 
     // Swiping the pager is a second way to change tabs alongside tapping a label - both funnel
     // through viewModel.selectTab() so a swipe triggers the same lazy Playlists/Artists fetch a
