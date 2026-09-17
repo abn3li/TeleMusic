@@ -140,16 +140,29 @@ private fun MiniPlayerContent(
                 )
             }
 
-            // Play/Pause Button
-            IconButton(
-                onClick = onPlayPause,
-                modifier = Modifier.size(40.dp)
-            ) {
-                Icon(
-                    imageVector = if (state.isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
-                    contentDescription = if (state.isPlaying) "Pause" else "Play",
-                    tint = Color.White
-                )
+            // Play/Pause Button - a spinner in its place while THIS song is still loading
+            // (loadingSongId, see NowPlayingViewModel.loadCurrentQueuePosition's own doc) OR
+            // actively buffering (isBuffering, wired straight to ExoPlayer's own
+            // Player.STATE_BUFFERING) - not just whenever anything is loading. loadingSongId
+            // alone only covers the initial stream resolve; isBuffering is what actually lights
+            // up during a real playback stall/retry (a still-downloading Telegram file, a slow
+            // connection, ...), which used to show nothing here at all and just looked frozen.
+            // Same treatment NowPlayingScreen's own artwork spinner already gets.
+            if (state.loadingSongId == song.telegramMessageId || state.isBuffering) {
+                Box(modifier = Modifier.size(40.dp), contentAlignment = Alignment.Center) {
+                    CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp, color = Color.White)
+                }
+            } else {
+                IconButton(
+                    onClick = onPlayPause,
+                    modifier = Modifier.size(40.dp)
+                ) {
+                    Icon(
+                        imageVector = if (state.isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
+                        contentDescription = if (state.isPlaying) "Pause" else "Play",
+                        tint = Color.White
+                    )
+                }
             }
 
             // Next Button

@@ -453,6 +453,9 @@ class TdlibManager(private val context: Context) {
     /** Non-suspending - safe to call from a playback/loading thread. */
     fun getCachedFileProgress(fileId: Int): TdApi.File? = fileProgress[fileId]
 
+    /** Diagnostic only - see TdlibDataSource.open()'s own doc on why this is being checked. */
+    fun hasStartedDownload(fileId: Int): Boolean = fileId in downloadsStarted
+
     private suspend fun sendSuspend(function: TdApi.Function<*>): TdApi.Object =
         suspendCancellableCoroutine { cont ->
             client?.send(function) { result ->

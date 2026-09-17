@@ -205,11 +205,18 @@ def resolve_stream_url(video_id, format_selector="bestaudio[acodec^=opus]"):
     plain https:// URL exactly like any other source (see PlaybackController.playUri), so there's
     no new playback machinery needed, just a URL instead of a file path.
     """
-    # NOT pinned to the android client (search()'s own per-video fetch is, see its doc) - that
-    # was tried here too for the same latency win, but android's own format list doesn't
-    # reliably include the Opus formats [format_selector] asks for (251/bestaudio[acodec^=opus]),
-    # so pinning to it here made real playback fail outright rather than just resolve faster.
-    # Left as yt-dlp's own default client fallback chain (web first) - slower, but correct.
+    # NOT pinned to any single client. Two attempts at this both broke real playback outright
+    # ("Requested format is not available") instead of just resolving faster - android first
+    # (itag 251/Opus missing from its format list), then web_music (verified empirically: it
+    # doesn't reliably carry Opus either, same failure, same error, confirmed via logcat). Left
+    # as yt-dlp's own default multi-client fallback chain - slower, but the only version that's
+    # actually been confirmed correct across real videos. Do not re-attempt a single-client pin
+    # here without first verifying Opus availability across several real videos, not just one.
+    # A THIRD attempt reused one YoutubeDL instance across calls instead of building a fresh one
+    # each time (to skip its extractor-registry setup cost) - reverted too: real device timing
+    # showed calls getting SLOWER the more of them ran on the shared instance (2.95s -> 6.39s ->
+    # 10.24s), consistent with a shared HTTP session/connection compounding YouTube's own
+    # throttling. A fresh instance per call avoids that.
     opts = {
         "quiet": True,
         "no_warnings": True,
@@ -217,8 +224,10 @@ def resolve_stream_url(video_id, format_selector="bestaudio[acodec^=opus]"):
         "noplaylist": True,
         "skip_download": True,
     }
+    t0 = time.monotonic()
     with yt_dlp.YoutubeDL(opts) as ydl:
         info = ydl.extract_info(f"https://music.youtube.com/watch?v={video_id}", download=False)
+    print(f"[timing] resolve_stream_url({video_id}): {time.monotonic() - t0:.2f}s")
     entry = _entry_from_info(info)
     entry["url"] = info.get("url")
     return entry

@@ -115,6 +115,13 @@ class PlaybackController(context: Context) {
         playUri(File(filePath).toURI().toString().toUri(), songId, title, artist, artworkUrl)
     }
 
+    /** Stops the current song immediately, without starting anything new - used right when the
+     * user picks a different song, BEFORE any slow resolve step (a YouTube stream URL, a Telegram
+     * prebuffer wait) runs. Without this, the OLD song kept audibly playing through that whole
+     * wait, only actually stopping once playUri() finally ran for the new one - which read as
+     * "the old song won't stop" rather than "the new one is still loading". */
+    fun stop() { controller?.stop() }
+
     fun togglePlayPause() { controller?.let { if (it.isPlaying) it.pause() else it.play() } }
     fun seekTo(positionMs: Long) { controller?.seekTo(positionMs) }
     fun currentPositionMs(): Long = controller?.currentPosition ?: 0L

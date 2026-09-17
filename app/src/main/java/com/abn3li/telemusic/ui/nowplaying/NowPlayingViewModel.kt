@@ -376,6 +376,17 @@ class NowPlayingViewModel(
         loadJob = viewModelScope.launch {
             val songId = songIdOverride ?: queue.currentSongId() ?: return@launch
 
+            // Stops whatever was playing RIGHT NOW, before any of the slow work below (a
+            // YouTube stream resolve, a Telegram prebuffer wait) - see PlaybackController.stop's
+            // own doc for why this used to be missing: the old song kept audibly playing through
+            // that whole wait otherwise, which read as "it won't stop" rather than "the new one
+            // is loading". Skipped only when nothing was playing yet (first song of the app
+            // session) - nothing to stop, and stop() on an idle player is harmless anyway, but
+            // there's no reason to call it.
+            if (_uiState.value.song != null) {
+                playbackController.stop()
+            }
+
             _uiState.value = _uiState.value.copy(loadingSongId = songId)
 
             // Fast path: the song is almost always already in memory via allSongsMap (it's
@@ -409,7 +420,16 @@ class NowPlayingViewModel(
                 isShuffleEnabled = queue.isShuffleEnabled,
                 repeatMode = queue.repeatMode,
                 errorMessage = null,
-                loadingSongId = null,
+                // loadingSongId is deliberately NOT cleared here - it stays set through
+                // startPlayback() below, see that call's own note. Clearing it this early meant
+                // the artwork's own buffering spinner (NowPlayingScreen.kt, keyed on
+                // loadingSongId) switched off right as the real wait began for a YouTube-
+                // streamable row (see SongEntity.youtubeVideoId's own doc): resolving a fresh
+                // stream URL is a real ~2-3s network round trip (see
+                // MusicRepository.resolveDirectPlaybackUri), and nothing was showing during it -
+                // exactly what read as "shows zero info, no sign it's doing anything." A local/
+                // Telegram song resolves near-instantly either way, so this costs those nothing
+                // visible - the spinner just never has time to render for them.
                 // isDownloading belongs to whichever song was on screen when a download was
                 // started, not necessarily this new one - without resetting it here, skipping
                 // away from a song mid-download left the NEXT song showing a downloading
@@ -422,6 +442,14 @@ class NowPlayingViewModel(
             // Zero automatic lyrics fetch on song change! Only manual when user taps button.
 
             startPlayback(song)
+
+            // Only clears loadingSongId if this is still the song actually on screen - a fast
+            // skip to the next/previous song while a slow YouTube resolve was still in flight
+            // would otherwise clear the NEW song's own loading state out from under it once the
+            // old resolve finally finished.
+            if (_uiState.value.song?.telegramMessageId == song.telegramMessageId) {
+                _uiState.value = _uiState.value.copy(loadingSongId = null)
+            }
 
             // Streamed-only auto-cache bookkeeping (does NOT set isExplicitDownload). A local
             // import or a YouTube-streamable row (youtubeVideoId set) is already fully on-device
@@ -472,7 +500,16 @@ class NowPlayingViewModel(
         }
     }
 
-    fun togglePlayPause() = playbackController.togglePlayPause()
+    // Flips isPlaying in state immediately, not just the player itself - the icon otherwise
+    // only caught up on the NEXT 300ms position-tick poll (startPositionTicker below), which
+    // read as the wrong icon (still showing Play right after tapping it) sitting there for a
+    // beat before flipping. This is the standard optimistic-update pattern: assume the toggle
+    // succeeded and show that immediately, then let the next tick's real
+    // playbackController.isPlaying() read silently correct it if it didn't.
+    fun togglePlayPause() {
+        playbackController.togglePlayPause()
+        _uiState.value = _uiState.value.copy(isPlaying = !_uiState.value.isPlaying)
+    }
 
     fun seekTo(positionMs: Long) {
         // Write the target position into state BEFORE telling the player to seek, not after.

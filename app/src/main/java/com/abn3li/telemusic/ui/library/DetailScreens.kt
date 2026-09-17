@@ -68,6 +68,8 @@ private class DetailViewModel(
     }
     fun removeDownload(song: SongEntity) = viewModelScope.launch { repository.removeDownload(song) }
     fun clearSong(song: SongEntity) = viewModelScope.launch { repository.clearSong(song) }
+    suspend fun editSongAndFetchArtwork(song: SongEntity, title: String, artist: String): Boolean =
+        repository.editSongAndFetchArtwork(song, title, artist)
     fun toggleHiddenFromTracks() {
         val toggle = onToggleHiddenFromTracks ?: return
         val current = isHiddenFromTracks?.value ?: return
@@ -328,6 +330,7 @@ private fun SongListScaffold(
                                 }
                                 vm.clearSong(song)
                             },
+                            onEditAndFetchArtwork = { title, artist -> vm.editSongAndFetchArtwork(song, title, artist) },
                             primaryColor = primaryColor,
                             onSurfaceVariant = onSurfaceVariant,
                             titleStyle = titleStyle,

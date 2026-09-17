@@ -7,6 +7,7 @@ import com.abn3li.telemusic.data.local.SongEntity
 data class SongUiModel(
     val id: Long,
     val title: String,
+    val artist: String,
     val subtitle: String,
     // The small pre-decoded local copy - see ThumbnailGenerator. Falls back to the full-res
     // albumArtUrl only until the one-time background generation catches up (freshly-synced
@@ -21,6 +22,7 @@ data class SongUiModel(
 fun SongEntity.toUiModel(isDownloading: Boolean): SongUiModel = SongUiModel(
     id = telegramMessageId,
     title = title,
+    artist = artist,
     subtitle = if (album.isNullOrBlank()) artist else "$artist • $album",
     listArtworkUrl = thumbnailPath ?: albumArtUrl,
     isFavorite = isFavorite,

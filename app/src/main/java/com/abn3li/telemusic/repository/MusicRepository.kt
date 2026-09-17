@@ -53,6 +53,15 @@ class MusicRepository(
 ) {
     private val appContext = context.applicationContext
 
+    // Song ids already confirmed to have a working telegramFileId THIS app run - see
+    // getFreshFileIdForSong's own doc for why this exists: without it, EVERY play of a Telegram
+    // song paid a real TDLib round trip (OpenChat + GetMessage) to re-verify a file id that, in
+    // the common case (replaying a song, or the queue auto-advancing through recently-played
+    // ones), was already confirmed fresh moments ago. In-memory only, not persisted - cleared on
+    // every fresh sync (see syncFromChannel), since that's the one thing that's actually shown to
+    // rotate a song's real file id out from under it.
+    private val verifiedFreshFileIdThisRun = java.util.concurrent.ConcurrentHashMap.newKeySet<Long>()
+
     // Live mirrors of the three smart playlists' own "Hide from tracks" flags (see
     // AppSettingsStore's own doc - they're settings, not DB rows, so they need their own
     // reactive holder here) - this repository is a single app-wide instance, so a toggle made
@@ -272,6 +281,12 @@ class MusicRepository(
     // ---- Sync from Telegram ----
     suspend fun syncFromChannel(chatId: Long) {
         settingsStore.lastSyncedChatId = chatId
+        // A fresh sync is the one thing that's actually shown to rotate a song's real file id
+        // out from under it (see verifiedFreshFileIdThisRun's own doc) - every song this sync
+        // touches gets its telegramFileId written fresh below anyway, so clearing this just means
+        // the NEXT play of each song trusts that freshly-synced value instead of a stale "already
+        // verified" flag from before this sync ran.
+        verifiedFreshFileIdThisRun.clear()
         var fromMessageId = 0L
         do {
             val batch = tdlibManager.fetchAudioMessages(chatId, fromMessageId)
@@ -401,6 +416,28 @@ class MusicRepository(
             )
             if (finalArtUrl != null) ensureThumbnail(song.telegramMessageId, finalArtUrl)
         }
+    }
+
+    /** The long-press-on-a-coverless-song flow: lets the user correct a mis-tagged title/artist
+     * (common for Telegram audio with garbage or missing tags) and re-runs the same
+     * iTunes -> Deezer -> MusicBrainz lookup enrichMissingMetadata uses, keyed off the user's own
+     * correction instead of a guess. Unlike that bulk pass, this ALWAYS overwrites title/artist -
+     * correcting them is the whole point of this flow, not a fallback for "Unknown title". Returns
+     * whether artwork was actually found; the title/artist correction is saved either way. */
+    suspend fun editSongAndFetchArtwork(song: SongEntity, newTitle: String, newArtist: String): Boolean {
+        val enriched = metadataRepository.enrich("$newTitle $newArtist".trim())
+        songDao.update(
+            song.copy(
+                title = newTitle,
+                artist = newArtist,
+                album = enriched?.album ?: song.album,
+                albumArtUrl = enriched?.artworkUrl ?: song.albumArtUrl,
+                metadataEnriched = true
+            )
+        )
+        val artUrl = enriched?.artworkUrl ?: return false
+        ensureThumbnail(song.telegramMessageId, artUrl)
+        return true
     }
 
     /** Generates a small local thumbnail for [songId] from [artUrl] if it doesn't have one yet. */
@@ -572,6 +609,12 @@ class MusicRepository(
         // id that could never exist, stalling this song's state update the whole time.
         if (song.isLocalImport || song.telegramFileId == 0) return song.telegramFileId
 
+        // Already confirmed working THIS run - skip the TDLib round trip entirely rather than
+        // re-verifying a file id that was just proven fresh moments ago (see
+        // verifiedFreshFileIdThisRun's own doc). This is the fast path for the common case:
+        // replaying a song, or the queue auto-advancing through recently-played ones.
+        if (song.telegramMessageId in verifiedFreshFileIdThisRun) return song.telegramFileId
+
         // This song's OWN remembered chat, from a previous resolve (see SongEntity.resolvedChatId's
         // own doc) - tried FIRST, ahead of the app-wide lastSyncedChatId, since that single global
         // value only ever reflects whichever chat was resolved MOST RECENTLY across every song,
@@ -587,6 +630,7 @@ class MusicRepository(
                 if (freshId != song.telegramFileId) {
                     songDao.update(song.copy(telegramFileId = freshId))
                 }
+                verifiedFreshFileIdThisRun.add(song.telegramMessageId)
                 return freshId
             }
         }
@@ -604,6 +648,7 @@ class MusicRepository(
             val freshId = tdlibManager.getFreshFileId(channelId, song.telegramMessageId)
             if (freshId != null) {
                 songDao.update(song.copy(telegramFileId = freshId, resolvedChatId = channelId))
+                verifiedFreshFileIdThisRun.add(song.telegramMessageId)
                 return freshId
             }
         }
@@ -635,6 +680,7 @@ class MusicRepository(
             val (chatId, freshId) = found
             settingsStore.lastSyncedChatId = chatId
             songDao.update(song.copy(telegramFileId = freshId!!, resolvedChatId = chatId))
+            verifiedFreshFileIdThisRun.add(song.telegramMessageId)
             return freshId!!
         }
 

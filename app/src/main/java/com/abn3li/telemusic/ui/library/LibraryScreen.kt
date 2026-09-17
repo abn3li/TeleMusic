@@ -574,6 +574,9 @@ private fun SongList(
                             viewModel.clearSong(songEntity)
                         }
                     },
+                    onEditAndFetchArtwork = remember(songEntity) {
+                        { title, artist -> viewModel.editSongAndFetchArtwork(songEntity, title, artist) }
+                    },
                     primaryColor = primaryColor,
                     onSurfaceVariant = onSurfaceVariant,
                     titleStyle = titleStyle,

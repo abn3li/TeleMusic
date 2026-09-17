@@ -33,6 +33,10 @@ class TdlibDataSource(private val tdlibManager: TdlibManager) : BaseDataSource(t
     override fun open(dataSpec: DataSpec): Long {
         dataSpecUri = dataSpec.uri
         fileId = dataSpec.uri.lastPathSegment?.toIntOrNull() ?: -1
+        // Diagnostic only - see the header hex-dump logged just below, right before the
+        // extractor probe would run. Answers whether TDLib had already seen this fileId THIS
+        // session (a fresh DownloadFile request vs one that was gated to a plain status check).
+        val alreadyStartedBefore = tdlibManager.hasStartedDownload(fileId)
 
         // Safely close previous handle if open
         try {
@@ -75,7 +79,16 @@ class TdlibDataSource(private val tdlibManager: TdlibManager) : BaseDataSource(t
             throw IOException("Audio file does not exist on disk at $filePath (fileId=$fileId)")
         }
 
-        Log.d(TAG, "open() fileId=$fileId path=$filePath pos=${dataSpec.position} size=${fileOnDisk.length()}")
+        Log.d(TAG, "open() fileId=$fileId path=$filePath pos=${dataSpec.position} size=${fileOnDisk.length()} alreadyStartedBefore=$alreadyStartedBefore")
+        // Diagnostic only - a real header hex dump beats guessing at container detection from
+        // the outside. Read-only peek, does not disturb the RandomAccessFile opened just below.
+        runCatching {
+            RandomAccessFile(fileOnDisk, "r").use { peek ->
+                val head = ByteArray(minOf(32, fileOnDisk.length().toInt()))
+                peek.readFully(head)
+                Log.d(TAG, "open() fileId=$fileId header=${head.joinToString(" ") { "%02X".format(it) }}")
+            }
+        }.onFailure { Log.w(TAG, "open() fileId=$fileId header peek failed: ${it.message}") }
 
         try {
             raf = RandomAccessFile(fileOnDisk, "r")
@@ -130,7 +143,19 @@ class TdlibDataSource(private val tdlibManager: TdlibManager) : BaseDataSource(t
         while (waited < maxWaitMs) {
             progress = tdlibManager.getCachedFileProgress(fileId)
             val path = progress?.local?.path
-            val downloaded = progress?.local?.downloadedSize ?: 0L
+            // downloadedPrefixSize, NOT downloadedSize - TDLib's own docs on LocalFile.downloadedSize
+            // are explicit: "Total downloaded file size... The actual file size may be bigger, and
+            // some parts of it may contain garbage." TDLib streams in a way that doesn't guarantee
+            // bytes arrive in front-to-back order, so downloadedSize can report hundreds of KB
+            // "downloaded" while the actual bytes at the very start of the file (position 0, where
+            // every extractor's own container-sniffing reads from) are still unwritten zeros - which
+            // is exactly what a real device repro showed (see this fix's own commit/PR history: a
+            // header hex-dump logged all zeros despite downloadedSize already reporting 800KB+).
+            // downloadedPrefixSize is the field TDLib actually provides for "how many bytes starting
+            // from downloadOffset are safely readable right now" - downloadOffset is always 0 here
+            // (see TdlibManager.beginStreamingDownload's own DownloadFile call), so this directly
+            // answers "is the start of the file actually valid yet".
+            val downloaded = progress?.local?.downloadedPrefixSize ?: 0L
             val completed = progress?.local?.isDownloadingCompleted ?: false
             val totalSize = progress?.size?.takeIf { it > 0 }?.toLong()
                 ?: progress?.expectedSize?.takeIf { it > 0 }?.toLong()
@@ -304,8 +329,15 @@ class TdlibDataSource(private val tdlibManager: TdlibManager) : BaseDataSource(t
             // point TDLib has actually reported real progress. open() already gets this right
             // (defaults to false) - this was the one place still defaulting to true.
             val completed = progress?.local?.isDownloadingCompleted ?: false
-            val currentDiskLength = raf?.length() ?: 0L
-            val availableOnDisk = maxOf(0L, currentDiskLength - readPosition)
+            // downloadedPrefixSize, NOT raf.length() - see waitForFileAndBytes's own doc on why
+            // downloadedSize/file-length-on-disk both overstate what's actually safe to read
+            // (TDLib pre-sizes the file, so its length reflects the eventual total almost
+            // immediately, regardless of how much of THAT range is real data vs still-zero-filled).
+            // completed short-circuits this once the whole file is genuinely done, since
+            // downloadedPrefixSize's own doc only promises accuracy "if isDownloadingCompleted is
+            // false" - trusting the real disk length only becomes safe at that point.
+            val safeDownloadedBytes = if (completed) (raf?.length() ?: 0L) else (progress?.local?.downloadedPrefixSize ?: 0L)
+            val availableOnDisk = maxOf(0L, safeDownloadedBytes - readPosition)
 
             if (availableOnDisk > 0) {
                 val safeToRead = minOf(toRead.toLong(), availableOnDisk).toInt()

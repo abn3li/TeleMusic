@@ -1,7 +1,9 @@
 package com.abn3li.telemusic.ui.library
 
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -32,6 +34,7 @@ import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import com.abn3li.telemusic.data.local.PlaylistEntity
+import kotlinx.coroutines.launch
 
 // Recomputing this per row, per recomposition, added up across hundreds of rows during a
 // fling - RoundedCornerShape at a fixed dp doesn't depend on composition/theme at all, so it's
@@ -57,6 +60,7 @@ private fun RowIconButton(onClick: () -> Unit, content: @Composable () -> Unit) 
     )
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun SongRow(
     song: SongUiModel,
@@ -68,6 +72,11 @@ fun SongRow(
     onCreatePlaylistAndAdd: (String) -> Unit,
     onDeleteDownload: () -> Unit,
     onClearSong: () -> Unit,
+    // Long-press entry point for a coverless song (see the dialog below) - takes the user's
+    // corrected title/artist and returns whether artwork was actually found for it. Only ever
+    // invoked when the row has no artwork to begin with (see the combinedClickable below), so
+    // there's no need for a separate "does this song need this" check here.
+    onEditAndFetchArtwork: suspend (title: String, artist: String) -> Boolean,
     modifier: Modifier = Modifier,
     primaryColor: Color = MaterialTheme.colorScheme.primary,
     onSurfaceVariant: Color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -85,6 +94,8 @@ fun SongRow(
     val context = LocalContext.current
     var menuExpanded by remember { mutableStateOf(false) }
     var showCreateDialog by remember { mutableStateOf(false) }
+    var showEditArtworkDialog by remember { mutableStateOf(false) }
+    val hasArtwork = !song.listArtworkUrl.isNullOrEmpty()
 
     val imageRequest = remember(song.listArtworkUrl, context) {
         ImageRequest.Builder(context)
@@ -100,7 +111,12 @@ fun SongRow(
         modifier = modifier
             .fillMaxWidth()
             .height(68.dp)
-            .clickable(onClick = onClick)
+            .combinedClickable(
+                onClick = onClick,
+                // Only a coverless row responds to a long-press - there's nothing to fix by
+                // editing name/artist on a row that already has artwork.
+                onLongClick = if (!hasArtwork) { { showEditArtworkDialog = true } } else null
+            )
             .padding(horizontal = 12.dp, vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -310,6 +326,78 @@ fun SongRow(
             },
             dismissButton = {
                 TextButton(onClick = { showCreateDialog = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+
+    if (showEditArtworkDialog) {
+        var editTitle by remember { mutableStateOf(song.title) }
+        var editArtist by remember { mutableStateOf(song.artist) }
+        var isFetching by remember { mutableStateOf(false) }
+        var notFound by remember { mutableStateOf(false) }
+        val scope = rememberCoroutineScope()
+
+        AlertDialog(
+            onDismissRequest = { if (!isFetching) showEditArtworkDialog = false },
+            title = { Text("Edit & fetch artwork") },
+            text = {
+                Column {
+                    Text(
+                        "Correct the title/artist below, then fetch artwork for it.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = onSurfaceVariant
+                    )
+                    Spacer(Modifier.height(12.dp))
+                    OutlinedTextField(
+                        value = editTitle,
+                        onValueChange = { editTitle = it; notFound = false },
+                        label = { Text("Title") },
+                        singleLine = true,
+                        enabled = !isFetching,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    OutlinedTextField(
+                        value = editArtist,
+                        onValueChange = { editArtist = it; notFound = false },
+                        label = { Text("Artist") },
+                        singleLine = true,
+                        enabled = !isFetching,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    if (notFound) {
+                        Spacer(Modifier.height(8.dp))
+                        Text(
+                            "Name updated, but no artwork was found for that search.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.error
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    enabled = !isFetching && editTitle.isNotBlank() && editArtist.isNotBlank(),
+                    onClick = {
+                        scope.launch {
+                            isFetching = true
+                            val found = onEditAndFetchArtwork(editTitle.trim(), editArtist.trim())
+                            isFetching = false
+                            if (found) showEditArtworkDialog = false else notFound = true
+                        }
+                    }
+                ) {
+                    if (isFetching) {
+                        CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                    } else {
+                        Text("Fetch artwork")
+                    }
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showEditArtworkDialog = false }, enabled = !isFetching) {
                     Text("Cancel")
                 }
             }
