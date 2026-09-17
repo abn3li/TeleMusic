@@ -16,6 +16,8 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.PlatformTextStyle
@@ -166,6 +168,7 @@ private fun SongListScaffold(
     }
 
     Scaffold(
+        containerColor = BgColor,
         topBar = {
             TopAppBar(
                 title = {
@@ -176,6 +179,7 @@ private fun SongListScaffold(
                     // other truncated title in this app already gets.
                     Text(
                         text = title,
+                        color = Color.White,
                         style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
                         maxLines = 2,
                         overflow = TextOverflow.Ellipsis
@@ -183,10 +187,10 @@ private fun SongListScaffold(
                 },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = Color.White)
                     }
                 },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surface)
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = BgColor)
             )
         }
     ) { padding ->
@@ -195,19 +199,25 @@ private fun SongListScaffold(
                 .padding(padding)
                 .fillMaxSize()
         ) {
+            // Same rounded-top CardColor panel every Library tab (Tracks/Albums/Artists/
+            // Playlists) already wraps its content in - this screen used to be plain default
+            // Material colors sitting directly on the scaffold, which read as a different,
+            // unstyled screen next to the rest of the redesigned app.
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .clip(RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp))
+                    .background(CardColor)
+            ) {
             if (songs.isEmpty()) {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Text(
-                        text = "No songs here yet",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
+                    Text(text = "No songs here yet", style = MaterialTheme.typography.bodyMedium, color = TextMuted)
                 }
             } else {
                 LazyColumn(
-                    contentPadding = PaddingValues(start = 16.dp, top = 8.dp, end = 16.dp, bottom = 8.dp + LocalMiniPlayerInset.current)
+                    contentPadding = PaddingValues(start = 16.dp, top = 16.dp, end = 16.dp, bottom = 8.dp + LocalMiniPlayerInset.current)
                 ) {
-                    // Header section with Samsung rounded album art & Play All / Shuffle buttons
+                    // Header section with rounded album art & Play All / Shuffle buttons
                     item {
                         Column(
                             modifier = Modifier
@@ -215,11 +225,12 @@ private fun SongListScaffold(
                                 .padding(vertical = 12.dp),
                             horizontalAlignment = Alignment.CenterHorizontally
                         ) {
-                            Surface(
-                                shape = RoundedCornerShape(24.dp),
-                                color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                                shadowElevation = 4.dp,
-                                modifier = Modifier.size(160.dp)
+                            Box(
+                                modifier = Modifier
+                                    .size(160.dp)
+                                    .clip(RoundedCornerShape(20.dp))
+                                    .background(BgColor),
+                                contentAlignment = Alignment.Center
                             ) {
                                 if (!albumArtUrl.isNullOrEmpty()) {
                                     AsyncImage(
@@ -229,19 +240,12 @@ private fun SongListScaffold(
                                         modifier = Modifier.fillMaxSize()
                                     )
                                 } else {
-                                    Box(
-                                        modifier = Modifier
-                                            .fillMaxSize()
-                                            .background(MaterialTheme.colorScheme.surfaceContainerHighest),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        Icon(
-                                            imageVector = Icons.Default.MusicNote,
-                                            contentDescription = null,
-                                            modifier = Modifier.size(64.dp),
-                                            tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.8f)
-                                        )
-                                    }
+                                    Icon(
+                                        imageVector = Icons.Default.MusicNote,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(64.dp),
+                                        tint = TextMuted
+                                    )
                                 }
                             }
 
@@ -250,10 +254,10 @@ private fun SongListScaffold(
                             Text(
                                 text = "${songs.size} ${if (songs.size == 1) "track" else "tracks"}",
                                 style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                color = TextMuted
                             )
 
-                            Spacer(Modifier.height(12.dp))
+                            Spacer(Modifier.height(14.dp))
 
                             Row(
                                 horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -261,11 +265,13 @@ private fun SongListScaffold(
                             ) {
                                 Button(
                                     onClick = { if (songIds.isNotEmpty()) onSongClick(songIds, 0) },
+                                    shape = RoundedCornerShape(50),
+                                    colors = ButtonDefaults.buttonColors(containerColor = AccentGreen, contentColor = OnAccentGreen),
                                     contentPadding = PaddingValues(horizontal = 20.dp, vertical = 10.dp)
                                 ) {
                                     Icon(Icons.Default.PlayArrow, contentDescription = null, modifier = Modifier.size(20.dp))
                                     Spacer(Modifier.width(6.dp))
-                                    Text("Play All")
+                                    Text("Play All", fontWeight = FontWeight.Medium)
                                 }
 
                                 FilledTonalButton(
@@ -275,11 +281,13 @@ private fun SongListScaffold(
                                             onSongClick(songIds, randomIndex)
                                         }
                                     },
+                                    shape = RoundedCornerShape(50),
+                                    colors = ButtonDefaults.filledTonalButtonColors(containerColor = DividerColor, contentColor = Color.White),
                                     contentPadding = PaddingValues(horizontal = 20.dp, vertical = 10.dp)
                                 ) {
                                     Icon(Icons.Default.Shuffle, contentDescription = null, modifier = Modifier.size(20.dp))
                                     Spacer(Modifier.width(6.dp))
-                                    Text("Shuffle")
+                                    Text("Shuffle", fontWeight = FontWeight.Medium)
                                 }
                             }
 
@@ -292,6 +300,8 @@ private fun SongListScaffold(
                                 Spacer(Modifier.height(10.dp))
                                 OutlinedButton(
                                     onClick = { vm.toggleHiddenFromTracks() },
+                                    shape = RoundedCornerShape(50),
+                                    colors = ButtonDefaults.outlinedButtonColors(contentColor = TextSecondary),
                                     contentPadding = PaddingValues(horizontal = 20.dp, vertical = 10.dp)
                                 ) {
                                     Icon(
@@ -337,10 +347,11 @@ private fun SongListScaffold(
                             subtitleStyle = subtitleStyle
                         )
                         if (index < songs.lastIndex) {
-                            HorizontalDivider(thickness = 0.5.dp, color = MaterialTheme.colorScheme.outlineVariant)
+                            HorizontalDivider(thickness = 0.5.dp, color = DividerColor)
                         }
                     }
                 }
+            }
             }
         }
     }

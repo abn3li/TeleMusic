@@ -49,7 +49,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.composed
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.PathEffect
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
@@ -57,6 +62,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.PlatformTextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.rememberAsyncImagePainter
@@ -77,15 +83,84 @@ import kotlin.math.roundToInt
 
 // The redesign's own dark palette - deliberately local to this screen (hardcoded, not routed
 // through MaterialTheme) so it matches the pasted mockup exactly rather than approximating it
-// with the app's existing MonochromeDarkColorScheme tokens.
-private val BgColor = Color(0xFF000000)
-private val CardColor = Color(0xFF19191C)
-private val TextSecondary = Color(0xFFA9A9A6)
-private val TextMuted = Color(0xFF8B8B88)
-private val AccentGreen = Color(0xFF1D9E75)
-private val OnAccentGreen = Color(0xFF04342C)
-private val ChevronColor = Color(0xFF5F5F5C)
-private val DividerColor = Color(0xFF232326)
+// with the app's existing MonochromeDarkColorScheme tokens. `internal` (not `private`) so
+// DetailScreens.kt (same package) can match this exact palette for Album/Artist/Playlist detail
+// screens instead of drifting to its own approximation of it.
+internal val BgColor = Color(0xFF000000)
+internal val CardColor = Color(0xFF19191C)
+internal val TextSecondary = Color(0xFFA9A9A6)
+internal val TextMuted = Color(0xFF8B8B88)
+internal val AccentGreen = Color(0xFF1D9E75)
+internal val OnAccentGreen = Color(0xFF04342C)
+internal val ChevronColor = Color(0xFF5F5F5C)
+internal val DividerColor = Color(0xFF232326)
+private val GridCardBg = Color(0x0FF7F1EA)
+private val GridCardLabel = Color(0xFFF7F1EA)
+private val GridCardSubtitle = Color(0xFF837A72)
+private val GridCardAccentTan = Color(0xFFC4A67E)
+
+// Sits behind drawContent (not clipped by it) since a dashed stroke drawn ON the already-clipped
+// background would have its outer half cut off by the same RoundedCornerShape clip - drawing it
+// in drawWithContent's own DrawScope, after drawContent(), paints it on top instead.
+private fun Modifier.dashedBorder(color: Color, cornerRadius: Dp, strokeWidth: Dp = 1.dp): Modifier =
+    this.drawWithContent {
+        drawContent()
+        drawRoundRect(
+            color = color,
+            cornerRadius = CornerRadius(cornerRadius.toPx(), cornerRadius.toPx()),
+            style = Stroke(width = strokeWidth.toPx(), pathEffect = PathEffect.dashPathEffect(floatArrayOf(8f, 6f), 0f))
+        )
+    }
+
+/** A compact 2-up grid cell for the Playlists tab's smart shortcuts (Liked/Downloaded/Telegram)
+ * and the "New playlist" action - [iconContent] fills a 40dp/10dp-rounded square so each cell can
+ * paint its own icon treatment (a gradient + glyph, or Telegram's own 4-color quadrant swatch)
+ * without SmartPlaylistGridCard needing to know about any of them. */
+@Composable
+private fun SmartPlaylistGridCard(
+    label: String,
+    subtitle: String?,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    dashed: Boolean = false,
+    iconContent: @Composable () -> Unit
+) {
+    Row(
+        modifier = modifier
+            .height(64.dp)
+            .clip(RoundedCornerShape(14.dp))
+            .background(GridCardBg)
+            .then(if (dashed) Modifier.dashedBorder(GridCardAccentTan.copy(alpha = 0.4f), 14.dp) else Modifier)
+            .clickableNoRipple(onClick)
+            .padding(horizontal = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        Box(
+            modifier = Modifier.size(40.dp).clip(RoundedCornerShape(10.dp)),
+            contentAlignment = Alignment.Center
+        ) {
+            iconContent()
+        }
+        // fill = true (the default) - weight(1f, fill = false) let this column shrink to its
+        // own content width, which cut the text off early inside a half-width grid cell instead
+        // of using the full remaining space before ellipsizing.
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = label,
+                color = if (dashed) GridCardAccentTan else GridCardLabel,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Bold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            if (subtitle != null) {
+                Spacer(Modifier.height(1.dp))
+                Text(text = subtitle, color = GridCardSubtitle, fontSize = 11.5.sp, maxLines = 1)
+            }
+        }
+    }
+}
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
@@ -755,45 +830,6 @@ private fun ArtistsList(artists: List<ArtistSummary>, onArtistClick: (String) ->
 }
 
 @Composable
-private fun SmartPlaylistRow(
-    label: String,
-    subtitle: String,
-    icon: ImageVector,
-    iconTint: Color,
-    iconBg: Color,
-    onClick: () -> Unit
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(16.dp))
-            .background(DividerColor)
-            .clickableNoRipple(onClick)
-            .padding(horizontal = 14.dp, vertical = 12.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Box(
-            modifier = Modifier.size(48.dp).clip(RoundedCornerShape(12.dp)).background(iconBg),
-            contentAlignment = Alignment.Center
-        ) {
-            Icon(imageVector = icon, contentDescription = null, tint = iconTint, modifier = Modifier.size(22.dp))
-        }
-        Spacer(Modifier.width(14.dp))
-        Column(modifier = Modifier.weight(1f)) {
-            Text(text = label, color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Medium)
-            Spacer(Modifier.height(2.dp))
-            Text(text = subtitle, color = TextMuted, fontSize = 13.sp)
-        }
-        Icon(
-            imageVector = Icons.AutoMirrored.Filled.PlaylistPlay,
-            contentDescription = null,
-            tint = ChevronColor,
-            modifier = Modifier.size(18.dp)
-        )
-    }
-}
-
-@Composable
 private fun PlaylistsList(
     playlists: List<PlaylistSummary>,
     likedCount: Int,
@@ -807,6 +843,7 @@ private fun PlaylistsList(
     var showCreateDialog by remember { mutableStateOf(false) }
 
     fun trackWord(count: Int) = "$count ${if (count == 1) "track" else "tracks"}"
+    fun playlistWord(count: Int) = "$count ${if (count == 1) "playlist" else "playlists"}"
 
     Box(
         modifier = Modifier
@@ -819,48 +856,76 @@ private fun PlaylistsList(
         contentPadding = PaddingValues(start = 16.dp, top = 12.dp, end = 16.dp, bottom = 12.dp + LocalMiniPlayerInset.current),
         verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
-        item(key = "new_playlist_button") {
-            Button(
-                onClick = { showCreateDialog = true },
-                modifier = Modifier.fillMaxWidth().height(48.dp),
-                shape = RoundedCornerShape(14.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = AccentGreen, contentColor = OnAccentGreen)
-            ) {
-                Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
-                Spacer(Modifier.width(8.dp))
-                Text(text = "New playlist", fontSize = 15.sp, fontWeight = FontWeight.Medium)
+        // 2x2 grid: Liked | Downloaded on top, Telegram Songs | New playlist below - "New
+        // playlist" moved to the last cell (bottom-right) instead of its own full-width button.
+        item(key = "smart_playlists_grid") {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    SmartPlaylistGridCard(
+                        label = SmartPlaylistKind.LIKED.label,
+                        subtitle = trackWord(likedCount),
+                        modifier = Modifier.weight(1f),
+                        onClick = remember(onSmartPlaylistClick) { { onSmartPlaylistClick(SmartPlaylistKind.LIKED) } }
+                    ) {
+                        Box(
+                            modifier = Modifier.fillMaxSize().background(Brush.linearGradient(listOf(Color(0xFF7A3B3B), Color(0xFF4A2020)))),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(Icons.Default.Favorite, contentDescription = null, tint = Color(0xFFE88A7A), modifier = Modifier.size(18.dp))
+                        }
+                    }
+                    SmartPlaylistGridCard(
+                        label = SmartPlaylistKind.DOWNLOADED.label,
+                        subtitle = trackWord(downloadedCount),
+                        modifier = Modifier.weight(1f),
+                        onClick = remember(onSmartPlaylistClick) { { onSmartPlaylistClick(SmartPlaylistKind.DOWNLOADED) } }
+                    ) {
+                        Box(
+                            modifier = Modifier.fillMaxSize().background(Brush.linearGradient(listOf(Color(0xFF3D5C46), Color(0xFF24382A)))),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(Icons.Default.Download, contentDescription = null, tint = Color(0xFF8FDBA6), modifier = Modifier.size(17.dp))
+                        }
+                    }
+                }
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    SmartPlaylistGridCard(
+                        label = SmartPlaylistKind.TELEGRAM.label,
+                        subtitle = trackWord(telegramCount),
+                        modifier = Modifier.weight(1f),
+                        onClick = remember(onSmartPlaylistClick) { { onSmartPlaylistClick(SmartPlaylistKind.TELEGRAM) } }
+                    ) {
+                        Column(Modifier.fillMaxSize()) {
+                            Row(Modifier.weight(1f).fillMaxWidth()) {
+                                Box(Modifier.weight(1f).fillMaxHeight().background(Color(0xFF6B5A8F)))
+                                Box(Modifier.weight(1f).fillMaxHeight().background(Color(0xFF8F5A5A)))
+                            }
+                            Row(Modifier.weight(1f).fillMaxWidth()) {
+                                Box(Modifier.weight(1f).fillMaxHeight().background(Color(0xFF5A8F7C)))
+                                Box(Modifier.weight(1f).fillMaxHeight().background(Color(0xFF8F7C5A)))
+                            }
+                        }
+                    }
+                    SmartPlaylistGridCard(
+                        label = "New playlist",
+                        // A second line, same as every other cell - a lone centered line read as
+                        // visually "off" next to three two-line cards even once all four shared
+                        // the same fixed height. Updates live with the real playlist count rather
+                        // than staying a static "0" once the user actually creates one.
+                        subtitle = playlistWord(playlists.size),
+                        modifier = Modifier.weight(1f),
+                        dashed = true,
+                        onClick = { showCreateDialog = true }
+                    ) {
+                        Box(
+                            modifier = Modifier.fillMaxSize().background(Color(0x14F7F1EA)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(Icons.Default.Add, contentDescription = null, tint = GridCardAccentTan, modifier = Modifier.size(16.dp))
+                        }
+                    }
+                }
             }
-        }
-
-        item(key = "smart_liked") {
-            SmartPlaylistRow(
-                label = SmartPlaylistKind.LIKED.label,
-                subtitle = trackWord(likedCount),
-                icon = Icons.Default.Favorite,
-                iconTint = Color(0xFFF0997B),
-                iconBg = Color(0xFF4A1B0C),
-                onClick = remember(onSmartPlaylistClick) { { onSmartPlaylistClick(SmartPlaylistKind.LIKED) } }
-            )
-        }
-        item(key = "smart_telegram") {
-            SmartPlaylistRow(
-                label = SmartPlaylistKind.TELEGRAM.label,
-                subtitle = trackWord(telegramCount),
-                icon = Icons.Default.Send,
-                iconTint = Color(0xFF85B7EB),
-                iconBg = Color(0xFF042C53),
-                onClick = remember(onSmartPlaylistClick) { { onSmartPlaylistClick(SmartPlaylistKind.TELEGRAM) } }
-            )
-        }
-        item(key = "smart_downloaded") {
-            SmartPlaylistRow(
-                label = SmartPlaylistKind.DOWNLOADED.label,
-                subtitle = trackWord(downloadedCount),
-                icon = Icons.Default.Download,
-                iconTint = Color(0xFF97C459),
-                iconBg = Color(0xFF173404),
-                onClick = remember(onSmartPlaylistClick) { { onSmartPlaylistClick(SmartPlaylistKind.DOWNLOADED) } }
-            )
         }
 
         if (playlists.isNotEmpty()) {
