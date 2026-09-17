@@ -79,6 +79,25 @@ class MusicRepository(
     fun setHideTelegramFromTracks(hidden: Boolean) { settingsStore.hideTelegramFromTracks = hidden; _hideTelegram.value = hidden }
     fun setHideDownloadedFromTracks(hidden: Boolean) { settingsStore.hideDownloadedFromTracks = hidden; _hideDownloaded.value = hidden }
 
+    // Same reactive-mirror-of-a-setting pattern as the hide-from-tracks flags above - the
+    // Settings screen's "Appearance" row writes here, and every screen reading
+    // rememberAppearanceStyle() (Library, detail screens, Settings itself) picks it up live.
+    private val _appearanceStyle = MutableStateFlow(settingsStore.appearanceStyle)
+    fun observeAppearanceStyle(): StateFlow<com.abn3li.telemusic.data.settings.AppearanceStyle> = _appearanceStyle
+    fun setAppearanceStyle(style: com.abn3li.telemusic.data.settings.AppearanceStyle) {
+        settingsStore.appearanceStyle = style
+        _appearanceStyle.value = style
+    }
+
+    // Same pattern - which blob palette AmbientBlurBackground draws (see AmbientBackground.kt's
+    // blobColorsFor()) when AMBIENT_BLUR is the selected appearance.
+    private val _ambientColorSet = MutableStateFlow(settingsStore.ambientColorSet)
+    fun observeAmbientColorSet(): StateFlow<com.abn3li.telemusic.data.settings.AmbientColorSet> = _ambientColorSet
+    fun setAmbientColorSet(set: com.abn3li.telemusic.data.settings.AmbientColorSet) {
+        settingsStore.ambientColorSet = set
+        _ambientColorSet.value = set
+    }
+
     /** Best-effort copy of [source] into the user's chosen shared-storage download folder, if
      * they've picked one (AppSettingsStore.downloadFolderUri) - a no-op (returns null) otherwise,
      * so a song downloads exactly as it did before anyone touches that setting. [displayName]

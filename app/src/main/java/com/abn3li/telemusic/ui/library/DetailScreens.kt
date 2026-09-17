@@ -167,8 +167,9 @@ private fun SongListScaffold(
         typography.bodySmall.copy(platformStyle = PlatformTextStyle(includeFontPadding = false))
     }
 
+    AdaptiveScreenBackground {
     Scaffold(
-        containerColor = BgColor,
+        containerColor = Color.Transparent,
         topBar = {
             TopAppBar(
                 title = {
@@ -190,7 +191,7 @@ private fun SongListScaffold(
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = Color.White)
                     }
                 },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = BgColor)
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent)
             )
         }
     ) { padding ->
@@ -199,15 +200,15 @@ private fun SongListScaffold(
                 .padding(padding)
                 .fillMaxSize()
         ) {
-            // Same rounded-top CardColor panel every Library tab (Tracks/Albums/Artists/
-            // Playlists) already wraps its content in - this screen used to be plain default
-            // Material colors sitting directly on the scaffold, which read as a different,
-            // unstyled screen next to the rest of the redesigned app.
+            // Same translucent glass panel every Library tab (Tracks/Albums/Artists/Playlists)
+            // already wraps its content in - this screen used to be plain default Material
+            // colors sitting directly on the scaffold, which read as a different, unstyled
+            // screen next to the rest of the redesigned app.
             Box(
                 modifier = Modifier
                     .fillMaxSize()
                     .clip(RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp))
-                    .background(CardColor)
+                    .background(adaptivePanelFill())
             ) {
             if (songs.isEmpty()) {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -354,5 +355,6 @@ private fun SongListScaffold(
             }
             }
         }
+    }
     }
 }

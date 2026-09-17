@@ -11,6 +11,7 @@ import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
@@ -316,10 +317,11 @@ fun LibraryScreen(
         }
     }
 
+    AdaptiveScreenBackground {
     Scaffold(
-        containerColor = BgColor,
+        containerColor = Color.Transparent,
         topBar = {
-            Surface(color = BgColor) {
+            Surface(color = Color.Transparent) {
                 Column {
                     Column(modifier = Modifier.padding(start = 18.dp, end = 18.dp, top = 20.dp, bottom = 14.dp)) {
                         Row(
@@ -448,7 +450,7 @@ fun LibraryScreen(
             }
         }
     ) { padding ->
-        Column(modifier = Modifier.padding(padding).fillMaxSize().background(BgColor)) {
+        Column(modifier = Modifier.padding(padding).fillMaxSize()) {
             // Samsung Music-style tabs: no pill/chip background at all - the selected tab is
             // just bigger, bolder, and brighter than the rest, which read/unread size contrast
             // alone is what carries the selection state.
@@ -499,6 +501,7 @@ fun LibraryScreen(
                 }
             }
         }
+    }
     }
 }
 
@@ -596,7 +599,7 @@ private fun SongList(
         modifier = Modifier
             .fillMaxSize()
             .clip(RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp))
-            .background(CardColor)
+            .background(adaptivePanelFill())
     ) {
         if (songsUi.isEmpty()) {
             Column(Modifier.fillMaxSize()) {
@@ -675,7 +678,7 @@ private fun AlbumsList(albums: List<AlbumSummary>, onAlbumClick: (String) -> Uni
         modifier = Modifier
             .fillMaxSize()
             .clip(RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp))
-            .background(CardColor)
+            .background(adaptivePanelFill())
     ) {
     if (albums.isEmpty()) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -754,7 +757,7 @@ private fun ArtistsList(artists: List<ArtistSummary>, onArtistClick: (String) ->
         modifier = Modifier
             .fillMaxSize()
             .clip(RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp))
-            .background(CardColor)
+            .background(adaptivePanelFill())
     ) {
     if (artists.isEmpty()) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -849,7 +852,7 @@ private fun PlaylistsList(
         modifier = Modifier
             .fillMaxSize()
             .clip(RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp))
-            .background(CardColor)
+            .background(adaptivePanelFill())
     ) {
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
@@ -951,7 +954,7 @@ private fun PlaylistsList(
                 modifier = Modifier
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(16.dp))
-                    .background(DividerColor)
+                    .adaptiveRow(RoundedCornerShape(16.dp))
                     .clickableNoRipple(onPlaylistClicked)
                     .padding(horizontal = 14.dp, vertical = 12.dp),
                 verticalAlignment = Alignment.CenterVertically

@@ -4,14 +4,18 @@ import android.content.Intent
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.ui.graphics.Color
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.filled.*
@@ -27,8 +31,11 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import com.abn3li.telemusic.TgMusicApp
+import com.abn3li.telemusic.data.settings.AmbientColorSet
 import com.abn3li.telemusic.data.settings.AppSettingsStore
+import com.abn3li.telemusic.data.settings.AppearanceStyle
 import com.abn3li.telemusic.data.settings.DnsResolver
+import com.abn3li.telemusic.ui.library.blobColorsFor
 import com.abn3li.telemusic.data.update.UpdateChecker
 import com.abn3li.telemusic.ui.nowplaying.LocalMiniPlayerInset
 import com.abn3li.telemusic.data.update.UpdateCheckResult
@@ -134,8 +141,13 @@ fun SettingsScreen(onBack: () -> Unit, onLoggedOut: () -> Unit) {
         }
     }
 
+    // Root ambient-blur background only for now - the individual Card sections below still use
+    // their existing MaterialTheme.colorScheme.surfaceVariant fill (they already read fine as
+    // opaque cards over the blur; a full glass-surface reskin of every section here is future
+    // work, not part of this pass).
+    com.abn3li.telemusic.ui.library.AdaptiveScreenBackground {
     Scaffold(
-        containerColor = MaterialTheme.colorScheme.background,
+        containerColor = Color.Transparent,
         contentColor = MaterialTheme.colorScheme.onBackground,
         topBar = {
             TopAppBar(
@@ -146,7 +158,7 @@ fun SettingsScreen(onBack: () -> Unit, onLoggedOut: () -> Unit) {
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.background
+                    containerColor = Color.Transparent
                 )
             )
         }
@@ -159,6 +171,72 @@ fun SettingsScreen(onBack: () -> Unit, onLoggedOut: () -> Unit) {
                 .padding(start = 16.dp, top = 8.dp, end = 16.dp, bottom = 8.dp + LocalMiniPlayerInset.current),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
+            // ---- APPEARANCE (Classic dark cards vs. the ambient-blur/glass look) ----
+            Card(
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+                shape = RoundedCornerShape(20.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(Modifier.padding(16.dp)) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Icon(Icons.Default.Palette, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                        Text("Appearance", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                    }
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        "Choose the Library/Settings screens' look.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(Modifier.height(12.dp))
+                    val appearanceStyle by app.musicRepository.observeAppearanceStyle().collectAsState()
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        AppearanceOptionChip(
+                            label = "Classic",
+                            selected = appearanceStyle == AppearanceStyle.CLASSIC,
+                            modifier = Modifier.weight(1f),
+                            onClick = { app.musicRepository.setAppearanceStyle(AppearanceStyle.CLASSIC) }
+                        )
+                        AppearanceOptionChip(
+                            label = "Ambient blur",
+                            selected = appearanceStyle == AppearanceStyle.AMBIENT_BLUR,
+                            modifier = Modifier.weight(1f),
+                            onClick = { app.musicRepository.setAppearanceStyle(AppearanceStyle.AMBIENT_BLUR) }
+                        )
+                    }
+
+                    Spacer(Modifier.height(16.dp))
+                    Text("Ambient colors", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                    Spacer(Modifier.height(2.dp))
+                    Text(
+                        "Which blob palette the ambient-blur background uses.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(Modifier.height(10.dp))
+                    val ambientColorSet by app.musicRepository.observeAmbientColorSet().collectAsState()
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        AmbientColorSet.entries.forEach { set ->
+                            AmbientColorSetChip(
+                                set = set,
+                                selected = ambientColorSet == set,
+                                modifier = Modifier.weight(1f),
+                                onClick = { app.musicRepository.setAmbientColorSet(set) }
+                            )
+                        }
+                    }
+                }
+            }
+
             // ---- DNS RESOLVERS SECTION (TELEGRAM X / NAGRAM X) ----
             Card(
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
@@ -846,6 +924,7 @@ fun SettingsScreen(onBack: () -> Unit, onLoggedOut: () -> Unit) {
             Spacer(Modifier.height(16.dp))
         }
     }
+    }
 
     if (showRegionDialog) {
         AlertDialog(
@@ -1001,6 +1080,65 @@ fun SettingsScreen(onBack: () -> Unit, onLoggedOut: () -> Unit) {
                 showImportSheet = false
                 localAudioFiles = emptyList()
             }
+        )
+    }
+}
+
+/** One selectable pill in the Appearance section's Classic/Ambient blur choice. */
+@Composable
+private fun AppearanceOptionChip(label: String, selected: Boolean, onClick: () -> Unit, modifier: Modifier = Modifier) {
+    Box(
+        modifier = modifier
+            .clip(RoundedCornerShape(50))
+            .background(if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surface)
+            .clickable(onClick = onClick)
+            .padding(vertical = 10.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            text = label,
+            color = if (selected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
+            fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+            style = MaterialTheme.typography.bodyMedium
+        )
+    }
+}
+
+/** One selectable swatch in the Appearance section's "Ambient colors" picker - a small stack of
+ * that set's own blob colors (see blobColorsFor) plus its label, so the choice is visible before
+ * tapping instead of just a name. */
+@Composable
+private fun AmbientColorSetChip(set: AmbientColorSet, selected: Boolean, onClick: () -> Unit, modifier: Modifier = Modifier) {
+    val colors = remember(set) { blobColorsFor(set).take(4) }
+    Column(
+        modifier = modifier
+            .clip(RoundedCornerShape(14.dp))
+            .background(if (selected) MaterialTheme.colorScheme.primary.copy(alpha = 0.14f) else MaterialTheme.colorScheme.surface)
+            .then(
+                if (selected) Modifier.border(1.5.dp, MaterialTheme.colorScheme.primary, RoundedCornerShape(14.dp))
+                else Modifier
+            )
+            .clickable(onClick = onClick)
+            .padding(vertical = 10.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Row(horizontalArrangement = Arrangement.spacedBy((-6).dp)) {
+            colors.forEach { c ->
+                Box(
+                    modifier = Modifier
+                        .size(18.dp)
+                        .clip(CircleShape)
+                        .border(1.dp, MaterialTheme.colorScheme.surface, CircleShape)
+                        .background(c)
+                )
+            }
+        }
+        Spacer(Modifier.height(6.dp))
+        Text(
+            text = set.label,
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+            color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
         )
     }
 }
