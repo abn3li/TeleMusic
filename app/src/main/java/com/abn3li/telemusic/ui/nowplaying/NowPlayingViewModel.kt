@@ -76,6 +76,41 @@ class NowPlayingViewModel(
     // at all, only a video id, which nothing else in NowPlayingUiState/SongEntity carries).
     private var pendingEphemeralVideoId: String? = null
 
+    // The Queue screen's "Up Next" list - resolved SongEntity rows for everything queued after
+    // the currently playing song (see PlaybackQueue.orderedIds/currentIndexValue). Deliberately
+    // NOT folded into NowPlayingUiState: it only needs to refresh on an actual queue-order
+    // change (song change, shuffle toggle, reorder, clear), never on the 300ms position tick,
+    // and giving it its own StateFlow keeps the Queue screen from recomposing off ticks it
+    // doesn't care about, same reasoning as playbackProgress being split out below.
+    private val _upcomingQueue = MutableStateFlow<List<SongEntity>>(emptyList())
+    val upcomingQueue: StateFlow<List<SongEntity>> = _upcomingQueue
+
+    private fun refreshUpcomingQueue() {
+        viewModelScope.launch {
+            val upcomingIds = queue.orderedIds().drop(queue.currentIndexValue() + 1)
+            _upcomingQueue.value = withContext(Dispatchers.IO) { upcomingIds.mapNotNull { repository.getSongById(it) } }
+        }
+    }
+
+    /** Queue screen's "tap an upcoming track" action - [offsetInUpcoming] is its position within
+     * [upcomingQueue], not an absolute queue index. */
+    fun jumpToQueueItem(offsetInUpcoming: Int) {
+        val id = queue.jumpToIndex(queue.currentIndexValue() + 1 + offsetInUpcoming) ?: return
+        loadCurrentQueuePosition(songIdOverride = id)
+    }
+
+    /** Queue screen's "Clear Queue" action - keeps the currently playing song, drops the rest. */
+    fun clearUpcomingQueue() {
+        queue.removeUpcoming()
+        refreshUpcomingQueue()
+    }
+
+    /** Queue screen's drag-to-reorder - offsets are positions within [upcomingQueue]. */
+    fun moveQueueItem(fromOffset: Int, toOffset: Int) {
+        queue.moveUpcoming(fromOffset, toOffset)
+        refreshUpcomingQueue()
+    }
+
     /**
      * The fast-ticking slice of [uiState], for the two composables that actually need to
      * redraw every 300ms (the seekbar, the lyrics view's active-line highlight) to collect
@@ -187,6 +222,7 @@ class NowPlayingViewModel(
     fun playFromQueue(ids: List<Long>, startIndex: Int) {
         queue.setQueue(ids, startIndex)
         loadCurrentQueuePosition(songIdOverride = queue.currentSongId())
+        refreshUpcomingQueue()
     }
 
     /** Plays a single song that was never added to the library - the YouTube "Play" button (see
@@ -283,11 +319,13 @@ class NowPlayingViewModel(
     fun nextSong() {
         val id = queue.next() ?: return
         loadCurrentQueuePosition(songIdOverride = id)
+        refreshUpcomingQueue()
     }
 
     fun previousSong() {
         val id = queue.previous() ?: return
         loadCurrentQueuePosition(songIdOverride = id)
+        refreshUpcomingQueue()
     }
 
     fun toggleShuffle() {
@@ -297,6 +335,7 @@ class NowPlayingViewModel(
             hasNext = queue.hasNext(),
             hasPrevious = queue.hasPrevious()
         )
+        refreshUpcomingQueue()
     }
 
     fun toggleRepeat() {

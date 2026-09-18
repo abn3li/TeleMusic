@@ -36,6 +36,46 @@ class PlaybackQueue {
 
     fun currentSongId(): Long? = songIds.getOrNull(currentIndex)
 
+    /** The full ordered id list as currently playing (post-shuffle if shuffle is on) - for the
+     * Queue screen's "Up Next" list, which is everything after [currentIndex]. */
+    fun orderedIds(): List<Long> = songIds
+    fun currentIndexValue(): Int = currentIndex
+
+    /** Jumps straight to [index] within [orderedIds] - the Queue screen's "tap an upcoming
+     * track to play it now" action. Returns the id now playing, or null if out of range. */
+    fun jumpToIndex(index: Int): Long? {
+        if (index !in songIds.indices) return null
+        currentIndex = index
+        return songIds[index]
+    }
+
+    /** "Clear Queue" - keeps the currently playing song, drops everything queued after it.
+     * originalSongIds is truncated too so toggling shuffle back off afterward doesn't silently
+     * bring the cleared songs back. */
+    fun removeUpcoming() {
+        val keepId = songIds.getOrNull(currentIndex) ?: return
+        songIds = listOf(keepId)
+        originalSongIds = listOf(keepId)
+        currentIndex = 0
+    }
+
+    /** Reorders two tracks within the "Up Next" slice (i.e. offsets are relative to
+     * currentIndex + 1, not absolute positions in [orderedIds]) - the Queue screen's
+     * drag-to-reorder. Only reorders the currently-playing order (the shuffled view, if shuffle
+     * is on); originalSongIds is left alone while shuffled so turning shuffle back off restores
+     * the original browsing order rather than baking a shuffle-time reorder into it. */
+    fun moveUpcoming(fromOffset: Int, toOffset: Int) {
+        val base = currentIndex + 1
+        val from = base + fromOffset
+        val to = base + toOffset
+        if (from !in songIds.indices || to !in songIds.indices || from == to) return
+        val mutable = songIds.toMutableList()
+        val item = mutable.removeAt(from)
+        mutable.add(to, item)
+        songIds = mutable
+        if (!isShuffleEnabled) originalSongIds = mutable
+    }
+
     /** Empties the queue entirely - used when playback moves to something that was never part
      * of any queue (an ephemeral YouTube stream, see PlaybackController.playUri's callers), so
      * Next/Previous can't silently fall back to whatever library queue was playing before.

@@ -1,9 +1,17 @@
 package com.abn3li.telemusic.ui.nowplaying
 
+import android.content.BroadcastReceiver
+import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
+import android.media.AudioManager
+import androidx.core.content.ContextCompat
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.Crossfade
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
@@ -14,22 +22,22 @@ import androidx.compose.animation.scaleOut
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyListState
-import androidx.compose.foundation.lazy.itemsIndexed
-import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Album
 import androidx.compose.material.icons.filled.AudioFile
+import androidx.compose.material.icons.filled.ChatBubbleOutline
 import androidx.compose.material.icons.filled.CloudDone
 import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.FastForward
@@ -37,12 +45,15 @@ import androidx.compose.material.icons.filled.FastRewind
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.GraphicEq
+import androidx.compose.material.icons.filled.Headphones
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Lyrics
+import androidx.compose.material.icons.filled.MoreHoriz
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.QueueMusic
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Repeat
 import androidx.compose.material.icons.filled.RepeatOne
@@ -52,6 +63,8 @@ import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material.icons.filled.Storage
 import androidx.compose.material.icons.filled.Timer
+import androidx.compose.material.icons.filled.VolumeMute
+import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -73,8 +86,10 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
+import com.abn3li.telemusic.data.local.SongEntity
 import com.abn3li.telemusic.playback.RepeatMode
 import kotlinx.coroutines.launch
 import java.io.File
@@ -239,12 +254,25 @@ private fun NowPlayingContent(
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
-    val listState = rememberLazyListState()
     val coroutineScope = rememberCoroutineScope()
 
     var showLyricsView by remember { mutableStateOf(false) }
+    var showQueueView by remember { mutableStateOf(false) }
     var showSongInfoDialog by remember { mutableStateOf(false) }
     var showManualLyricsDialog by remember { mutableStateOf(false) }
+
+    // Without this, system back while Lyrics/Queue is open skipped straight past this whole
+    // screen to whatever's behind the player sheet (the Library screen) - the OUTER
+    // BackHandler(enabled=isExpanded) up in NowPlayingScreen only knows about the sheet being
+    // expanded or not, it has no idea Lyrics/Queue is showing inside it. key()-wrapped for the
+    // same reason as that outer one - forces re-registration (reclaiming front-of-stack
+    // priority) the instant either flag flips true, instead of only toggling an already-
+    // registered callback's enabled flag.
+    key(showLyricsView, showQueueView) {
+        BackHandler(enabled = showLyricsView || showQueueView) {
+            if (showQueueView) showQueueView = false else showLyricsView = false
+        }
+    }
 
     // The button click at line ~800 only fires fetchLyricsOnDemand() for the OPEN action
     // itself - it never re-fires when the song underneath changes (Next/Previous/swipe) while
@@ -282,12 +310,11 @@ private fun NowPlayingContent(
         label = "artScale"
     )
 
-    // Auto-scroll-to-active-line and the isActive highlight itself both moved into
-    // SyncedLyricsView below, which collects playbackProgress on its own - see that
-    // composable's doc for why this can't just read state.activeLyricIndex here any more.
+    // Auto-scroll-to-active-line and the isActive highlight both live in LyricsView.kt now -
+    // that composable collects playbackProgress on its own, same reasoning as SeekbarSection's
+    // own doc for why this screen can't just read state.activeLyricIndex here any more.
 
     val backgroundColor = MaterialTheme.colorScheme.background
-    val surfaceVariantColor = MaterialTheme.colorScheme.surfaceVariant
 
     val artworkRequest = remember(state.song?.albumArtUrl, context) {
         ImageRequest.Builder(context)
@@ -306,6 +333,31 @@ private fun NowPlayingContent(
     val latestState by rememberUpdatedState(state)
 
     Box(modifier = modifier) {
+        if (showQueueView) {
+            // Queue is its own full-screen view too (QueueView.kt), same pattern as LyricsView -
+            // a reorderable "Up Next" list has nothing to do with the artwork/seekbar/transport
+            // layout below, so it gets the whole screen rather than living inside a slot of it.
+            QueueView(
+                state = state,
+                viewModel = viewModel,
+                onClose = { showQueueView = false },
+                onOpenLyrics = { showQueueView = false; showLyricsView = true },
+                modifier = Modifier.fillMaxSize()
+            )
+        } else if (showLyricsView) {
+            // Lyrics is its own full-screen view now (LyricsView.kt) - it used to render
+            // inside the artwork card's own box, sharing the screen with the metadata/seekbar/
+            // transport rows below it, which fought the artwork's horizontal swipe-to-skip
+            // gesture region and read as visually unrelated to a synced-lyrics list anyway.
+            LyricsView(
+                state = state,
+                viewModel = viewModel,
+                onClose = { showLyricsView = false },
+                onOpenManualSearch = { showManualLyricsDialog = true },
+                onOpenQueue = { showLyricsView = false; showQueueView = true },
+                modifier = Modifier.fillMaxSize()
+            )
+        } else {
         // Now Playing GPU Hardware Layer Container Sheet. Dragging this directly manipulates
         // the SAME expansionFraction the parent PlayerSheetOverlay uses for translationY/alpha,
         // so the drag, the squish/corner-radius feedback below, and the mini-player reveal are
@@ -335,27 +387,33 @@ private fun NowPlayingContent(
                     onClick = {}
                 )
         ) {
-            // Dynamic mesh gradient backdrop (see ArtworkMeshBackdrop.kt).
-            // Averages the current cover into a small grid of its OWN colours (in roughly its
-            // own proportions) instead of a flat blurred copy of the artwork, then crossfades
-            // to the next track's mesh over ~900ms. See ArtworkMeshBackdrop.kt for the full
-            // technique. Position ticks recompose this screen twice a second and must not drag
-            // a full-screen blur along with them, which is why the mesh is an immutable value
-            // read once per track rather than something derived every frame.
-            val artworkMesh = rememberArtworkMesh(state.song?.albumArtUrl)
-            ArtworkMeshBackdrop(mesh = artworkMesh, modifier = Modifier.fillMaxSize())
+            // Real blurred album art backdrop (per the glassmorphic redesign spec) instead of
+            // the mesh-of-averaged-colors ArtworkMeshBackdrop used to draw here. `state` passed
+            // into this composable is stableUiState (see PlayerSheetOverlay), which does NOT
+            // update on every 300ms position tick - only on a real song change - so this blur
+            // isn't recomposed/rebuilt that often either way. Its ongoing cost is being
+            // COMPOSITED every frame this screen is visible (same tradeoff already accepted for
+            // the Library screen's ambient-blur background), not recomposition churn.
+            // Modifier.blur() is a no-op below API 31 (no RenderEffect there) - the art just
+            // renders sharp instead of blurred on those devices, which is the graceful fallback.
+            AsyncImage(
+                model = artworkRequest,
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize().blur(60.dp)
+            )
 
             // Ambient Dark Gradient Mask - keeps the app's own Material text/icon colors
-            // legible over the mesh regardless of how bright the sampled colours are.
+            // legible over the blurred art regardless of how bright it is.
             Box(
                 Modifier
                     .fillMaxSize()
                     .background(
                         Brush.verticalGradient(
                             colors = listOf(
-                                surfaceVariantColor.copy(alpha = 0.35f),
-                                backgroundColor.copy(alpha = 0.55f),
-                                backgroundColor.copy(alpha = 0.82f)
+                                Color.Black.copy(alpha = 0.35f),
+                                Color.Black.copy(alpha = 0.55f),
+                                Color.Black.copy(alpha = 0.92f)
                             )
                         )
                     )
@@ -370,151 +428,154 @@ private fun NowPlayingContent(
                 // Drag-to-dismiss is scoped to just the top bar + artwork area, never the
                 // playback controls below (a drag gesture and a button's clickable modifier
                 // fighting over the same touch region is what caused an accidental pause
-                // there before) - AND, as of now, never the lyrics view either. A raw
-                // pointerInput drag detector on an ancestor of a scrollable LazyColumn (the
-                // synced-lyrics list) competes with that list's own internal scroll gesture
-                // handling for the same vertical direction; unlike Compose's built-in nested
-                // scroll protocol, a manual detectVerticalDragGestures here doesn't coordinate
-                // with the LazyColumn at all, and can leave a touch sequence half-consumed in
-                // a way that reads as the whole screen ignoring subsequent taps - including
-                // the playback control row below it, entirely outside this Column's bounds.
-                // Dismissing is still reachable from the artwork view, the back arrow, or the
-                // system back button while lyrics are open.
+                // there before). Lyrics is its own separate full-screen view now (see
+                // LyricsView.kt/showLyricsView's branch above) - this Column, and this drag
+                // gesture, only ever run while showing the normal player, so the gesture no
+                // longer needs to special-case a lyrics list living inside it.
                 Column(
                     modifier = Modifier
                         .weight(1f)
                         .fillMaxWidth()
-                        .then(
-                            if (showLyricsView) {
-                                Modifier
-                            } else {
-                                Modifier.pointerInput(Unit) {
-                                    // Whole-gesture average speed (total distance / total
-                                    // duration) - simpler and more reliable than
-                                    // VelocityTracker's recent-samples fit for this purpose,
-                                    // which under-reports on short, fast flicks that only
-                                    // produce a couple of drag events before release.
-                                    var gestureStartMs = 0L
-                                    var totalDragPx = 0f
-                                    detectVerticalDragGestures(
-                                        onDragStart = {
-                                            gestureStartMs = System.currentTimeMillis()
-                                            totalDragPx = 0f
-                                        },
-                                        onDragEnd = {
-                                            val elapsedMs = (System.currentTimeMillis() - gestureStartMs).coerceAtLeast(1L)
-                                            val avgVelocity = totalDragPx / (elapsedMs / 1000f)
-                                            coroutineScope.launch {
-                                                if (expansionFraction.value < 0.6f || avgVelocity > 500f) {
-                                                    onCollapse()
-                                                } else {
-                                                    expansionFraction.animateTo(1f, SHEET_TRANSITION_SPEC)
-                                                }
-                                            }
-                                        },
-                                        onDragCancel = {
-                                            coroutineScope.launch { expansionFraction.animateTo(1f, SHEET_TRANSITION_SPEC) }
-                                        },
-                                        onVerticalDrag = { change, dragAmount ->
-                                            change.consume()
-                                            totalDragPx += dragAmount
-                                            val deltaFraction = -(dragAmount / screenHeightPx)
-                                            coroutineScope.launch {
-                                                expansionFraction.snapTo((expansionFraction.value + deltaFraction).coerceIn(0f, 1f))
-                                            }
+                        .pointerInput(Unit) {
+                            // Whole-gesture average speed (total distance / total duration) -
+                            // simpler and more reliable than VelocityTracker's recent-samples
+                            // fit for this purpose, which under-reports on short, fast flicks
+                            // that only produce a couple of drag events before release.
+                            var gestureStartMs = 0L
+                            var totalDragPx = 0f
+                            detectVerticalDragGestures(
+                                onDragStart = {
+                                    gestureStartMs = System.currentTimeMillis()
+                                    totalDragPx = 0f
+                                },
+                                onDragEnd = {
+                                    val elapsedMs = (System.currentTimeMillis() - gestureStartMs).coerceAtLeast(1L)
+                                    val avgVelocity = totalDragPx / (elapsedMs / 1000f)
+                                    coroutineScope.launch {
+                                        if (expansionFraction.value < 0.6f || avgVelocity > 500f) {
+                                            onCollapse()
+                                        } else {
+                                            expansionFraction.animateTo(1f, SHEET_TRANSITION_SPEC)
                                         }
-                                    )
+                                    }
+                                },
+                                onDragCancel = {
+                                    coroutineScope.launch { expansionFraction.animateTo(1f, SHEET_TRANSITION_SPEC) }
+                                },
+                                onVerticalDrag = { change, dragAmount ->
+                                    change.consume()
+                                    totalDragPx += dragAmount
+                                    val deltaFraction = -(dragAmount / screenHeightPx)
+                                    coroutineScope.launch {
+                                        expansionFraction.snapTo((expansionFraction.value + deltaFraction).coerceIn(0f, 1f))
+                                    }
                                 }
-                            }
-                        )
+                            )
+                        }
                 ) {
-                // Top Bar with Info Button
-                TopAppBar(
-                    title = {
-                        Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
-                            Text(
-                                text = "NOW PLAYING",
-                                style = MaterialTheme.typography.labelMedium,
-                                color = MaterialTheme.colorScheme.primary,
-                                letterSpacing = MaterialTheme.typography.labelMedium.letterSpacing
-                            )
-                            if (!state.song?.album.isNullOrBlank()) {
-                                Text(
-                                    text = state.song.album,
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                            }
-                        }
-                    },
-                    navigationIcon = {
-                        IconButton(onClick = onCollapse) {
-                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
-                        }
-                    },
-                    actions = {
-                        IconButton(onClick = { showSongInfoDialog = true }) {
-                            Icon(
-                                imageVector = Icons.Default.Info,
-                                contentDescription = "Song Info",
-                                tint = MaterialTheme.colorScheme.primary
-                            )
-                        }
-                    },
-                    colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent)
-                )
+                // Drag handle + source label, replacing the old TopAppBar - matches the
+                // glassmorphic mockup (no traditional app bar). The whole thing is tappable to
+                // collapse, same "tap the handle to dismiss" affordance the mockup's own drag
+                // handle implies; the back arrow/Info button that used to live here moved into
+                // the metadata row below (a MoreHoriz options button) so this row stays purely
+                // the handle + context label.
+                val sourceLabel = remember(state.song?.telegramMessageId) {
+                    val song = state.song
+                    when {
+                        song == null -> "Not Playing"
+                        song.youtubeVideoId != null -> "Playing from YouTube"
+                        song.isLocalImport -> "Playing from Local Music"
+                        else -> "Playing from Telegram"
+                    }
+                }
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 8.dp, bottom = 4.dp)
+                        .clickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = null,
+                            onClick = onCollapse
+                        ),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(width = 40.dp, height = 4.dp)
+                            .clip(RoundedCornerShape(2.dp))
+                            .background(Color.White.copy(alpha = 0.35f))
+                    )
+                    Spacer(Modifier.height(10.dp))
+                    Text(
+                        text = sourceLabel,
+                        color = Color.White.copy(alpha = 0.75f),
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Medium
+                    )
+                }
 
                 Spacer(Modifier.height(12.dp))
 
-                // Main Display Area (Expressive 3D Animated Pager Artwork Card or Lyrics View)
+                // Main Display Area - just the artwork card now. Lyrics used to render here
+                // too (swapped in via an if/else on showLyricsView) - it's its own full-screen
+                // LyricsView now (see the branch at the top of this function), so this box only
+                // ever shows the artwork.
                 Box(
                     modifier = Modifier
                         .weight(1f)
                         .fillMaxWidth(),
                     contentAlignment = Alignment.Center
                 ) {
-                    if (!showLyricsView) {
                         // Single static artwork card - see the note on swipeOffset/swipeSettle
                         // above for why this deliberately isn't a multi-card carousel anymore.
                         Box(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .pointerInput(Unit) {
-                                    var total = 0f
-                                    detectHorizontalDragGestures(
-                                        onDragStart = { total = 0f },
-                                        onDragCancel = { swipeOffset = 0f },
-                                        onDragEnd = {
-                                            when {
-                                                total <= -swipeThresholdPx -> if (latestState.hasNext) viewModel.nextSong()
-                                                total >= swipeThresholdPx -> if (latestState.hasPrevious) viewModel.previousSong()
-                                            }
-                                            swipeOffset = 0f
-                                        },
-                                        onHorizontalDrag = { change, delta ->
-                                            change.consume()
-                                            total += delta
-                                            // Damped: a hint the finger can feel, not a
-                                            // drag-to-position slider.
-                                            swipeOffset = total * 0.35f
-                                        }
-                                    )
-                                },
+                            modifier = Modifier.fillMaxSize(),
                             contentAlignment = Alignment.Center
                         ) {
                             Surface(
-                                shape = RoundedCornerShape(16.dp),
-                                color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                                shape = RoundedCornerShape(18.dp),
+                                color = Color.White.copy(alpha = 0.05f),
                                 // No shadow here on purpose - it visibly followed the card
                                 // around during swipe-down-to-dismiss (the whole sheet
                                 // translating drags the shadow's own offset along with it),
-                                // which read as distracting rather than adding depth.
-                                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f)),
+                                // which read as distracting rather than adding depth. Border
+                                // dropped too (per the glassmorphic redesign) - a translucent
+                                // fill alone over the blurred backdrop already reads as glass.
+                                // 0.78f, not full width - this sits inside a weight(1f) region
+                                // that also has to leave room for the metadata row, seekbar,
+                                // transport row, volume row, and footer below it; going full
+                                // width read as the artwork swallowing the whole screen instead
+                                // of sharing it with everything else.
+                                // The swipe-to-skip gesture is attached HERE, on the card's own
+                                // bounds, not on the enclosing fillMaxSize() Box above - that box
+                                // is taller than this 1:1 card (it shares its weight(1f) region
+                                // with letterboxing above/below), and attaching the gesture to it
+                                // meant tapping/dragging that blank space - nowhere near the
+                                // visible card - could still register as a swipe and skip tracks.
                                 modifier = Modifier
-                                    .fillMaxWidth(0.82f)
+                                    .fillMaxWidth(0.78f)
                                     .aspectRatio(1f)
+                                    .pointerInput(Unit) {
+                                        var total = 0f
+                                        detectHorizontalDragGestures(
+                                            onDragStart = { total = 0f },
+                                            onDragCancel = { swipeOffset = 0f },
+                                            onDragEnd = {
+                                                when {
+                                                    total <= -swipeThresholdPx -> if (latestState.hasNext) viewModel.nextSong()
+                                                    total >= swipeThresholdPx -> if (latestState.hasPrevious) viewModel.previousSong()
+                                                }
+                                                swipeOffset = 0f
+                                            },
+                                            onHorizontalDrag = { change, delta ->
+                                                change.consume()
+                                                total += delta
+                                                // Damped: a hint the finger can feel, not a
+                                                // drag-to-position slider.
+                                                swipeOffset = total * 0.35f
+                                            }
+                                        )
+                                    }
                                     .graphicsLayer {
                                         translationX = swipeSettle
                                         // Pause-shrink: the card settles to
@@ -588,87 +649,6 @@ private fun NowPlayingContent(
                                 )
                             }
                         }
-                    } else {
-                        // Lyrics View
-                        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                            when {
-                                state.isFetchingLyrics -> {
-                                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                        CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
-                                        Spacer(Modifier.height(12.dp))
-                                        Text("Searching lyrics across LRCLIB & lyrics.ovh...", style = MaterialTheme.typography.bodyMedium)
-                                    }
-                                }
-                                state.lyricLines.isNotEmpty() -> {
-                                    SyncedLyricsView(
-                                        lines = state.lyricLines,
-                                        listState = listState,
-                                        viewModel = viewModel,
-                                        onOpenManualSearch = { showManualLyricsDialog = true }
-                                    )
-                                }
-                                !state.song?.lyricsPlain.isNullOrBlank() -> {
-                                    Column(Modifier.fillMaxSize()) {
-                                        Row(
-                                            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
-                                            horizontalArrangement = Arrangement.End
-                                        ) {
-                                            IconButton(onClick = { showManualLyricsDialog = true }) {
-                                                Icon(Icons.Default.Search, contentDescription = "Custom Lyrics Search", tint = MaterialTheme.colorScheme.primary)
-                                            }
-                                        }
-                                        LazyColumn(
-                                            modifier = Modifier.weight(1f).fillMaxWidth(),
-                                            horizontalAlignment = Alignment.CenterHorizontally
-                                        ) {
-                                            item {
-                                                Text(
-                                                    text = state.song.lyricsPlain,
-                                                    style = MaterialTheme.typography.titleLarge,
-                                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                                    textAlign = TextAlign.Center,
-                                                    modifier = Modifier.padding(24.dp)
-                                                )
-                                            }
-                                        }
-                                    }
-                                }
-                                else -> {
-                                    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(24.dp)) {
-                                        Text(
-                                            text = "No lyrics found automatically",
-                                            style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
-                                            textAlign = TextAlign.Center
-                                        )
-                                        Spacer(Modifier.height(4.dp))
-                                        Text(
-                                            text = "Search custom song name / artist manually to fetch lyrics from LRCLIB & other sources:",
-                                            style = MaterialTheme.typography.bodySmall,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                            textAlign = TextAlign.Center
-                                        )
-                                        Spacer(Modifier.height(16.dp))
-                                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                            FilledTonalButton(
-                                                onClick = { viewModel.fetchLyricsOnDemand() }
-                                            ) {
-                                                Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
-                                                Spacer(Modifier.width(6.dp))
-                                                Text("Auto-Retry")
-                                            }
-                                            Button(
-                                                onClick = { showManualLyricsDialog = true }
-                                            ) {
-                                                Icon(Icons.Default.Search, contentDescription = null, modifier = Modifier.size(16.dp))
-                                                Spacer(Modifier.width(6.dp))
-                                                Text("Search Custom Name")
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
                 }
                 } // close drag-gesture-scoped Column (top bar + pager/lyrics)
 
@@ -685,73 +665,70 @@ private fun NowPlayingContent(
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
                             text = state.song?.title ?: "Unknown Title",
-                            style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+                            fontSize = 23.sp,
+                            fontWeight = FontWeight.Bold,
                             maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
+                            overflow = TextOverflow.Clip,
+                            modifier = Modifier.basicMarquee()
                         )
-                        Spacer(Modifier.height(2.dp))
+                        Spacer(Modifier.height(3.dp))
                         Text(
-                            text = state.song?.artist ?: "Unknown Artist",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            text = (state.song?.artist ?: "Unknown Artist").uppercase(),
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            letterSpacing = 1.sp,
+                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
                         )
                     }
 
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        // Like button - translucent disc style: fill brightens when active,
-                        // icon Crossfades between states.
-                        val isFav = state.song?.isFavorite == true
-                        PlayerCircleGlyph(
-                            icon = if (isFav) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
-                            contentDescription = "Favorite",
-                            active = isFav,
-                            onClick = { viewModel.toggleFavorite() }
-                        )
+                    // Favorite/Download used to be their own separate circle buttons next to
+                    // this one - combined into this single options menu instead, so the row
+                    // reads as one action button rather than three competing for the same
+                    // small strip of space next to a potentially-marqueeing title.
+                    val isFav = state.song?.isFavorite == true
+                    val isDownloaded = state.song?.isExplicitDownload == true
+                    // A YouTube "Play" stream also has isLocalImport=true (see SongEntity's own
+                    // doc) but no localFilePath - that combination still shows Download, so it
+                    // can be saved for real instead of just streamed once (see
+                    // NowPlayingViewModel.downloadEphemeralSong's own doc). Only a REAL local
+                    // import (already fully on-device) hides it - nothing to download.
+                    val isRealLocalImport = state.song?.isLocalImport == true && state.song?.localFilePath != null
+                    var optionsMenuExpanded by remember { mutableStateOf(false) }
 
-                        // Download Button - hidden only for a REAL local import (already fully
-                        // on-device, nothing to download). A YouTube "Play" stream also has
-                        // isLocalImport=true (see SongEntity's own doc) but no localFilePath -
-                        // that combination means "still shows Download", so it can actually be
-                        // saved for real instead of just streamed once (see
-                        // NowPlayingViewModel.downloadEphemeralSong's own doc).
-                        val isDownloaded = state.song?.isExplicitDownload == true
-                        val isRealLocalImport = state.song?.isLocalImport == true && state.song?.localFilePath != null
-                        if (!isRealLocalImport) {
-                            if (state.isDownloading) {
-                                Box(modifier = Modifier.size(34.dp), contentAlignment = Alignment.Center) {
-                                    CircularProgressIndicator(
-                                        modifier = Modifier.size(18.dp),
-                                        strokeWidth = 2.dp,
-                                        color = MaterialTheme.colorScheme.primary
-                                    )
-                                }
-                            } else {
-                                PlayerCircleGlyph(
-                                    icon = if (isDownloaded) Icons.Default.CloudDone else Icons.Default.CloudDownload,
-                                    contentDescription = if (isDownloaded) "Downloaded" else "Download song",
-                                    active = isDownloaded,
-                                    onClick = { if (!isDownloaded) viewModel.downloadCurrentSong() }
+                    Box {
+                        if (state.isDownloading) {
+                            Box(modifier = Modifier.size(36.dp), contentAlignment = Alignment.Center) {
+                                CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp, color = Color.White)
+                            }
+                        } else {
+                            PlayerCircleGlyph(
+                                icon = Icons.Default.MoreHoriz,
+                                contentDescription = "Song options",
+                                onClick = { optionsMenuExpanded = true }
+                            )
+                        }
+                        DropdownMenu(expanded = optionsMenuExpanded, onDismissRequest = { optionsMenuExpanded = false }) {
+                            DropdownMenuItem(
+                                text = { Text(if (isFav) "Remove from Favorites" else "Add to Favorites") },
+                                leadingIcon = { Icon(if (isFav) Icons.Default.Favorite else Icons.Default.FavoriteBorder, contentDescription = null) },
+                                onClick = { optionsMenuExpanded = false; viewModel.toggleFavorite() }
+                            )
+                            if (!isRealLocalImport) {
+                                DropdownMenuItem(
+                                    text = { Text(if (isDownloaded) "Downloaded" else "Download song") },
+                                    leadingIcon = { Icon(if (isDownloaded) Icons.Default.CloudDone else Icons.Default.CloudDownload, contentDescription = null) },
+                                    enabled = !isDownloaded,
+                                    onClick = { optionsMenuExpanded = false; viewModel.downloadCurrentSong() }
                                 )
                             }
+                            DropdownMenuItem(
+                                text = { Text("Song info") },
+                                leadingIcon = { Icon(Icons.Default.Info, contentDescription = null) },
+                                onClick = { optionsMenuExpanded = false; showSongInfoDialog = true }
+                            )
                         }
-
-                        // Lyrics Toggle Button (Moved right next to Download & Like buttons)
-                        PlayerCircleGlyph(
-                            icon = Icons.Default.Lyrics,
-                            contentDescription = "Toggle Lyrics",
-                            active = showLyricsView,
-                            onClick = {
-                                // Fetch-on-open is handled by the LaunchedEffect above (keyed on
-                                // song id + showLyricsView), which also covers Next/Previous
-                                // while the view stays open - no need to duplicate it here.
-                                showLyricsView = !showLyricsView
-                            }
-                        )
                     }
                 }
 
@@ -770,7 +747,7 @@ private fun NowPlayingContent(
                 // collects playbackProgress itself - see SeekbarSection's doc.
                 SeekbarSection(
                     viewModel = viewModel,
-                    songId = state.song?.telegramMessageId,
+                    song = state.song,
                     modifier = Modifier.padding(horizontal = 24.dp)
                 )
 
@@ -855,7 +832,52 @@ private fun NowPlayingContent(
                         onClick = { viewModel.toggleRepeat() }
                     )
                 }
+
+                // Real device volume (STREAM_MUSIC), not a fake/decorative slider - per the
+                // glassmorphic redesign spec's volume row.
+                DeviceVolumeRow(modifier = Modifier.padding(horizontal = 24.dp, vertical = 6.dp))
+
+                // Footer: lyrics toggle (left), a purely decorative "this phone" glass pill
+                // (center - this app has no cast/multi-device output, so it's visual only,
+                // matching the mockup's own non-functional device icons), queue (right).
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 4.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    DockToggleGlyph(
+                        icon = Icons.Default.ChatBubbleOutline,
+                        contentDescription = "Toggle Lyrics",
+                        active = showLyricsView,
+                        onClick = { showLyricsView = !showLyricsView }
+                    )
+
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Row(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(20.dp))
+                                .background(Color.White.copy(alpha = 0.15f))
+                                .border(1.dp, Color.White.copy(alpha = 0.08f), RoundedCornerShape(20.dp))
+                                .padding(horizontal = 14.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            Icon(Icons.Default.Headphones, contentDescription = null, tint = Color.White, modifier = Modifier.size(18.dp))
+                            Box(Modifier.width(1.dp).height(14.dp).background(Color.White.copy(alpha = 0.25f)))
+                            Icon(Icons.Default.Person, contentDescription = null, tint = Color.White.copy(alpha = 0.65f), modifier = Modifier.size(18.dp))
+                        }
+                        Spacer(Modifier.height(6.dp))
+                        Text("This phone", color = Color.White.copy(alpha = 0.6f), fontSize = 11.sp, fontWeight = FontWeight.Medium)
+                    }
+
+                    DockToggleGlyph(
+                        icon = Icons.Default.QueueMusic,
+                        contentDescription = "Queue",
+                        onClick = { showQueueView = true }
+                    )
+                }
             }
+        }
         }
 
         // Manual Custom Lyrics Search Dialog
@@ -1071,91 +1093,149 @@ private fun NowPlayingContent(
 @Composable
 private fun SeekbarSection(
     viewModel: NowPlayingViewModel,
-    songId: Long?,
+    song: SongEntity?,
     modifier: Modifier = Modifier
 ) {
     val progress by viewModel.playbackProgress.collectAsState()
-    val amplitudes = rememberWaveformAmplitudes(seed = songId)
 
+    // Minimalist thin slider (per the glassmorphic redesign spec) instead of the WaveformSeekBar
+    // this screen used before - a plain Slider with a small thumb, not per-sample bars.
+    // isDragging gates which value the slider shows: while the user is actively dragging, the
+    // real ticking position (progress.currentPositionMs, updating every 300ms) must NOT override
+    // their thumb position mid-gesture - only once they release does the real position resume
+    // driving the display, right after the seek this same release triggers lands.
+    var isDragging by remember { mutableStateOf(false) }
+    var dragPositionMs by remember { mutableFloatStateOf(progress.currentPositionMs.toFloat()) }
+    val displayedPositionMs = if (isDragging) dragPositionMs else progress.currentPositionMs.toFloat()
     Column(modifier = modifier) {
-        WaveformSeekBar(
-            amplitudes = amplitudes,
-            currentPositionMs = progress.currentPositionMs,
-            durationMs = progress.durationMs,
-            onSeekTo = { viewModel.seekTo(it) }
+        Slider(
+            value = displayedPositionMs,
+            onValueChange = { isDragging = true; dragPositionMs = it },
+            onValueChangeFinished = { isDragging = false; viewModel.seekTo(dragPositionMs.toLong()) },
+            valueRange = 0f..progress.durationMs.coerceAtLeast(1L).toFloat(),
+            colors = SliderDefaults.colors(
+                thumbColor = Color.White,
+                activeTrackColor = Color.White,
+                inactiveTrackColor = Color.White.copy(alpha = 0.25f)
+            ),
+            modifier = Modifier.fillMaxWidth().height(20.dp)
         )
 
+        // Three equal-weight slots (not Arrangement.SpaceBetween on raw children) so the center
+        // badge stays put - SpaceBetween just puts the badge "between" the two time labels, and
+        // those labels change width as their digit count changes (0:09 -> 0:10), which visibly
+        // shifted the badge left/right every tick. Each slot now owns a fixed third of the row
+        // and aligns its own content within it, so the badge's slot - and its centered position
+        // inside that slot - never moves regardless of how wide the time text on either side is.
         Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(start = 4.dp, top = 2.dp, end = 4.dp),
-            horizontalArrangement = Arrangement.SpaceBetween
+            verticalAlignment = Alignment.CenterVertically
         ) {
             Text(
-                text = formatMs(progress.currentPositionMs),
+                text = formatMs(displayedPositionMs.toLong()),
                 style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
+                color = Color.White.copy(alpha = 0.6f),
+                maxLines = 1,
+                modifier = Modifier.weight(1f)
             )
+
+            // Codec/bitrate badge, matching the "MP3 - 192 kbps" style quality badge other media
+            // players show here - reuses detectAudioFormat, the same real-header-sniffing +
+            // file-size-derived-bitrate logic the Song Info popup already shows, instead of the
+            // source label (Telegram/YouTube/Local) this slot showed before.
+            val badgeText = remember(song?.telegramMessageId, song?.localFilePath) {
+                if (song == null) "" else {
+                    val (format, bitrate) = detectAudioFormat(song.localFilePath, song.durationSeconds)
+                    val shortFormat = format.substringBefore(" ").substringBefore("(").trim()
+                    if (bitrate.isBlank()) shortFormat else "$shortFormat · $bitrate"
+                }
+            }
+            Row(
+                modifier = Modifier.weight(1f),
+                horizontalArrangement = Arrangement.Center,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                if (badgeText.isNotEmpty()) {
+                    Icon(
+                        Icons.Default.Headphones,
+                        contentDescription = null,
+                        tint = Color.White.copy(alpha = 0.6f),
+                        modifier = Modifier.size(12.dp)
+                    )
+                    Spacer(Modifier.width(3.dp))
+                    Text(
+                        text = badgeText,
+                        fontSize = 10.sp,
+                        color = Color.White.copy(alpha = 0.6f),
+                        fontWeight = FontWeight.Medium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+            }
+
+            val remainingMs = (progress.durationMs - displayedPositionMs.toLong()).coerceAtLeast(0)
             Text(
-                text = formatMs(progress.durationMs),
+                text = "-${formatMs(remainingMs)}",
                 style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
+                color = Color.White.copy(alpha = 0.6f),
+                textAlign = TextAlign.End,
+                maxLines = 1,
+                modifier = Modifier.weight(1f)
             )
         }
     }
 }
 
 /**
- * The synced-lyrics list, in its own composable for the same reason as [SeekbarSection]: the
- * active-line highlight and its auto-scroll both need [PlaybackProgress.activeLyricIndex] every
- * 300ms, and reading that off the shared, no-longer-ticking [NowPlayingUiState] would mean it
- * never updated at all. Collecting playbackProgress locally here keeps that cost scoped to just
- * this list rather than the whole screen.
+ * Real device volume (STREAM_MUSIC) - not a fake/decorative slider. Stays in sync with the
+ * hardware volume buttons (or another app changing the stream) via VOLUME_CHANGED_ACTION, not
+ * just its own drags - without that, pressing the phone's volume rocker while this screen is
+ * open would leave the slider showing a stale position until it was reopened.
  */
 @Composable
-private fun SyncedLyricsView(
-    lines: List<LyricLine>,
-    listState: LazyListState,
-    viewModel: NowPlayingViewModel,
-    onOpenManualSearch: () -> Unit
-) {
-    val progress by viewModel.playbackProgress.collectAsState()
+private fun DeviceVolumeRow(modifier: Modifier = Modifier) {
+    val context = LocalContext.current
+    val audioManager = remember { context.getSystemService(Context.AUDIO_SERVICE) as AudioManager }
+    val maxVolume = remember { audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC).coerceAtLeast(1) }
+    var volume by remember { mutableFloatStateOf(audioManager.getStreamVolume(AudioManager.STREAM_MUSIC) / maxVolume.toFloat()) }
 
-    LaunchedEffect(progress.activeLyricIndex) {
-        if (progress.activeLyricIndex >= 0) {
-            listState.animateScrollToItem(maxOf(0, progress.activeLyricIndex - 2))
+    DisposableEffect(context) {
+        val receiver = object : BroadcastReceiver() {
+            override fun onReceive(ctx: Context, intent: Intent) {
+                if (intent.getIntExtra("android.media.EXTRA_VOLUME_STREAM_TYPE", -1) == AudioManager.STREAM_MUSIC) {
+                    volume = audioManager.getStreamVolume(AudioManager.STREAM_MUSIC) / maxVolume.toFloat()
+                }
+            }
         }
+        ContextCompat.registerReceiver(
+            context, receiver, IntentFilter("android.media.VOLUME_CHANGED_ACTION"), ContextCompat.RECEIVER_NOT_EXPORTED
+        )
+        onDispose { context.unregisterReceiver(receiver) }
     }
 
-    Column(Modifier.fillMaxSize()) {
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
-            horizontalArrangement = Arrangement.End
-        ) {
-            IconButton(onClick = onOpenManualSearch) {
-                Icon(Icons.Default.Search, contentDescription = "Custom Lyrics Search", tint = MaterialTheme.colorScheme.primary)
-            }
-        }
-        LazyColumn(
-            state = listState,
-            modifier = Modifier.weight(1f).fillMaxWidth(),
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-            itemsIndexed(lines) { index, line ->
-                val isActive = index == progress.activeLyricIndex
-                Text(
-                    text = line.text,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable { viewModel.seekTo(line.timeMs) }
-                        .padding(vertical = 12.dp, horizontal = 16.dp),
-                    style = if (isActive) MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Bold)
-                    else MaterialTheme.typography.titleLarge,
-                    color = if (isActive) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
-                    textAlign = TextAlign.Center
-                )
-            }
-        }
+    Row(
+        modifier = modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(Icons.Default.VolumeMute, contentDescription = null, tint = Color.White.copy(alpha = 0.55f), modifier = Modifier.size(18.dp))
+        Slider(
+            value = volume,
+            onValueChange = { newVolume ->
+                volume = newVolume
+                audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, (newVolume * maxVolume).roundToInt(), 0)
+            },
+            colors = SliderDefaults.colors(
+                thumbColor = Color.Transparent,
+                activeTrackColor = Color.White.copy(alpha = 0.85f),
+                inactiveTrackColor = Color.White.copy(alpha = 0.2f)
+            ),
+            modifier = Modifier.weight(1f).height(16.dp)
+        )
+        Icon(Icons.Default.VolumeUp, contentDescription = null, tint = Color.White.copy(alpha = 0.55f), modifier = Modifier.size(18.dp))
     }
 }
 
@@ -1259,6 +1339,58 @@ private fun PlayerToggleGlyph(
             tint = if (highlighted) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f),
             modifier = Modifier.size(24.dp)
         )
+    }
+}
+
+/**
+ * The lyrics-toggle/queue icon buttons in the player dock's footer row (this file, LyricsView.kt,
+ * QueueView.kt) used to be bare IconButtons with a static tint - the only feedback tapping them
+ * gave was the platform ripple, and toggled state (lyrics on/off) just snapped instantly. This
+ * gives them the same kind of press-scale + fading active pill + tint crossfade that reference
+ * players like Metrolist/InnerTune give their dock controls: a spring-based press-down scale for
+ * tactile feedback, a soft white disc that fades in behind the icon while [active], and the icon
+ * tint itself crossfading instead of hard-cutting between its on/off alpha. `internal` (not
+ * `private`) so LyricsView.kt/QueueView.kt can call it too.
+ */
+@Composable
+internal fun DockToggleGlyph(
+    icon: ImageVector,
+    contentDescription: String,
+    onClick: () -> Unit,
+    active: Boolean = false,
+    modifier: Modifier = Modifier
+) {
+    val interactionSource = remember { MutableInteractionSource() }
+    val isPressed by interactionSource.collectIsPressedAsState()
+    val pressScale by animateFloatAsState(
+        targetValue = if (isPressed) 0.82f else 1f,
+        animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessHigh),
+        label = "dockGlyphPress"
+    )
+    val backgroundAlpha by animateFloatAsState(
+        targetValue = if (active) 0.22f else 0f,
+        animationSpec = tween(durationMillis = 220, easing = FastOutSlowInEasing),
+        label = "dockGlyphBackground"
+    )
+    val tint by animateColorAsState(
+        targetValue = if (active) Color.White else Color.White.copy(alpha = 0.65f),
+        animationSpec = tween(durationMillis = 220),
+        label = "dockGlyphTint"
+    )
+    Box(
+        modifier = modifier
+            .graphicsLayer { scaleX = pressScale; scaleY = pressScale }
+            .size(40.dp)
+            .clip(CircleShape)
+            .background(Color.White.copy(alpha = backgroundAlpha))
+            .clickable(
+                interactionSource = interactionSource,
+                indication = null,
+                onClick = onClick
+            ),
+        contentAlignment = Alignment.Center
+    ) {
+        Icon(icon, contentDescription = contentDescription, tint = tint, modifier = Modifier.size(22.dp))
     }
 }
 
@@ -1372,7 +1504,7 @@ private fun GlassInfoRow(icon: ImageVector, label: String, value: String) {
     }
 }
 
-private fun formatMs(ms: Long): String {
+internal fun formatMs(ms: Long): String {
     val totalSeconds = ms / 1000
     return "%d:%02d".format(totalSeconds / 60, totalSeconds % 60)
 }
