@@ -70,13 +70,18 @@ import com.abn3li.telemusic.data.browse.HomeSection
 import com.abn3li.telemusic.data.download.YtDlpSearchResult
 import com.abn3li.telemusic.data.local.ImportedPlaylistEntity
 import com.abn3li.telemusic.data.local.SongEntity
+import com.abn3li.telemusic.ui.library.AdaptiveScreenBackground
+import com.abn3li.telemusic.ui.library.LibrarySourceToggle
+import com.abn3li.telemusic.ui.library.adaptivePanelFill
 import com.abn3li.telemusic.ui.nowplaying.LocalMiniPlayerInset
 
 // Same local dark palette the Library/Settings/Sync redesign uses (see LibraryScreen's own doc
 // on why this is hardcoded per-screen rather than routed through MaterialTheme) - kept
 // consistent here so this screen doesn't look like a different, unstyled screen bolted on.
-private val BgColor = Color(0xFF000000)
-private val CardColor = Color(0xFF19191C)
+// BgColor/CardColor used to be hardcoded here too, which meant this screen stayed flat black
+// even with "Ambient blur" selected in Settings - AdaptiveScreenBackground/adaptivePanelFill()
+// (imported above) are what Library/detail/Sync screens use for that toggle, and now this screen
+// goes through the same ones instead of its own disconnected copy.
 private val TextSecondary = Color(0xFFA9A9A6)
 private val TextMuted = Color(0xFF8B8B88)
 private val AccentGreen = Color(0xFF1D9E75)
@@ -141,8 +146,9 @@ fun YouTubeDownloadScreen(
         )
     }
 
+    AdaptiveScreenBackground {
     Scaffold(
-        containerColor = BgColor,
+        containerColor = Color.Transparent,
         topBar = {
             TopAppBar(
                 title = { Text("YouTube", color = Color.White, fontWeight = FontWeight.Bold) },
@@ -151,11 +157,19 @@ fun YouTubeDownloadScreen(
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = Color.White)
                     }
                 },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = BgColor)
+                actions = {
+                    LibrarySourceToggle(
+                        showYoutube = true,
+                        onSelectLibrary = onBack,
+                        onSelectYoutube = {},
+                        modifier = Modifier.padding(end = 12.dp)
+                    )
+                },
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent)
             )
         }
     ) { padding ->
-        Column(modifier = Modifier.fillMaxSize().background(BgColor).padding(padding)) {
+        Column(modifier = Modifier.fillMaxSize().padding(padding)) {
             OutlinedTextField(
                 value = state.query,
                 onValueChange = viewModel::onQueryChange,
@@ -164,8 +178,8 @@ fun YouTubeDownloadScreen(
                 singleLine = true,
                 shape = RoundedCornerShape(20.dp),
                 colors = OutlinedTextFieldDefaults.colors(
-                    focusedContainerColor = CardColor,
-                    unfocusedContainerColor = CardColor,
+                    focusedContainerColor = adaptivePanelFill(),
+                    unfocusedContainerColor = adaptivePanelFill(),
                     focusedBorderColor = Color.Transparent,
                     unfocusedBorderColor = Color.Transparent,
                     focusedTextColor = Color.White,
@@ -193,7 +207,7 @@ fun YouTubeDownloadScreen(
                     modifier = Modifier
                         .fillMaxSize()
                         .clip(RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp))
-                        .background(CardColor)
+                        .background(adaptivePanelFill())
                 ) {
                     if (state.results.isEmpty()) {
                         EmptyTabMessage(state.errorMessage ?: "No songs found")
@@ -215,6 +229,7 @@ fun YouTubeDownloadScreen(
                 }
             }
         }
+    }
     }
 }
 
@@ -399,7 +414,7 @@ private fun GenreChip(genre: BrowseCollection, onClick: () -> Unit) {
     androidx.compose.material3.Surface(
         onClick = onClick,
         shape = RoundedCornerShape(100),
-        color = CardColor
+        color = adaptivePanelFill()
     ) {
         Text(
             text = genre.title,

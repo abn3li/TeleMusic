@@ -11,12 +11,15 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 
-/** Which channels ChannelPickerStep shows - independent of search, so a filter and a query can
- * be combined (e.g. "public channels matching 'music'"). */
-enum class ChannelFilter(val label: String) {
+/** Which chats ChannelPickerStep shows - independent of search, so a filter and a query can be
+ * combined (e.g. "groups matching 'music'"). Replaces the old channel-only Public/Private
+ * filter now that every chat category (not just channels) is fetched and shown. */
+enum class ChatCategoryFilter(val label: String) {
     ALL("All"),
-    PUBLIC("Public"),
-    PRIVATE("Private")
+    CHANNELS("Channels"),
+    GROUPS("Groups"),
+    CHATS("Chats"),
+    BOTS("Bots")
 }
 
 data class SyncUiState(
@@ -28,7 +31,7 @@ data class SyncUiState(
     // shown once this is non-null, same "don't show it if we can't back it" rule the channel
     // list already follows for a failed fetch.
     val savedMessagesChat: TelegramChatInfo? = null,
-    val filter: ChannelFilter = ChannelFilter.ALL,
+    val filter: ChatCategoryFilter = ChatCategoryFilter.ALL,
     val searchQuery: String = ""
 )
 
@@ -63,14 +66,18 @@ class SyncViewModel(private val tdlibManager: TdlibManager) : ViewModel() {
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(isLoadingChats = true, loadChatsError = null)
             runCatching {
-                val chats = tdlibManager.listMyChats().filter { it.isChannel }
+                // No category filter here any more - channels, groups, regular chats, and bots
+                // are all real places audio can be shared, so listMyChats()'s own full result
+                // (already classified per chat - see its own doc) goes straight to the UI, which
+                // filters by category itself for display.
+                val chats = tdlibManager.listMyChats()
                 _uiState.value = _uiState.value.copy(chats = chats)
             }.onFailure { e ->
                 // Previously swallowed silently, so a failed fetch (e.g. a transient error
                 // right after a fresh login) looked identical to a real empty "no channels"
                 // state, with no way to tell which one it was or retry without leaving the
                 // screen.
-                _uiState.value = _uiState.value.copy(loadChatsError = e.message ?: "Couldn't load your channels")
+                _uiState.value = _uiState.value.copy(loadChatsError = e.message ?: "Couldn't load your chats")
             }
             _uiState.value = _uiState.value.copy(isLoadingChats = false)
         }
@@ -81,7 +88,7 @@ class SyncViewModel(private val tdlibManager: TdlibManager) : ViewModel() {
         }
     }
 
-    fun setFilter(filter: ChannelFilter) {
+    fun setFilter(filter: ChatCategoryFilter) {
         _uiState.value = _uiState.value.copy(filter = filter)
     }
 

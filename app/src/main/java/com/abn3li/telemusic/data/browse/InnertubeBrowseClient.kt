@@ -25,12 +25,15 @@ class InnertubeBrowseClient {
         .readTimeout(15, TimeUnit.SECONDS)
         .build()
 
-    // [region] is a plain ISO 3166-1 alpha-2 country code ("US", "GB", "JP", ...) read fresh on
-    // every call rather than baked in at construction - this client is a long-lived singleton
-    // (see DiscoveryRepository), so a region changed in Settings has to take effect on the very
-    // next browse() call without needing a new client instance.
-    fun browse(browseId: String, params: String? = null, region: String = "US"): JSONObject =
-        post("browse", region, JSONObject().apply {
+    // A user-facing region picker used to sit in front of this (Settings > YouTube region), but
+    // was removed: verified on-device that neither the context.client.gl field below nor a
+    // PREF=gl=<region> cookie changes what Home/Charts/New Releases/Genres actually come back for
+    // this anonymous (no sign-in) endpoint - YouTube's backend gates that content off the
+    // request's real IP geolocation instead, which this app has no way to override. `gl`/`hl`
+    // stay hardcoded to a real value (still needed - they affect response language/labels) rather
+    // than exposing a setting that looked functional but couldn't actually do what it claimed.
+    fun browse(browseId: String, params: String? = null): JSONObject =
+        post("browse", JSONObject().apply {
             put("browseId", browseId)
             if (params != null) put("params", params)
         })
@@ -38,17 +41,17 @@ class InnertubeBrowseClient {
     /** The next page of a browse response that had a [BrowseParser.findContinuationToken] -
      * same `/browse` endpoint, just a continuation token instead of a browseId (this is
      * Innertube's own convention for paging any shelf, not something specific to this client). */
-    fun browseContinuation(continuation: String, region: String = "US"): JSONObject =
-        post("browse", region, JSONObject().apply { put("continuation", continuation) })
+    fun browseContinuation(continuation: String): JSONObject =
+        post("browse", JSONObject().apply { put("continuation", continuation) })
 
-    private fun post(endpoint: String, region: String, extra: JSONObject): JSONObject {
+    private fun post(endpoint: String, extra: JSONObject): JSONObject {
         val body = JSONObject().apply {
             put("context", JSONObject().apply {
                 put("client", JSONObject().apply {
                     put("clientName", "WEB_REMIX")
                     put("clientVersion", CLIENT_VERSION)
                     put("hl", "en")
-                    put("gl", region)
+                    put("gl", "US")
                 })
             })
             extra.keys().forEach { key -> put(key, extra.get(key)) }

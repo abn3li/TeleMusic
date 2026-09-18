@@ -200,16 +200,13 @@ private fun SongListScaffold(
                 .padding(padding)
                 .fillMaxSize()
         ) {
-            // Same translucent glass panel every Library tab (Tracks/Albums/Artists/Playlists)
-            // already wraps its content in - this screen used to be plain default Material
-            // colors sitting directly on the scaffold, which read as a different, unstyled
-            // screen next to the rest of the redesigned app.
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .clip(RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp))
-                    .background(adaptivePanelFill())
-            ) {
+            // No card/panel background here on purpose - content sits directly on the ambient
+            // background, matching the YouTube playlist screen's look (BrowseCollectionScreen.kt)
+            // once that got its own redesign pass. This used to wrap everything in a translucent
+            // glass panel clipped to a rounded top edge, which read as a boxed-in "card" sitting
+            // on top of the screen instead of being part of it - fine for the Library tabs
+            // (Tracks/Albums/Artists/Playlists), which are genuinely scrollable lists sharing a
+            // header, but wrong for a single album/artist/playlist's own detail screen.
             if (songs.isEmpty()) {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     Text(text = "No songs here yet", style = MaterialTheme.typography.bodyMedium, color = TextMuted)
@@ -230,7 +227,7 @@ private fun SongListScaffold(
                                 modifier = Modifier
                                     .size(160.dp)
                                     .clip(RoundedCornerShape(20.dp))
-                                    .background(BgColor),
+                                    .background(adaptivePanelFill()),
                                 contentAlignment = Alignment.Center
                             ) {
                                 if (!albumArtUrl.isNullOrEmpty()) {
@@ -352,7 +349,6 @@ private fun SongListScaffold(
                         }
                     }
                 }
-            }
             }
         }
     }

@@ -1,15 +1,14 @@
 package com.abn3li.telemusic.ui.nowplaying
 
 import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode as AnimRepeatMode
-import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.snap
-import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
@@ -322,32 +321,42 @@ fun QueueView(
                     )
 
                     Row(horizontalArrangement = Arrangement.spacedBy(24.dp), verticalAlignment = Alignment.CenterVertically) {
+                        val prevInteraction = remember { MutableInteractionSource() }
+                        val prevScale = rememberPressScale(prevInteraction)
+                        val prevAlpha by animateFloatAsState(if (state.hasPrevious) 1f else 0.35f, label = "prevAlpha")
                         Icon(
                             Icons.Default.SkipPrevious,
                             contentDescription = "Previous",
                             tint = Color.White,
-                            modifier = Modifier.size(28.dp).alpha(if (state.hasPrevious) 1f else 0.35f).clickable(
-                                interactionSource = remember { MutableInteractionSource() }, indication = null,
-                                onClick = { viewModel.previousSong() }
-                            )
+                            modifier = Modifier
+                                .size(28.dp)
+                                .graphicsLayer { scaleX = prevScale; scaleY = prevScale }
+                                .alpha(prevAlpha)
+                                .clickable(interactionSource = prevInteraction, indication = null, onClick = { viewModel.previousSong() })
                         )
+                        val playPauseInteraction = remember { MutableInteractionSource() }
+                        val playPauseScale = rememberPressScale(playPauseInteraction)
                         Icon(
                             imageVector = if (state.isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
                             contentDescription = "Play/Pause",
                             tint = Color.White,
-                            modifier = Modifier.size(36.dp).clickable(
-                                interactionSource = remember { MutableInteractionSource() }, indication = null,
-                                onClick = { viewModel.togglePlayPause() }
-                            )
+                            modifier = Modifier
+                                .size(36.dp)
+                                .graphicsLayer { scaleX = playPauseScale; scaleY = playPauseScale }
+                                .clickable(interactionSource = playPauseInteraction, indication = null, onClick = { viewModel.togglePlayPause() })
                         )
+                        val nextInteraction = remember { MutableInteractionSource() }
+                        val nextScale = rememberPressScale(nextInteraction)
+                        val nextAlpha by animateFloatAsState(if (state.hasNext) 1f else 0.35f, label = "nextAlpha")
                         Icon(
                             Icons.Default.SkipNext,
                             contentDescription = "Next",
                             tint = Color.White,
-                            modifier = Modifier.size(28.dp).alpha(if (state.hasNext) 1f else 0.35f).clickable(
-                                interactionSource = remember { MutableInteractionSource() }, indication = null,
-                                onClick = { viewModel.nextSong() }
-                            )
+                            modifier = Modifier
+                                .size(28.dp)
+                                .graphicsLayer { scaleX = nextScale; scaleY = nextScale }
+                                .alpha(nextAlpha)
+                                .clickable(interactionSource = nextInteraction, indication = null, onClick = { viewModel.nextSong() })
                         )
                     }
 
@@ -365,12 +374,15 @@ fun QueueView(
 
 @Composable
 private fun CircleIconButton(icon: androidx.compose.ui.graphics.vector.ImageVector, onClick: () -> Unit) {
+    val interactionSource = remember { MutableInteractionSource() }
+    val pressScale = rememberPressScale(interactionSource)
     Box(
         modifier = Modifier
             .size(36.dp)
+            .graphicsLayer { scaleX = pressScale; scaleY = pressScale }
             .clip(CircleShape)
             .background(Color.White.copy(alpha = 0.15f))
-            .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onClick),
+            .clickable(interactionSource = interactionSource, indication = null, onClick = onClick),
         contentAlignment = Alignment.Center
     ) {
         Icon(icon, contentDescription = null, tint = Color.White, modifier = Modifier.size(18.dp))
@@ -379,19 +391,32 @@ private fun CircleIconButton(icon: androidx.compose.ui.graphics.vector.ImageVect
 
 @Composable
 private fun ActionPill(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String?, active: Boolean, onClick: () -> Unit) {
+    val interactionSource = remember { MutableInteractionSource() }
+    val pressScale = rememberPressScale(interactionSource)
+    val backgroundColor by animateColorAsState(
+        targetValue = Color.White.copy(alpha = if (active) 0.28f else 0.12f),
+        animationSpec = tween(durationMillis = 220, easing = FastOutSlowInEasing),
+        label = "actionPillBackground"
+    )
+    val contentColor by animateColorAsState(
+        targetValue = if (active) Color.White else Color.White.copy(alpha = 0.7f),
+        animationSpec = tween(durationMillis = 220),
+        label = "actionPillContent"
+    )
     Row(
         modifier = Modifier
+            .graphicsLayer { scaleX = pressScale; scaleY = pressScale }
             .clip(RoundedCornerShape(14.dp))
-            .background(Color.White.copy(alpha = if (active) 0.28f else 0.12f))
+            .background(backgroundColor)
             .border(1.dp, Color.White.copy(alpha = 0.08f), RoundedCornerShape(14.dp))
-            .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onClick)
+            .clickable(interactionSource = interactionSource, indication = null, onClick = onClick)
             .padding(horizontal = 10.dp, vertical = 5.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(4.dp)
     ) {
-        Icon(icon, contentDescription = label, tint = if (active) Color.White else Color.White.copy(alpha = 0.7f), modifier = Modifier.size(16.dp))
+        Icon(icon, contentDescription = label, tint = contentColor, modifier = Modifier.size(16.dp))
         if (label != null) {
-            Text(label, color = if (active) Color.White else Color.White.copy(alpha = 0.7f), fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+            Text(label, color = contentColor, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
         }
     }
 }

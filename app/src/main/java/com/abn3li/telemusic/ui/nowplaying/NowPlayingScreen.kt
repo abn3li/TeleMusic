@@ -9,6 +9,7 @@ import androidx.core.content.ContextCompat
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.Crossfade
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
@@ -28,6 +29,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
+import androidx.compose.foundation.interaction.InteractionSource
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.*
@@ -44,6 +46,7 @@ import androidx.compose.material.icons.filled.FastForward
 import androidx.compose.material.icons.filled.FastRewind
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
+import androidx.compose.material.icons.filled.FileDownload
 import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.Headphones
 import androidx.compose.material.icons.filled.Info
@@ -781,10 +784,19 @@ private fun NowPlayingContent(
                         onClick = { viewModel.previousSong() }
                     )
 
-                    // Play / Pause - Prominent Filled Icon Button
+                    // Play / Pause - Prominent Filled Icon Button. Corner radius morphs between a
+                    // rounder "squircle" while paused and a fuller circle while playing (matching
+                    // the same touch other polished players give this exact button) instead of a
+                    // fixed CircleShape - a small detail, but it's the one button on this screen
+                    // you look at and tap the most.
+                    val playPauseCornerRadius by animateDpAsState(
+                        targetValue = if (state.isPlaying) 36.dp else 24.dp,
+                        animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessMedium),
+                        label = "playPauseCornerRadius"
+                    )
                     FilledIconButton(
                         onClick = { viewModel.togglePlayPause() },
-                        shape = CircleShape,
+                        shape = RoundedCornerShape(playPauseCornerRadius),
                         colors = IconButtonDefaults.filledIconButtonColors(
                             containerColor = MaterialTheme.colorScheme.primary,
                             contentColor = MaterialTheme.colorScheme.onPrimary
@@ -852,23 +864,22 @@ private fun NowPlayingContent(
                         onClick = { showLyricsView = !showLyricsView }
                     )
 
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Row(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(20.dp))
-                                .background(Color.White.copy(alpha = 0.15f))
-                                .border(1.dp, Color.White.copy(alpha = 0.08f), RoundedCornerShape(20.dp))
-                                .padding(horizontal = 14.dp, vertical = 8.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(10.dp)
-                        ) {
-                            Icon(Icons.Default.Headphones, contentDescription = null, tint = Color.White, modifier = Modifier.size(18.dp))
-                            Box(Modifier.width(1.dp).height(14.dp).background(Color.White.copy(alpha = 0.25f)))
-                            Icon(Icons.Default.Person, contentDescription = null, tint = Color.White.copy(alpha = 0.65f), modifier = Modifier.size(18.dp))
-                        }
-                        Spacer(Modifier.height(6.dp))
-                        Text("This phone", color = Color.White.copy(alpha = 0.6f), fontSize = 11.sp, fontWeight = FontWeight.Medium)
-                    }
+                    // Same isFavorite/isExplicitDownload/isLocalImport reads and
+                    // toggleFavorite()/downloadCurrentSong() actions the "..." options menu above
+                    // uses - kept as a second local read rather than hoisting isFav/isDownloaded/
+                    // isRealLocalImport out of that Row's scope, since both are cheap derived
+                    // reads off the same `state.song`.
+                    val isSongFavorite = state.song?.isFavorite == true
+                    val isSongDownloaded = state.song?.isExplicitDownload == true
+                    val isSongRealLocalImport = state.song?.isLocalImport == true && state.song?.localFilePath != null
+                    DownloadSavePill(
+                        isDownloaded = isSongDownloaded || isSongRealLocalImport,
+                        isSaved = isSongFavorite,
+                        isDownloading = state.isDownloading,
+                        downloadEnabled = !isSongDownloaded && !isSongRealLocalImport,
+                        onDownloadClick = { viewModel.downloadCurrentSong() },
+                        onSaveClick = { viewModel.toggleFavorite() }
+                    )
 
                     DockToggleGlyph(
                         icon = Icons.Default.QueueMusic,
@@ -1292,12 +1303,22 @@ private fun PlayerTransportGlyph(
     enabled: Boolean = true
 ) {
     val iconAlpha by animateFloatAsState(targetValue = if (enabled) 1f else 0.35f, label = "transportAlpha")
+    val interactionSource = remember { MutableInteractionSource() }
+    val isPressed by interactionSource.collectIsPressedAsState()
+    // Same spring press-scale as DockToggleGlyph (the lyrics/queue dock icons) - skip/previous
+    // had a disabled-state fade already but nothing at all for the tap itself.
+    val pressScale by animateFloatAsState(
+        targetValue = if (isPressed) 0.85f else 1f,
+        animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessHigh),
+        label = "transportPressScale"
+    )
     Box(
         modifier = Modifier
             .size(size + 24.dp)
+            .graphicsLayer { scaleX = pressScale; scaleY = pressScale }
             .clip(CircleShape)
             .clickable(
-                interactionSource = remember { MutableInteractionSource() },
+                interactionSource = interactionSource,
                 indication = null,
                 enabled = enabled,
                 onClick = onClick
@@ -1321,13 +1342,31 @@ private fun PlayerToggleGlyph(
     onClick: () -> Unit,
     highlighted: Boolean = false
 ) {
+    val backgroundColor by animateColorAsState(
+        targetValue = if (highlighted) MaterialTheme.colorScheme.primary.copy(alpha = 0.18f) else Color.Transparent,
+        animationSpec = tween(durationMillis = 220, easing = FastOutSlowInEasing),
+        label = "toggleGlyphBackground"
+    )
+    val tint by animateColorAsState(
+        targetValue = if (highlighted) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f),
+        animationSpec = tween(durationMillis = 220),
+        label = "toggleGlyphTint"
+    )
+    val interactionSource = remember { MutableInteractionSource() }
+    val isPressed by interactionSource.collectIsPressedAsState()
+    val pressScale by animateFloatAsState(
+        targetValue = if (isPressed) 0.85f else 1f,
+        animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessHigh),
+        label = "toggleGlyphPressScale"
+    )
     Box(
         modifier = Modifier
             .size(44.dp)
+            .graphicsLayer { scaleX = pressScale; scaleY = pressScale }
             .clip(CircleShape)
-            .background(if (highlighted) MaterialTheme.colorScheme.primary.copy(alpha = 0.18f) else Color.Transparent)
+            .background(backgroundColor)
             .clickable(
-                interactionSource = remember { MutableInteractionSource() },
+                interactionSource = interactionSource,
                 indication = null,
                 onClick = onClick
             ),
@@ -1336,7 +1375,7 @@ private fun PlayerToggleGlyph(
         Icon(
             imageVector = icon,
             contentDescription = contentDescription,
-            tint = if (highlighted) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f),
+            tint = tint,
             modifier = Modifier.size(24.dp)
         )
     }
@@ -1392,6 +1431,113 @@ internal fun DockToggleGlyph(
     ) {
         Icon(icon, contentDescription = contentDescription, tint = tint, modifier = Modifier.size(22.dp))
     }
+}
+
+/**
+ * The footer's center pill - Download and Favorite, sharing the exact same actions as the "..."
+ * options menu above (viewModel.toggleFavorite()/downloadCurrentSong()) instead of duplicating
+ * that logic. Replaces the old decorative "This phone" device pill, which had no click handlers
+ * at all - just a headphones/person glyph pair that never did anything.
+ *
+ * No `.blur()` on the pill itself: the reference design asks for a CSS `backdrop-filter` (blurs
+ * what's BEHIND the pill, letting the artwork/backdrop show through softened). Compose's
+ * `Modifier.blur()` only blurs what's INSIDE the composable it's applied to - on a Row wrapping
+ * the icons themselves, that would blur the icons into illegibility, not the backdrop. Real
+ * backdrop blur needs the Haze library, which (per AmbientBackground.kt's own doc) isn't a
+ * dependency here - so this pill stays a plain translucent fill, same as the DockToggleGlyph
+ * buttons and the pill it replaces.
+ */
+@Composable
+internal fun DownloadSavePill(
+    isDownloaded: Boolean,
+    isSaved: Boolean,
+    onDownloadClick: () -> Unit,
+    onSaveClick: () -> Unit,
+    isDownloading: Boolean = false,
+    downloadEnabled: Boolean = true,
+    modifier: Modifier = Modifier
+) {
+    Row(
+        modifier = modifier
+            .clip(RoundedCornerShape(50))
+            .background(Color.White.copy(alpha = 0.11f))
+            .padding(horizontal = 14.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        if (isDownloading) {
+            Box(modifier = Modifier.size(22.dp), contentAlignment = Alignment.Center) {
+                CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp, color = Color.White)
+            }
+        } else {
+            PillActionGlyph(
+                icon = Icons.Default.FileDownload,
+                contentDescription = if (isDownloaded) "Downloaded" else "Download song",
+                active = isDownloaded,
+                enabled = downloadEnabled,
+                onClick = onDownloadClick
+            )
+        }
+
+        Box(Modifier.width(1.dp).height(16.dp).background(Color.White.copy(alpha = 0.18f)))
+
+        PillActionGlyph(
+            icon = if (isSaved) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
+            contentDescription = if (isSaved) "Remove from Favorites" else "Add to Favorites",
+            active = isSaved,
+            onClick = onSaveClick
+        )
+    }
+}
+
+/** One icon inside [DownloadSavePill] - dim white by default, full white + press-scale when tapped. */
+@Composable
+private fun PillActionGlyph(
+    icon: ImageVector,
+    contentDescription: String,
+    active: Boolean,
+    onClick: () -> Unit,
+    enabled: Boolean = true
+) {
+    val interactionSource = remember { MutableInteractionSource() }
+    val pressScale = rememberPressScale(interactionSource)
+    val tint by animateColorAsState(
+        targetValue = if (active) Color.White else Color.White.copy(alpha = 0.7f),
+        animationSpec = tween(durationMillis = 200),
+        label = "pillGlyphTint"
+    )
+    Icon(
+        imageVector = icon,
+        contentDescription = contentDescription,
+        tint = tint,
+        modifier = Modifier
+            .size(22.dp)
+            .graphicsLayer { scaleX = pressScale; scaleY = pressScale }
+            .clickable(
+                interactionSource = interactionSource,
+                indication = null,
+                enabled = enabled,
+                onClick = onClick
+            )
+    )
+}
+
+/**
+ * Same spring press-scale DockToggleGlyph/PlayerToggleGlyph/PlayerTransportGlyph all use, factored
+ * out so LyricsView.kt/QueueView.kt's own plain `Icon(...).clickable(...)` transport rows (which
+ * only ever had a hard on/off `.alpha()` for enabled/disabled and nothing at all for the tap
+ * itself) can get the same tactile feedback without duplicating the boilerplate. `internal` so
+ * those files can call it.
+ */
+@Composable
+internal fun rememberPressScale(interactionSource: InteractionSource): Float {
+    val isPressed by interactionSource.collectIsPressedAsState()
+    val scale by animateFloatAsState(
+        targetValue = if (isPressed) 0.85f else 1f,
+        animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessHigh),
+        label = "sharedPressScale"
+    )
+    return scale
 }
 
 /**

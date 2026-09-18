@@ -7,7 +7,6 @@ import com.abn3li.telemusic.data.browse.HomeSection
 import com.abn3li.telemusic.data.browse.InnertubeBrowseClient
 import com.abn3li.telemusic.data.local.ImportedPlaylistDao
 import com.abn3li.telemusic.data.local.ImportedPlaylistEntity
-import com.abn3li.telemusic.data.settings.AppSettingsStore
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
@@ -22,7 +21,6 @@ import kotlinx.coroutines.withContext
  * YouTubeDownloadViewModel.importPlaylist's own doc), since it's the same "things shown in
  * Discovery" concern as the home feed above. */
 class DiscoveryRepository(
-    private val settingsStore: AppSettingsStore,
     private val importedPlaylistDao: ImportedPlaylistDao,
     private val client: InnertubeBrowseClient = InnertubeBrowseClient()
 ) {
@@ -33,44 +31,27 @@ class DiscoveryRepository(
     // search - this cache turns every visit after the first into an instant, free return.
     @Volatile private var cachedHome: List<HomeSection>? = null
     @Volatile private var cachedGenres: List<BrowseCollection>? = null
-    // Which region the above were fetched for - a Settings change to youtubeRegion has to bust
-    // both caches, or "changing region" would silently keep showing the old region's content
-    // until the process restarted.
-    @Volatile private var cachedRegion: String? = null
-
-    private fun currentRegion(): String {
-        val region = settingsStore.youtubeRegion
-        android.util.Log.d("DiscoveryRepo", "currentRegion() region=$region cachedRegion=$cachedRegion cachedHomeSize=${cachedHome?.size}")
-        if (region != cachedRegion) {
-            cachedHome = null
-            cachedGenres = null
-            cachedRegion = region
-        }
-        return region
-    }
 
     /** Home + New releases, merged into one feed - an anonymous (no sign-in) request only ever
      * gets 1-2 sparse sections from the Home page alone, where the real app's Home tab also
      * surfaces its New releases page inline. Fetched in parallel (two independent requests, not
      * two round trips back to back) and merged in that order. */
     suspend fun homeFeed(): List<HomeSection> {
-        val region = currentRegion()
         cachedHome?.let { return it }
         return withContext(Dispatchers.IO) {
             coroutineScope {
                 val home = async {
-                    runCatching { BrowseParser.parseHomeFeed(client.browse(InnertubeBrowseClient.HOME_BROWSE_ID, region = region)) }
+                    runCatching { BrowseParser.parseHomeFeed(client.browse(InnertubeBrowseClient.HOME_BROWSE_ID)) }
                         .onFailure { e -> android.util.Log.e("DiscoveryRepo", "homeFeed(): home page fetch/parse failed", e) }
                         .getOrElse { emptyList() }
                 }
                 val newReleases = async {
                     runCatching {
-                        BrowseParser.parseGridAsSection(client.browse(InnertubeBrowseClient.NEW_RELEASES_BROWSE_ID, region = region), "New releases")
+                        BrowseParser.parseGridAsSection(client.browse(InnertubeBrowseClient.NEW_RELEASES_BROWSE_ID), "New releases")
                     }.onFailure { e -> android.util.Log.e("DiscoveryRepo", "homeFeed(): new releases fetch/parse failed", e) }
                         .getOrNull()
                 }
                 val merged = home.await() + listOfNotNull(newReleases.await())
-                android.util.Log.d("DiscoveryRepo", "homeFeed(): resolved ${merged.size} sections for region=$region")
                 merged.also { if (it.isNotEmpty()) cachedHome = it }
             }
         }
@@ -80,10 +61,9 @@ class DiscoveryRepository(
      * playlists for that genre through [browse] like any other card. Cached the same way
      * [homeFeed] is, for the same reason. */
     suspend fun genres(): List<BrowseCollection> {
-        val region = currentRegion()
         cachedGenres?.let { return it }
         return withContext(Dispatchers.IO) {
-            runCatching { BrowseParser.parseGenreChips(client.browse(InnertubeBrowseClient.GENRES_BROWSE_ID, region = region)) }
+            runCatching { BrowseParser.parseGenreChips(client.browse(InnertubeBrowseClient.GENRES_BROWSE_ID)) }
                 .onFailure { e -> android.util.Log.e("DiscoveryRepo", "genres(): fetch/parse failed", e) }
                 .getOrElse { emptyList() }
                 .also { if (it.isNotEmpty()) cachedGenres = it }
@@ -92,8 +72,7 @@ class DiscoveryRepository(
 
     suspend fun browse(browseId: String, params: String?): BrowseContent = withContext(Dispatchers.IO) {
         runCatching {
-            val region = settingsStore.youtubeRegion
-            val raw = client.browse(browseId, params, region = region)
+            val raw = client.browse(browseId, params)
             var content = BrowseParser.parseBrowseContent(raw)
             if (content.tracks.isEmpty() && content.collections.isEmpty()) {
                 // A real HTTP 200 with a page shape the parser doesn't recognize looks identical
@@ -123,7 +102,7 @@ class DiscoveryRepository(
                 var pages = 0
                 while (pages < 25) {
                     val token = BrowseParser.findContinuationToken(page) ?: break
-                    page = client.browseContinuation(token, region = region)
+                    page = client.browseContinuation(token)
                     val pageContent = BrowseParser.parseBrowseContent(page)
                     if (pageContent.tracks.isEmpty()) break
                     pageContent.tracks.forEach { allTracks[it.videoId] = it }

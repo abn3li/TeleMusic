@@ -7,6 +7,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
@@ -16,10 +17,13 @@ import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Groups
 import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Public
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.SmartToy
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -32,14 +36,19 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.abn3li.telemusic.TgMusicApp
 import com.abn3li.telemusic.data.telegram.TelegramAuthState
+import com.abn3li.telemusic.data.telegram.TelegramChatCategory
+import com.abn3li.telemusic.data.telegram.TelegramChatInfo
+import com.abn3li.telemusic.ui.library.AdaptiveScreenBackground
+import com.abn3li.telemusic.ui.library.adaptivePanelFill
 import com.abn3li.telemusic.ui.nowplaying.LocalMiniPlayerInset
 
 // Same local dark palette the Library/Settings redesign uses (see LibraryScreen's own doc on
 // why this is hardcoded per-screen rather than routed through MaterialTheme) - kept consistent
 // here so the channel picker doesn't look like a different, unstyled screen bolted onto the
-// rest of the app.
-private val BgColor = Color(0xFF000000)
-private val CardColor = Color(0xFF19191C)
+// rest of the app. BgColor/CardColor used to be hardcoded here too, which meant this screen
+// stayed flat black even with "Ambient blur" selected in Settings - AdaptiveScreenBackground/
+// adaptivePanelFill() (imported above) are what Library/detail screens use for that toggle, and
+// now this screen goes through the same ones instead of its own disconnected copy.
 private val TextSecondary = Color(0xFFA9A9A6)
 private val TextMuted = Color(0xFF8B8B88)
 private val AccentGreen = Color(0xFF1D9E75)
@@ -56,8 +65,9 @@ fun SyncScreen(onBack: () -> Unit) {
     val syncing by viewModel.isSyncing.collectAsState()
     val progress by viewModel.syncProgress.collectAsState()
 
+    AdaptiveScreenBackground {
     Scaffold(
-        containerColor = BgColor,
+        containerColor = Color.Transparent,
         topBar = {
             Column {
                 TopAppBar(
@@ -67,7 +77,7 @@ fun SyncScreen(onBack: () -> Unit) {
                             Icon(Icons.Default.ArrowBack, contentDescription = "Back", tint = Color.White)
                         }
                     },
-                    colors = TopAppBarDefaults.topAppBarColors(containerColor = BgColor)
+                    colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent)
                 )
                 if (syncing) {
                     LinearProgressIndicator(
@@ -83,7 +93,6 @@ fun SyncScreen(onBack: () -> Unit) {
             modifier = Modifier
                 .padding(padding)
                 .fillMaxSize()
-                .background(BgColor)
                 .padding(horizontal = 20.dp, vertical = 16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
@@ -106,7 +115,7 @@ fun SyncScreen(onBack: () -> Unit) {
             AnimatedVisibility(visible = progress.isNotBlank()) {
                 Surface(
                     shape = RoundedCornerShape(16.dp),
-                    color = CardColor,
+                    color = adaptivePanelFill(),
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Row(
@@ -129,6 +138,7 @@ fun SyncScreen(onBack: () -> Unit) {
                 }
             }
         }
+    }
     }
 }
 
@@ -244,7 +254,7 @@ private fun CountryPickerDialog(onDismiss: () -> Unit, onSelect: (Country) -> Un
 private fun CodeStep(viewModel: SyncViewModel, deliveryDescription: String) {
     var code by remember { mutableStateOf("") }
     Text("Enter the code Telegram sent you", color = Color.White)
-    Card(colors = CardDefaults.cardColors(containerColor = CardColor)) {
+    Card(colors = CardDefaults.cardColors(containerColor = adaptivePanelFill())) {
         Text(deliveryDescription, modifier = Modifier.padding(12.dp), style = MaterialTheme.typography.bodySmall, color = TextSecondary)
     }
     OutlinedTextField(value = code, onValueChange = { code = it }, label = { Text("12345") })
@@ -265,7 +275,7 @@ private fun ChannelPickerStep(
     syncing: Boolean,
     onRetry: () -> Unit,
     onPick: (Long) -> Unit,
-    onFilterChange: (ChannelFilter) -> Unit,
+    onFilterChange: (ChatCategoryFilter) -> Unit,
     onSearchChange: (String) -> Unit
 ) {
     var isSearchActive by remember { mutableStateOf(false) }
@@ -286,7 +296,7 @@ private fun ChannelPickerStep(
             ) {
                 Icon(
                     if (isSearchActive) Icons.Default.Close else Icons.Default.Search,
-                    contentDescription = if (isSearchActive) "Close search" else "Search channels",
+                    contentDescription = if (isSearchActive) "Close search" else "Search chats",
                     tint = if (isSearchActive) AccentGreen else TextSecondary
                 )
             }
@@ -296,13 +306,13 @@ private fun ChannelPickerStep(
             OutlinedTextField(
                 value = state.searchQuery,
                 onValueChange = onSearchChange,
-                placeholder = { Text("Search channels...") },
+                placeholder = { Text("Search chats...") },
                 leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = AccentGreen) },
                 singleLine = true,
                 shape = RoundedCornerShape(20.dp),
                 colors = OutlinedTextFieldDefaults.colors(
-                    focusedContainerColor = CardColor,
-                    unfocusedContainerColor = CardColor,
+                    focusedContainerColor = adaptivePanelFill(),
+                    unfocusedContainerColor = adaptivePanelFill(),
                     focusedBorderColor = Color.Transparent,
                     unfocusedBorderColor = Color.Transparent,
                     focusedTextColor = Color.White,
@@ -312,8 +322,8 @@ private fun ChannelPickerStep(
             )
         }
 
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            ChannelFilter.entries.forEach { filter ->
+        LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            items(ChatCategoryFilter.entries) { filter ->
                 ChannelFilterChip(
                     label = filter.label,
                     selected = state.filter == filter,
@@ -329,13 +339,13 @@ private fun ChannelPickerStep(
             state.loadChatsError != null -> {
                 // Previously a failed fetch (e.g. a transient error right after a fresh login,
                 // when TDLib's local chat list often isn't populated yet) looked identical to a
-                // genuinely empty account - same "No channels found" text, no way to tell which
+                // genuinely empty account - same "No chats found" text, no way to tell which
                 // one it was or retry without leaving the screen entirely.
                 Text(
-                    "Couldn't load your channels: ${state.loadChatsError}",
+                    "Couldn't load your chats: ${state.loadChatsError}",
                     color = MaterialTheme.colorScheme.error
                 )
-                FilledTonalButton(onClick = onRetry, colors = ButtonDefaults.filledTonalButtonColors(containerColor = CardColor, contentColor = AccentGreen)) {
+                FilledTonalButton(onClick = onRetry, colors = ButtonDefaults.filledTonalButtonColors(containerColor = adaptivePanelFill(), contentColor = AccentGreen)) {
                     Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(18.dp))
                     Spacer(Modifier.width(6.dp))
                     Text("Retry")
@@ -345,9 +355,11 @@ private fun ChannelPickerStep(
                 val filteredChats = remember(state.chats, state.filter, state.searchQuery) {
                     state.chats.filter { chat ->
                         val matchesFilter = when (state.filter) {
-                            ChannelFilter.ALL -> true
-                            ChannelFilter.PUBLIC -> chat.isPublic
-                            ChannelFilter.PRIVATE -> !chat.isPublic
+                            ChatCategoryFilter.ALL -> true
+                            ChatCategoryFilter.CHANNELS -> chat.category == TelegramChatCategory.CHANNEL
+                            ChatCategoryFilter.GROUPS -> chat.category == TelegramChatCategory.GROUP
+                            ChatCategoryFilter.CHATS -> chat.category == TelegramChatCategory.CHAT
+                            ChatCategoryFilter.BOTS -> chat.category == TelegramChatCategory.BOT
                         }
                         val matchesQuery = state.searchQuery.isBlank() ||
                             chat.title.contains(state.searchQuery, ignoreCase = true)
@@ -355,16 +367,17 @@ private fun ChannelPickerStep(
                     }
                 }
                 val savedMessages = state.savedMessagesChat?.takeIf {
-                    // Saved Messages isn't a channel, so it sits outside the Public/Private
-                    // filter entirely - only the search query (if any) can hide it.
+                    // Saved Messages sits outside the category filter entirely (it's not really
+                    // a Channel/Group/Chat/Bot, just your own account) - only the search query
+                    // (if any) can hide it, same as before.
                     state.searchQuery.isBlank() || it.title.contains(state.searchQuery, ignoreCase = true) ||
                         "saved messages".contains(state.searchQuery.trim(), ignoreCase = true)
                 }
 
                 if (filteredChats.isEmpty() && savedMessages == null) {
                     Text(
-                        if (state.chats.isEmpty()) "No channels found. Create a private channel in Telegram and upload some songs to it first."
-                        else "No chats match your search.",
+                        if (state.chats.isEmpty()) "No chats found. Create a private channel in Telegram and upload some songs to it first."
+                        else "Nothing matches your search.",
                         color = TextMuted
                     )
                 } else {
@@ -372,7 +385,7 @@ private fun ChannelPickerStep(
                         modifier = Modifier
                             .fillMaxSize()
                             .clip(RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp))
-                            .background(CardColor)
+                            .background(adaptivePanelFill())
                     ) {
                         LazyColumn(contentPadding = PaddingValues(bottom = LocalMiniPlayerInset.current)) {
                             if (savedMessages != null) {
@@ -389,13 +402,14 @@ private fun ChannelPickerStep(
                                     HorizontalDivider(color = DividerColor, thickness = 0.5.dp)
                                 }
                             }
-                            itemsIndexed(filteredChats) { index, chat ->
+                            itemsIndexed(filteredChats, key = { _, chat -> chat.id }) { index, chat ->
+                                val style = chatRowStyle(chat)
                                 ChannelRow(
                                     title = chat.title,
-                                    subtitle = if (chat.isPublic) "Public channel" else "Private channel",
-                                    icon = if (chat.isPublic) Icons.Default.Public else Icons.Default.Lock,
-                                    iconTint = if (chat.isPublic) Color(0xFF97C459) else Color(0xFFF0997B),
-                                    iconBg = if (chat.isPublic) Color(0xFF173404) else Color(0xFF4A1B0C),
+                                    subtitle = style.subtitle,
+                                    icon = style.icon,
+                                    iconTint = style.iconTint,
+                                    iconBg = style.iconBg,
                                     enabled = !syncing,
                                     onClick = { onPick(chat.id) }
                                 )
@@ -411,12 +425,33 @@ private fun ChannelPickerStep(
     }
 }
 
+/** Icon/color/subtitle for a chat row, keyed off its real [TelegramChatInfo.category] - Public/
+ * Private is still shown for a channel specifically (the only category that distinction applies
+ * to), everything else gets its own fixed look. */
+private data class ChatRowStyle(
+    val icon: androidx.compose.ui.graphics.vector.ImageVector,
+    val iconTint: Color,
+    val iconBg: Color,
+    val subtitle: String
+)
+
+private fun chatRowStyle(chat: TelegramChatInfo): ChatRowStyle = when (chat.category) {
+    TelegramChatCategory.CHANNEL -> if (chat.isPublic) {
+        ChatRowStyle(Icons.Default.Public, Color(0xFF97C459), Color(0xFF173404), "Public channel")
+    } else {
+        ChatRowStyle(Icons.Default.Lock, Color(0xFFF0997B), Color(0xFF4A1B0C), "Private channel")
+    }
+    TelegramChatCategory.GROUP -> ChatRowStyle(Icons.Default.Groups, Color(0xFF85B7EB), Color(0xFF042C53), "Group")
+    TelegramChatCategory.BOT -> ChatRowStyle(Icons.Default.SmartToy, Color(0xFFD9A441), Color(0xFF4A3A0C), "Bot")
+    TelegramChatCategory.CHAT -> ChatRowStyle(Icons.Default.Person, Color(0xFFC79BE0), Color(0xFF33204A), "Chat")
+}
+
 @Composable
 private fun ChannelFilterChip(label: String, selected: Boolean, onClick: () -> Unit) {
     Surface(
         onClick = onClick,
         shape = RoundedCornerShape(100),
-        color = if (selected) AccentGreen else CardColor
+        color = if (selected) AccentGreen else adaptivePanelFill()
     ) {
         Text(
             text = label,

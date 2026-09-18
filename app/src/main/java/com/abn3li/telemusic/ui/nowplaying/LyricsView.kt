@@ -7,7 +7,6 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
@@ -30,7 +29,6 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawWithContent
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.CompositingStrategy
@@ -295,32 +293,42 @@ fun LyricsView(
                     )
 
                     Row(horizontalArrangement = Arrangement.spacedBy(24.dp), verticalAlignment = Alignment.CenterVertically) {
+                        val prevInteraction = remember { MutableInteractionSource() }
+                        val prevScale = rememberPressScale(prevInteraction)
+                        val prevAlpha by animateFloatAsState(if (state.hasPrevious) 1f else 0.35f, label = "prevAlpha")
                         Icon(
                             Icons.Default.SkipPrevious,
                             contentDescription = "Previous",
                             tint = Color.White,
-                            modifier = Modifier.size(28.dp).alpha(if (state.hasPrevious) 1f else 0.35f).clickable(
-                                interactionSource = remember { MutableInteractionSource() }, indication = null,
-                                onClick = { viewModel.previousSong() }
-                            )
+                            modifier = Modifier
+                                .size(28.dp)
+                                .graphicsLayer { scaleX = prevScale; scaleY = prevScale }
+                                .alpha(prevAlpha)
+                                .clickable(interactionSource = prevInteraction, indication = null, onClick = { viewModel.previousSong() })
                         )
+                        val playPauseInteraction = remember { MutableInteractionSource() }
+                        val playPauseScale = rememberPressScale(playPauseInteraction)
                         Icon(
                             imageVector = if (state.isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
                             contentDescription = "Play/Pause",
                             tint = Color.White,
-                            modifier = Modifier.size(36.dp).clickable(
-                                interactionSource = remember { MutableInteractionSource() }, indication = null,
-                                onClick = { viewModel.togglePlayPause() }
-                            )
+                            modifier = Modifier
+                                .size(36.dp)
+                                .graphicsLayer { scaleX = playPauseScale; scaleY = playPauseScale }
+                                .clickable(interactionSource = playPauseInteraction, indication = null, onClick = { viewModel.togglePlayPause() })
                         )
+                        val nextInteraction = remember { MutableInteractionSource() }
+                        val nextScale = rememberPressScale(nextInteraction)
+                        val nextAlpha by animateFloatAsState(if (state.hasNext) 1f else 0.35f, label = "nextAlpha")
                         Icon(
                             Icons.Default.SkipNext,
                             contentDescription = "Next",
                             tint = Color.White,
-                            modifier = Modifier.size(28.dp).alpha(if (state.hasNext) 1f else 0.35f).clickable(
-                                interactionSource = remember { MutableInteractionSource() }, indication = null,
-                                onClick = { viewModel.nextSong() }
-                            )
+                            modifier = Modifier
+                                .size(28.dp)
+                                .graphicsLayer { scaleX = nextScale; scaleY = nextScale }
+                                .alpha(nextAlpha)
+                                .clickable(interactionSource = nextInteraction, indication = null, onClick = { viewModel.nextSong() })
                         )
                     }
 

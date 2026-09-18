@@ -56,9 +56,18 @@ import androidx.compose.ui.unit.dp
 import android.net.Uri
 import coil.compose.AsyncImage
 import com.abn3li.telemusic.TgMusicApp
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.ui.graphics.Color
 import com.abn3li.telemusic.data.browse.BrowseCollection
 import com.abn3li.telemusic.data.browse.BrowseTrack
 import com.abn3li.telemusic.data.local.SongEntity
+import com.abn3li.telemusic.ui.library.AccentGreen
+import com.abn3li.telemusic.ui.library.AdaptiveScreenBackground
+import com.abn3li.telemusic.ui.library.DividerColor
+import com.abn3li.telemusic.ui.library.OnAccentGreen
+import com.abn3li.telemusic.ui.library.TextSecondary
+import com.abn3li.telemusic.ui.library.adaptivePanelFill
 import com.abn3li.telemusic.ui.nowplaying.LocalMiniPlayerInset
 
 /**
@@ -101,13 +110,16 @@ fun BrowseCollectionScreen(
         )
     }
 
+    AdaptiveScreenBackground {
     Scaffold(
+        containerColor = Color.Transparent,
         topBar = {
             TopAppBar(
-                title = { Text(state.title, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                title = { Text(state.title, color = Color.White, maxLines = 1, overflow = TextOverflow.Ellipsis) },
                 navigationIcon = {
-                    IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") }
-                }
+                    IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = Color.White) }
+                },
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent)
             )
         }
     ) { padding ->
@@ -127,7 +139,7 @@ fun BrowseCollectionScreen(
                             ) {
                                 androidx.compose.material3.Surface(
                                     shape = RoundedCornerShape(24.dp),
-                                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                                    color = adaptivePanelFill(),
                                     shadowElevation = 4.dp,
                                     modifier = Modifier.size(160.dp)
                                 ) {
@@ -135,14 +147,14 @@ fun BrowseCollectionScreen(
                                         AsyncImage(model = coverUrl, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
                                     } else {
                                         Box(
-                                            modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surfaceContainerHighest),
+                                            modifier = Modifier.fillMaxSize().background(adaptivePanelFill()),
                                             contentAlignment = Alignment.Center
                                         ) {
                                             Icon(
                                                 imageVector = Icons.Default.MusicNote,
                                                 contentDescription = null,
                                                 modifier = Modifier.size(64.dp),
-                                                tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.8f)
+                                                tint = AccentGreen.copy(alpha = 0.8f)
                                             )
                                         }
                                     }
@@ -151,12 +163,13 @@ fun BrowseCollectionScreen(
                                 Text(
                                     text = "${state.tracks.size} ${if (state.tracks.size == 1) "track" else "tracks"}",
                                     style = MaterialTheme.typography.bodyMedium,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    color = TextSecondary
                                 )
                                 Spacer(Modifier.height(12.dp))
                                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
                                     androidx.compose.material3.Button(
                                         onClick = { state.tracks.firstOrNull()?.let { viewModel.onPlayClick(it) } },
+                                        colors = ButtonDefaults.buttonColors(containerColor = AccentGreen, contentColor = OnAccentGreen),
                                         contentPadding = PaddingValues(horizontal = 20.dp, vertical = 10.dp)
                                     ) {
                                         Icon(Icons.Default.PlayArrow, contentDescription = null, modifier = Modifier.size(20.dp))
@@ -165,6 +178,7 @@ fun BrowseCollectionScreen(
                                     }
                                     androidx.compose.material3.FilledTonalButton(
                                         onClick = { state.tracks.randomOrNull()?.let { viewModel.onPlayClick(it) } },
+                                        colors = ButtonDefaults.filledTonalButtonColors(containerColor = DividerColor, contentColor = Color.White),
                                         contentPadding = PaddingValues(horizontal = 20.dp, vertical = 10.dp)
                                     ) {
                                         Icon(Icons.Default.Shuffle, contentDescription = null, modifier = Modifier.size(20.dp))
@@ -179,12 +193,12 @@ fun BrowseCollectionScreen(
                                 // of competing with two one-tap playback buttons.
                                 when {
                                     state.importedPlaylistId != null -> Row(verticalAlignment = Alignment.CenterVertically) {
-                                        Icon(Icons.Default.CheckCircle, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(16.dp))
+                                        Icon(Icons.Default.CheckCircle, contentDescription = null, tint = AccentGreen, modifier = Modifier.size(16.dp))
                                         Spacer(Modifier.width(6.dp))
                                         Text(
                                             "Imported to your Library playlists",
                                             style = MaterialTheme.typography.bodySmall,
-                                            color = MaterialTheme.colorScheme.primary
+                                            color = AccentGreen
                                         )
                                     }
                                     state.importProgress != null -> {
@@ -192,15 +206,17 @@ fun BrowseCollectionScreen(
                                         androidx.compose.material3.OutlinedButton(
                                             onClick = {},
                                             enabled = false,
+                                            colors = ButtonDefaults.outlinedButtonColors(contentColor = TextSecondary),
                                             contentPadding = PaddingValues(horizontal = 20.dp, vertical = 10.dp)
                                         ) {
-                                            CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                                            CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp, color = AccentGreen)
                                             Spacer(Modifier.width(8.dp))
                                             Text("Importing $done/$total…")
                                         }
                                     }
                                     else -> androidx.compose.material3.OutlinedButton(
                                         onClick = { viewModel.importToLibrary() },
+                                        colors = ButtonDefaults.outlinedButtonColors(contentColor = TextSecondary),
                                         contentPadding = PaddingValues(horizontal = 20.dp, vertical = 10.dp)
                                     ) {
                                         Icon(Icons.AutoMirrored.Filled.PlaylistAdd, contentDescription = null, modifier = Modifier.size(18.dp))
@@ -233,10 +249,11 @@ fun BrowseCollectionScreen(
                     }
                 }
                 else -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Text(state.errorMessage ?: "Nothing here", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(state.errorMessage ?: "Nothing here", color = TextSecondary)
                 }
             }
         }
+    }
     }
 }
 
@@ -259,7 +276,7 @@ private fun BrowseTrackRow(
         verticalAlignment = Alignment.CenterVertically
     ) {
         Box(
-            modifier = Modifier.size(52.dp).clip(RoundedCornerShape(10.dp)).background(MaterialTheme.colorScheme.surfaceContainerHigh),
+            modifier = Modifier.size(52.dp).clip(RoundedCornerShape(10.dp)).background(adaptivePanelFill()),
             contentAlignment = Alignment.Center
         ) {
             if (track.thumbnailUrl != null) {
@@ -272,18 +289,18 @@ private fun BrowseTrackRow(
                 }
                 AsyncImage(model = request, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
             } else {
-                Icon(Icons.Default.MusicNote, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                Icon(Icons.Default.MusicNote, contentDescription = null, tint = AccentGreen)
             }
         }
         Spacer(Modifier.width(12.dp))
         Column(modifier = Modifier.weight(1f)) {
-            Text(track.title, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodyMedium)
+            Text(track.title, color = Color.White, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodyMedium)
             Text(
                 track.artist,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
                 style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
+                color = TextSecondary
             )
         }
         // Fixed 48dp slots regardless of state (IconButton's own default touch size) - a bare
@@ -291,16 +308,16 @@ private fun BrowseTrackRow(
         // visibly shifted left the moment loading started and snapped back once it finished.
         Box(modifier = Modifier.size(48.dp), contentAlignment = Alignment.Center) {
             if (isLoadingStream) {
-                CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+                CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp, color = AccentGreen)
             } else {
-                IconButton(onClick = onPlayClick) { Icon(Icons.Default.PlayArrow, contentDescription = "Play") }
+                IconButton(onClick = onPlayClick) { Icon(Icons.Default.PlayArrow, contentDescription = "Play", tint = Color.White) }
             }
         }
         Box(modifier = Modifier.size(48.dp), contentAlignment = Alignment.Center) {
             when {
-                isDownloading -> CircularProgressIndicator(modifier = Modifier.size(24.dp), strokeWidth = 2.dp)
-                isDownloaded -> Icon(Icons.Default.CheckCircle, contentDescription = "Downloaded", tint = MaterialTheme.colorScheme.primary)
-                else -> IconButton(onClick = onDownloadClick) { Icon(Icons.Default.Download, contentDescription = "Download") }
+                isDownloading -> CircularProgressIndicator(modifier = Modifier.size(24.dp), strokeWidth = 2.dp, color = AccentGreen)
+                isDownloaded -> Icon(Icons.Default.CheckCircle, contentDescription = "Downloaded", tint = AccentGreen)
+                else -> IconButton(onClick = onDownloadClick) { Icon(Icons.Default.Download, contentDescription = "Download", tint = Color.White) }
             }
         }
     }
@@ -311,7 +328,7 @@ private fun BrowseCollectionCard(collection: BrowseCollection, onClick: () -> Un
     val context = LocalContext.current
     Column(modifier = Modifier.clickable(onClick = onClick)) {
         Box(
-            modifier = Modifier.fillMaxWidth().height(160.dp).clip(RoundedCornerShape(10.dp)).background(MaterialTheme.colorScheme.surfaceContainerHigh),
+            modifier = Modifier.fillMaxWidth().height(160.dp).clip(RoundedCornerShape(10.dp)).background(adaptivePanelFill()),
             contentAlignment = Alignment.Center
         ) {
             if (collection.thumbnailUrl != null) {
@@ -320,13 +337,13 @@ private fun BrowseCollectionCard(collection: BrowseCollection, onClick: () -> Un
                 }
                 AsyncImage(model = request, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
             } else {
-                Icon(Icons.Default.MusicNote, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                Icon(Icons.Default.MusicNote, contentDescription = null, tint = AccentGreen)
             }
         }
         Spacer(Modifier.height(6.dp))
-        Text(collection.title, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Text(collection.title, color = Color.White, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
         collection.subtitle?.let {
-            Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(it, style = MaterialTheme.typography.bodySmall, color = TextSecondary, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
     }
 }

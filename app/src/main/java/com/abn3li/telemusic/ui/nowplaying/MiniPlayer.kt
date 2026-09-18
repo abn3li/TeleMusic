@@ -1,6 +1,10 @@
 package com.abn3li.telemusic.ui.nowplaying
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.Crossfade
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.layout.*
@@ -13,6 +17,7 @@ import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.compositionLocalOf
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -157,11 +162,17 @@ private fun MiniPlayerContent(
                     onClick = onPlayPause,
                     modifier = Modifier.size(40.dp)
                 ) {
-                    Icon(
-                        imageVector = if (state.isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
-                        contentDescription = if (state.isPlaying) "Pause" else "Play",
-                        tint = Color.White
-                    )
+                    // Same play/pause dissolve NowPlayingContent's own big button gets, instead
+                    // of the icon just popping instantly - this is the button you glance at most
+                    // often since the mini player is visible almost the whole time you're using
+                    // the app.
+                    Crossfade(targetState = state.isPlaying, animationSpec = tween(durationMillis = 150), label = "miniPlayPauseMorph") { playing ->
+                        Icon(
+                            imageVector = if (playing) Icons.Default.Pause else Icons.Default.PlayArrow,
+                            contentDescription = if (playing) "Pause" else "Play",
+                            tint = Color.White
+                        )
+                    }
                 }
             }
 
@@ -178,9 +189,16 @@ private fun MiniPlayerContent(
             }
         }
 
-        // Mini Progress Bar
+        // Mini Progress Bar - eased toward each new tick instead of jumping straight to it, so
+        // the fill reads as continuously gliding rather than visibly stepping every poll
+        // interval (state.currentPositionMs only updates a few times a second, not every frame).
         if (state.durationMs > 0L) {
-            val progressFloat = (state.currentPositionMs.toFloat() / state.durationMs.toFloat()).coerceIn(0f, 1f)
+            val targetProgress = (state.currentPositionMs.toFloat() / state.durationMs.toFloat()).coerceIn(0f, 1f)
+            val progressFloat by animateFloatAsState(
+                targetValue = targetProgress,
+                animationSpec = tween(durationMillis = 300, easing = LinearEasing),
+                label = "miniPlayerProgress"
+            )
             LinearProgressIndicator(
                 progress = { progressFloat },
                 modifier = Modifier

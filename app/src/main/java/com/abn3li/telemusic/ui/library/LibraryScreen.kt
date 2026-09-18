@@ -2,11 +2,14 @@ package com.abn3li.telemusic.ui.library
 
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
@@ -28,6 +31,7 @@ import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.automirrored.filled.Sort
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Album
@@ -306,14 +310,18 @@ fun LibraryScreen(
         remember { mutableFloatStateOf(0f) }
     }
 
+    // Kept short on purpose - this feeds the header's single-line SubWaveTelegramIndicator, and
+    // "Telegram Connected"/"Connecting to Telegram..." wrapped to two lines there. Every
+    // intermediate state collapses to "Reconnecting" - the header doesn't have room to spell out
+    // which exact phase (proxy/network/update) it's in the way the old flat status row did.
     val (statusColor, statusText) = remember(connectionState) {
         when (connectionState) {
-            TelegramConnectionState.CONNECTED -> Color(0xFF4CAF50) to "Telegram Connected"
-            TelegramConnectionState.CONNECTING -> Color(0xFFFF9800) to "Connecting to Telegram..."
-            TelegramConnectionState.CONNECTING_TO_PROXY -> Color(0xFF00E5FF) to "Connecting to Proxy..."
-            TelegramConnectionState.WAITING_FOR_NETWORK -> Color(0xFFFFC107) to "Waiting for Network..."
-            TelegramConnectionState.UPDATING -> Color(0xFF2196F3) to "Updating Telegram..."
-            TelegramConnectionState.DISCONNECTED -> Color(0xFFF44336) to "Telegram Disconnected"
+            TelegramConnectionState.CONNECTED -> Color(0xFF4CAF50) to "Connected"
+            TelegramConnectionState.CONNECTING -> Color(0xFFFF9800) to "Reconnecting"
+            TelegramConnectionState.CONNECTING_TO_PROXY -> Color(0xFF00E5FF) to "Reconnecting"
+            TelegramConnectionState.WAITING_FOR_NETWORK -> Color(0xFFFFC107) to "Reconnecting"
+            TelegramConnectionState.UPDATING -> Color(0xFF2196F3) to "Reconnecting"
+            TelegramConnectionState.DISCONNECTED -> Color(0xFFF44336) to "Disconnected"
         }
     }
 
@@ -323,96 +331,134 @@ fun LibraryScreen(
         topBar = {
             Surface(color = Color.Transparent) {
                 Column {
-                    Column(modifier = Modifier.padding(start = 18.dp, end = 18.dp, top = 20.dp, bottom = 14.dp)) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(text = "Library", color = Color.White, fontSize = 26.sp, fontWeight = FontWeight.Medium)
-                            Row(horizontalArrangement = Arrangement.spacedBy(14.dp), verticalAlignment = Alignment.CenterVertically) {
-                                IconButton(onClick = { isSearchActive = !isSearchActive }, modifier = Modifier.size(24.dp)) {
-                                    Icon(
-                                        Icons.Default.Search,
+                    // No card/background here on purpose - floats directly over whatever the
+                    // screen body behind it is (Classic flat fill or Ambient blur), same as
+                    // every other row on this screen, instead of being its own separate boxed-in
+                    // surface.
+                    Box(modifier = Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 16.dp)) {
+                        Column {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                // "Library" is the ONLY thing in its column now (the sub-wave
+                                // status row moved below, under the icon toolbar instead - see
+                                // the Row right after this one) - CenterVertically now correctly
+                                // centers the title against the icon row itself, not against a
+                                // taller title+status block.
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = "Library",
+                                    color = Color.White,
+                                    fontSize = 26.sp,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    modifier = Modifier.weight(1f, fill = false)
+                                )
+
+                                Row(
+                                    modifier = Modifier
+                                        .clip(CircleShape)
+                                        .background(Color.White.copy(alpha = 0.06f))
+                                        .border(1.dp, Color.White.copy(alpha = 0.10f), CircleShape)
+                                        .padding(3.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(1.dp)
+                                ) {
+                                    HeaderGlassButton(
+                                        icon = Icons.Default.Search,
                                         contentDescription = "Search songs",
-                                        tint = if (isSearchActive) AccentGreen else TextSecondary
+                                        tint = if (isSearchActive) AccentGreen else Color.White.copy(alpha = 0.75f),
+                                        onClick = { isSearchActive = !isSearchActive }
                                     )
-                                }
-                                IconButton(onClick = onSyncClick, modifier = Modifier.size(24.dp)) {
-                                    Icon(
-                                        Icons.Default.Sync,
+                                    HeaderGlassButton(
+                                        icon = Icons.Default.Sync,
                                         contentDescription = "Sync from channel",
-                                        tint = if (isSyncing) AccentGreen else TextSecondary,
+                                        tint = if (isSyncing) AccentGreen else Color.White.copy(alpha = 0.75f),
+                                        onClick = onSyncClick,
                                         modifier = Modifier.graphicsLayer {
                                             rotationZ = if (isSyncing) syncRotationAngle.value else 0f
                                         }
                                     )
-                                }
-                                IconButton(onClick = onYouTubeDownloadClick, modifier = Modifier.size(24.dp)) {
-                                    Icon(Icons.Default.Download, contentDescription = "Download from YouTube", tint = TextSecondary)
-                                }
-                                IconButton(onClick = onSettingsClick, modifier = Modifier.size(24.dp)) {
-                                    Icon(Icons.Default.Settings, contentDescription = "Settings", tint = TextSecondary)
+                                    LibrarySourceToggle(
+                                        showYoutube = false,
+                                        onSelectLibrary = {},
+                                        onSelectYoutube = onYouTubeDownloadClick,
+                                        trackHeight = 34.dp,
+                                        segmentWidth = 28.dp,
+                                        segmentHeight = 26.dp,
+                                        trackColor = Color.Black.copy(alpha = 0.45f),
+                                        activeColor = Color(0xFF00D68F)
+                                    )
+                                    HeaderGlassButton(
+                                        icon = Icons.Default.Settings,
+                                        contentDescription = "Settings",
+                                        onClick = onSettingsClick
+                                    )
                                 }
                             }
-                        }
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp),
-                            modifier = Modifier.padding(top = 6.dp)
-                        ) {
-                            Box(modifier = Modifier.size(6.dp).clip(CircleShape).background(statusColor))
-                            Text(text = statusText, color = TextSecondary, fontSize = 13.sp)
-                        }
-                    }
 
-                    AnimatedVisibility(visible = isSearchActive, enter = expandVertically(), exit = shrinkVertically()) {
-                        OutlinedTextField(
-                            value = searchQuery,
-                            onValueChange = { searchQuery = it },
-                            placeholder = { Text("Search songs, artists, albums...") },
-                            leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = AccentGreen) },
-                            trailingIcon = {
-                                if (searchQuery.isNotEmpty()) {
-                                    IconButton(onClick = { searchQuery = "" }) {
-                                        Icon(Icons.Default.Close, contentDescription = "Clear search", tint = TextSecondary)
-                                    }
-                                } else {
-                                    IconButton(onClick = { isSearchActive = false; searchQuery = "" }) {
-                                        Icon(Icons.Default.Close, contentDescription = "Close search", tint = TextSecondary)
+                            // Status stays under the TITLE (left), same spot Option A had it.
+                            // Only the Reconnect action moved - it sits under the icon toolbar
+                            // (right), replacing the old standalone "Connecting taking
+                            // time... [Reconnect]" banner that used to be its own full-width row
+                            // elsewhere on the screen.
+                            Row(
+                                modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                SubWaveTelegramIndicator(
+                                    connected = connectionState == TelegramConnectionState.CONNECTED,
+                                    statusColor = statusColor,
+                                    statusText = statusText
+                                )
+                                AnimatedVisibility(visible = showReconnectButton, enter = fadeIn(), exit = fadeOut()) {
+                                    Row(
+                                        modifier = Modifier
+                                            .clip(RoundedCornerShape(50))
+                                            .background(CardColor)
+                                            .clickable { app.tdlibManager.reconnect(app.settingsStore.proxySettings) }
+                                            .padding(horizontal = 10.dp, vertical = 4.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Icon(Icons.Default.Refresh, contentDescription = null, tint = AccentGreen, modifier = Modifier.size(13.dp))
+                                        Spacer(Modifier.width(4.dp))
+                                        Text("Reconnect", color = AccentGreen, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                                     }
                                 }
-                            },
-                            singleLine = true,
-                            shape = RoundedCornerShape(24.dp),
-                            colors = OutlinedTextFieldDefaults.colors(
-                                focusedContainerColor = CardColor,
-                                unfocusedContainerColor = CardColor,
-                                focusedBorderColor = Color.Transparent,
-                                unfocusedBorderColor = Color.Transparent,
-                                focusedTextColor = Color.White,
-                                unfocusedTextColor = Color.White
-                            ),
-                            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp)
-                        )
-                    }
+                            }
 
-                    AnimatedVisibility(visible = showReconnectButton, enter = expandVertically(), exit = shrinkVertically()) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            Text("Connecting taking time...", color = TextSecondary, fontSize = 12.sp)
-                            FilledTonalButton(
-                                onClick = { app.tdlibManager.reconnect(app.settingsStore.proxySettings) },
-                                colors = ButtonDefaults.filledTonalButtonColors(containerColor = CardColor, contentColor = AccentGreen),
-                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
-                                modifier = Modifier.height(32.dp)
-                            ) {
-                                Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(14.dp))
-                                Spacer(Modifier.width(6.dp))
-                                Text("Reconnect", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            AnimatedVisibility(visible = isSearchActive, enter = expandVertically(), exit = shrinkVertically()) {
+                                Column {
+                                    OutlinedTextField(
+                                        value = searchQuery,
+                                        onValueChange = { searchQuery = it },
+                                        placeholder = { Text("Search songs, artists, albums...") },
+                                        leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = AccentGreen) },
+                                        trailingIcon = {
+                                            if (searchQuery.isNotEmpty()) {
+                                                IconButton(onClick = { searchQuery = "" }) {
+                                                    Icon(Icons.Default.Close, contentDescription = "Clear search", tint = TextSecondary)
+                                                }
+                                            } else {
+                                                IconButton(onClick = { isSearchActive = false; searchQuery = "" }) {
+                                                    Icon(Icons.Default.Close, contentDescription = "Close search", tint = TextSecondary)
+                                                }
+                                            }
+                                        },
+                                        singleLine = true,
+                                        shape = RoundedCornerShape(16.dp),
+                                        colors = OutlinedTextFieldDefaults.colors(
+                                            focusedContainerColor = adaptivePanelFill(),
+                                            unfocusedContainerColor = adaptivePanelFill(),
+                                            focusedBorderColor = Color.Transparent,
+                                            unfocusedBorderColor = Color.Transparent,
+                                            focusedTextColor = Color.White,
+                                            unfocusedTextColor = Color.White
+                                        ),
+                                        modifier = Modifier.fillMaxWidth().padding(top = 14.dp)
+                                    )
+                                }
                             }
                         }
                     }
@@ -502,6 +548,132 @@ fun LibraryScreen(
             }
         }
     }
+    }
+}
+
+/**
+ * The Library header's "sub-wave" Telegram status row - a small live-looking indicator (animated
+ * equalizer bars + Telegram badge + pulsing status dot + status text) sitting under the "Library"
+ * title, per the reference design's compact_sub_wave_library_top_bar.html mockup. Animates only
+ * while [connected] (Telegram actually connected) - a permanently-animating decoration would keep
+ * compositing every frame this whole screen is on screen for no reason once the real state says
+ * otherwise, the same "why is this only conditionally infinite" reasoning already applied to
+ * syncRotationAngle above.
+ */
+@Composable
+private fun SubWaveTelegramIndicator(connected: Boolean, statusColor: Color, statusText: String, modifier: Modifier = Modifier) {
+    Row(
+        modifier = modifier,
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        EqualizerWaveBars(animating = connected)
+
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            // Authentic-ish Telegram badge - filled circle + paper-plane glyph, matching the
+            // mockup's own mini emblem rather than a generic icon.
+            Box(
+                modifier = Modifier.size(16.dp).clip(CircleShape).background(Color(0xFF229ED9)),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    Icons.AutoMirrored.Filled.Send,
+                    contentDescription = null,
+                    tint = Color.White,
+                    modifier = Modifier.size(9.dp)
+                )
+            }
+
+            PulsingStatusDot(color = statusColor, pulsing = connected)
+
+            Text(text = statusText, color = statusColor, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
+        }
+    }
+}
+
+/** 4 vertical bars bobbing at their own independent height/speed - a "live audio" glyph, not
+ * actually tied to any real waveform data (this is a status decoration, not a visualizer). */
+@Composable
+private fun EqualizerWaveBars(animating: Boolean, modifier: Modifier = Modifier) {
+    data class BarSpec(val minHeight: Dp, val maxHeight: Dp, val durationMs: Int, val color: Color)
+    val bars = remember {
+        listOf(
+            BarSpec(4.dp, 14.dp, 1050, Color(0xFF38BDF8)),
+            BarSpec(5.dp, 13.dp, 800, Color(0xFF34D399)),
+            BarSpec(6.dp, 15.dp, 1250, Color(0xFF38BDF8)),
+            BarSpec(4.dp, 11.dp, 950, Color(0xFF38BDF8))
+        )
+    }
+    Row(modifier = modifier.height(15.dp), horizontalArrangement = Arrangement.spacedBy(3.dp), verticalAlignment = Alignment.Bottom) {
+        bars.forEach { spec ->
+            val transition = rememberInfiniteTransition(label = "waveBar")
+            val height by if (animating) {
+                transition.animateFloat(
+                    initialValue = spec.minHeight.value,
+                    targetValue = spec.maxHeight.value,
+                    animationSpec = infiniteRepeatable(animation = tween(spec.durationMs, easing = LinearEasing), repeatMode = RepeatMode.Reverse),
+                    label = "waveBarHeight"
+                )
+            } else {
+                remember { mutableFloatStateOf(spec.minHeight.value) }
+            }
+            Box(
+                modifier = Modifier
+                    .width(2.5.dp)
+                    .height(height.dp)
+                    .clip(RoundedCornerShape(50))
+                    .background(spec.color)
+            )
+        }
+    }
+}
+
+/** The small status dot next to the Telegram connection text - scales up/down softly while
+ * [pulsing] (i.e. actually connected), sits still otherwise. */
+@Composable
+private fun PulsingStatusDot(color: Color, pulsing: Boolean, modifier: Modifier = Modifier) {
+    val transition = rememberInfiniteTransition(label = "statusPulse")
+    val scale by if (pulsing) {
+        transition.animateFloat(
+            initialValue = 1f,
+            targetValue = 1.15f,
+            animationSpec = infiniteRepeatable(animation = tween(1000, easing = LinearEasing), repeatMode = RepeatMode.Reverse),
+            label = "statusPulseScale"
+        )
+    } else {
+        remember { mutableFloatStateOf(1f) }
+    }
+    Box(
+        modifier = modifier
+            .size(7.dp)
+            .graphicsLayer { scaleX = scale; scaleY = scale }
+            .clip(CircleShape)
+            .background(color)
+    )
+}
+
+/** A round glass icon button for the header's action bar - transparent by default (the pill
+ * container around it already supplies the glass fill), press-scale feedback instead of the
+ * platform ripple, matching the DockToggleGlyph-family convention already used in Now Playing. */
+@Composable
+private fun HeaderGlassButton(
+    icon: ImageVector,
+    contentDescription: String,
+    onClick: () -> Unit,
+    tint: Color = Color.White.copy(alpha = 0.75f),
+    modifier: Modifier = Modifier
+) {
+    val interactionSource = remember { MutableInteractionSource() }
+    val pressScale = com.abn3li.telemusic.ui.nowplaying.rememberPressScale(interactionSource)
+    Box(
+        modifier = modifier
+            .size(38.dp)
+            .graphicsLayer { scaleX = pressScale; scaleY = pressScale }
+            .clip(CircleShape)
+            .clickable(interactionSource = interactionSource, indication = null, onClick = onClick),
+        contentAlignment = Alignment.Center
+    ) {
+        Icon(icon, contentDescription = contentDescription, tint = tint, modifier = Modifier.size(18.dp))
     }
 }
 

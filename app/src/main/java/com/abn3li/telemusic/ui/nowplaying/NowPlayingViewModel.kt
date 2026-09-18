@@ -97,6 +97,12 @@ class NowPlayingViewModel(
     fun jumpToQueueItem(offsetInUpcoming: Int) {
         val id = queue.jumpToIndex(queue.currentIndexValue() + 1 + offsetInUpcoming) ?: return
         loadCurrentQueuePosition(songIdOverride = id)
+        // Missing here (unlike every other queue-mutating function above/below) left
+        // upcomingQueue holding its stale pre-jump list - the tapped song (now currentIndex)
+        // stayed listed as "upcoming" too, so the Queue screen showed duplicate/stale rows and
+        // drag-to-reorder's offset math got thrown off against a list that no longer matched
+        // the real queue.
+        refreshUpcomingQueue()
     }
 
     /** Queue screen's "Clear Queue" action - keeps the currently playing song, drops the rest. */

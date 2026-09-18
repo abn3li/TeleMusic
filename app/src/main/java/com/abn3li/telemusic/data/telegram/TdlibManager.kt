@@ -300,11 +300,45 @@ class TdlibManager(private val context: Context) {
             emptyMap()
         }
 
-        return chats.map { chat ->
-            val supergroupType = chat.type as? TdApi.ChatTypeSupergroup
-            val isChannel = supergroupType?.isChannel == true
-            val isPublic = isChannel && publicBySupergroupId[supergroupType.supergroupId] == true
-            TelegramChatInfo(chat.id, chat.title, isChannel, isPublic)
+        // Own user id, so a private chat with yourself (i.e. Saved Messages) can be excluded
+        // below - it's already surfaced as its own dedicated row via getSavedMessagesChat(),
+        // and without this it would now also show up a second time in the general list below,
+        // now that private chats aren't filtered out entirely any more.
+        val myId = runCatching { (sendSuspend(TdApi.GetMe()) as TdApi.User).id }.getOrNull()
+
+        // Bot vs a real person is NOT something the Chat object itself carries - only the linked
+        // User's own `type` says that, same "needs a second call per item" shape as the
+        // public/private resolution above, so it's resolved the same way: one parallel pass over
+        // the distinct private-chat user ids into a read-only map.
+        val privateUserIds = chats.mapNotNull { (it.type as? TdApi.ChatTypePrivate)?.userId }.distinct()
+        val botByUserId = coroutineScope {
+            privateUserIds.map { userId ->
+                async {
+                    userId to (runCatching { sendSuspend(TdApi.GetUser(userId)) as TdApi.User }
+                        .getOrNull()?.type is TdApi.UserTypeBot)
+                }
+            }.awaitAll()
+        }.toMap()
+
+        return chats.mapNotNull { chat ->
+            when (val type = chat.type) {
+                is TdApi.ChatTypeSupergroup -> {
+                    val category = if (type.isChannel) TelegramChatCategory.CHANNEL else TelegramChatCategory.GROUP
+                    val isPublic = type.isChannel && publicBySupergroupId[type.supergroupId] == true
+                    TelegramChatInfo(chat.id, chat.title, category, isPublic)
+                }
+                is TdApi.ChatTypeBasicGroup -> TelegramChatInfo(chat.id, chat.title, TelegramChatCategory.GROUP)
+                is TdApi.ChatTypePrivate -> {
+                    if (type.userId == myId) return@mapNotNull null
+                    val category = if (botByUserId[type.userId] == true) TelegramChatCategory.BOT else TelegramChatCategory.CHAT
+                    TelegramChatInfo(chat.id, chat.title, category)
+                }
+                is TdApi.ChatTypeSecret -> {
+                    if (type.userId == myId) return@mapNotNull null
+                    TelegramChatInfo(chat.id, chat.title, TelegramChatCategory.CHAT)
+                }
+                else -> null
+            }
         }
     }
 
@@ -343,7 +377,7 @@ class TdlibManager(private val context: Context) {
     suspend fun getSavedMessagesChat(): TelegramChatInfo? = try {
         val myId = (sendSuspend(TdApi.GetMe()) as TdApi.User).id
         val chat = sendSuspend(TdApi.CreatePrivateChat(myId, true)) as TdApi.Chat
-        TelegramChatInfo(chat.id, chat.title.ifBlank { "Saved Messages" }, isChannel = false)
+        TelegramChatInfo(chat.id, chat.title.ifBlank { "Saved Messages" }, TelegramChatCategory.CHAT)
     } catch (_: Exception) {
         null
     }
@@ -406,7 +440,7 @@ class TdlibManager(private val context: Context) {
     /** Finds the first channel chatId in the user's account if lastSyncedChatId isn't stored yet. */
     suspend fun findFirstChannelId(): Long? {
         return try {
-            val chats = listMyChats(resolvePublicStatus = false).filter { it.isChannel }
+            val chats = listMyChats(resolvePublicStatus = false).filter { it.category == TelegramChatCategory.CHANNEL }
             chats.firstOrNull()?.id
         } catch (_: Exception) {
             null
