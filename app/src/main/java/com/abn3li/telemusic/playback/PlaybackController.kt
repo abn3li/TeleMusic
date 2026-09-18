@@ -33,7 +33,6 @@ class PlaybackController(context: Context) {
     fun connect(
         onPlaybackError: ((String) -> Unit)? = null,
         onBufferingChanged: ((Boolean) -> Unit)? = null,
-        onEnded: (() -> Unit)? = null,
         onReady: () -> Unit
     ) {
         val sessionToken = SessionToken(appContext, ComponentName(appContext, MusicService::class.java))
@@ -66,9 +65,11 @@ class PlaybackController(context: Context) {
                     onBufferingChanged?.invoke(playbackState == Player.STATE_BUFFERING)
                     if (playbackState == Player.STATE_READY) {
                         consecutiveErrorRetries = 0
-                    } else if (playbackState == Player.STATE_ENDED) {
-                        onEnded?.invoke()
                     }
+                    // STATE_ENDED (auto-advance to the next song) is handled in
+                    // NowPlayingViewModel's own addListener() instead - it already has the
+                    // queue/repeat-mode logic nextSong() needs, so this class doesn't need its
+                    // own separate "what happens when a song ends" callback and caller to wire up.
                 }
             })
             pendingListeners.forEach { controller?.addListener(it) }

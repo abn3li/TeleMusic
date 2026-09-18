@@ -191,6 +191,16 @@ class NowPlayingViewModel(
             // being broken. Player.STATE_BUFFERING is exactly ExoPlayer's own signal for this.
             override fun onPlaybackStateChanged(playbackState: Int) {
                 _uiState.value = _uiState.value.copy(isBuffering = playbackState == Player.STATE_BUFFERING)
+                // PlaybackController.connect() has its own onEnded callback for exactly this,
+                // but TgMusicApp's connect() call never passes one - STATE_ENDED fired into the
+                // void, so a song finishing just went silent instead of advancing. Reusing
+                // nextSong() itself (not duplicating PlaybackQueue's advance logic here) means
+                // this behaves identically to tapping the Next button - same wrap-at-the-end and
+                // repeat-one/repeat-all handling PlaybackQueue.next() already implements, no
+                // separate "how should the end of the queue behave" decision to get out of sync.
+                if (playbackState == Player.STATE_ENDED) {
+                    nextSong()
+                }
             }
         })
     }
