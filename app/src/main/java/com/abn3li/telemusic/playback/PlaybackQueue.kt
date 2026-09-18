@@ -95,6 +95,15 @@ class PlaybackQueue {
         }
     }
 
+    /** Peeks at the next song ID without advancing [currentIndex] - used for background pre-fetching. */
+    fun peekNextId(): Long? {
+        if (songIds.isEmpty()) return null
+        if (repeatMode == RepeatMode.ONE) return currentSongId()
+        if (currentIndex + 1 < songIds.size) return songIds[currentIndex + 1]
+        if (repeatMode == RepeatMode.ALL) return songIds.firstOrNull()
+        return null
+    }
+
     fun hasPrevious(): Boolean {
         if (songIds.size <= 1) return false
         return when (repeatMode) {

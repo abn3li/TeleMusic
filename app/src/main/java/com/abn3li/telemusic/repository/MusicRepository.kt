@@ -228,6 +228,7 @@ class MusicRepository(
             telegramFileId = 0,
             title = track.title,
             artist = track.artist,
+            durationSeconds = track.durationSeconds,
             albumArtUrl = track.thumbnailUrl,
             youtubeVideoId = track.videoId,
             metadataEnriched = true
@@ -246,7 +247,14 @@ class MusicRepository(
         if (song.localFilePath != null) return null
         val outcome = ytDlpRepository.resolveStreamUrl(videoId, DownloadQuality.BEST.formatSelector)
         val stream = outcome.getOrNull()?.takeIf { it.streamUrl.isNotBlank() } ?: return null
+        if (stream.durationSeconds > 0 && song.durationSeconds != stream.durationSeconds) {
+            songDao.update(song.copy(durationSeconds = stream.durationSeconds))
+        }
         return stream.streamUrl.toUri()
+    }
+
+    fun invalidateStreamCache(videoId: String) {
+        ytDlpRepository.invalidateStreamCache(videoId)
     }
 
     // ---- One-time cleanup: collapse collab credits into their primary artist ----

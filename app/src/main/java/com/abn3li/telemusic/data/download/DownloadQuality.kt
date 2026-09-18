@@ -12,5 +12,5 @@ package com.abn3li.telemusic.data.download
  * the Opus/WebM bytes YouTube served. There's no quality picker in the UI - every download always
  * uses this. */
 enum class DownloadQuality(val formatSelector: String) {
-    BEST("bestaudio[acodec^=opus]")
+    BEST("bestaudio/best")
 }

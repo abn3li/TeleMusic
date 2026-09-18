@@ -197,32 +197,20 @@ def download(video_id, dest_dir, dest_filename_stem, format_selector="bestaudio/
     return entry
 
 
-def resolve_stream_url(video_id, format_selector="bestaudio[acodec^=opus]"):
+def resolve_stream_url(video_id, format_selector="bestaudio/best"):
     """Resolves [video_id]'s direct, playable audio stream URL for [format_selector] WITHOUT
     downloading anything to disk - backs the "Play" button (stream it, keep nothing) as opposed
-    to [download] above (saved permanently to [dest_dir]). The URL is a short-lived, YouTube-
-    signed googlevideo.com link that expires on its own - Media3's own DefaultDataSource plays a
-    plain https:// URL exactly like any other source (see PlaybackController.playUri), so there's
-    no new playback machinery needed, just a URL instead of a file path.
+    to [download] above (saved permanently to [dest_dir]). Uses android/ios player clients
+    to obtain unthrottled streaming URLs (10+ MB/s) instead of web/tv clients which suffer from
+    YouTube CDN n-parameter throttling (30 KB/s).
     """
-    # NOT pinned to any single client. Two attempts at this both broke real playback outright
-    # ("Requested format is not available") instead of just resolving faster - android first
-    # (itag 251/Opus missing from its format list), then web_music (verified empirically: it
-    # doesn't reliably carry Opus either, same failure, same error, confirmed via logcat). Left
-    # as yt-dlp's own default multi-client fallback chain - slower, but the only version that's
-    # actually been confirmed correct across real videos. Do not re-attempt a single-client pin
-    # here without first verifying Opus availability across several real videos, not just one.
-    # A THIRD attempt reused one YoutubeDL instance across calls instead of building a fresh one
-    # each time (to skip its extractor-registry setup cost) - reverted too: real device timing
-    # showed calls getting SLOWER the more of them ran on the shared instance (2.95s -> 6.39s ->
-    # 10.24s), consistent with a shared HTTP session/connection compounding YouTube's own
-    # throttling. A fresh instance per call avoids that.
     opts = {
         "quiet": True,
         "no_warnings": True,
         "format": format_selector,
         "noplaylist": True,
         "skip_download": True,
+        "extractor_args": {"youtube": {"player_client": ["android", "ios"]}},
     }
     t0 = time.monotonic()
     with yt_dlp.YoutubeDL(opts) as ydl:

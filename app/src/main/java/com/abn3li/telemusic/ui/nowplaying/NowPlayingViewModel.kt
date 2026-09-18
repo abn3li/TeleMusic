@@ -70,6 +70,7 @@ class NowPlayingViewModel(
     val uiState: StateFlow<NowPlayingUiState> = _uiState
     private var tickerJob: Job? = null
     private var loadJob: Job? = null
+    private var prefetchJob: Job? = null
     // Set by playEphemeral() for a YouTube "Play" stream, cleared the moment a real song loads -
     // downloadCurrentSong() needs this to actually download the video (see its own doc for why
     // the ordinary downloadExplicitly() path can't: there's no Telegram message behind this row
@@ -191,15 +192,14 @@ class NowPlayingViewModel(
             // being broken. Player.STATE_BUFFERING is exactly ExoPlayer's own signal for this.
             override fun onPlaybackStateChanged(playbackState: Int) {
                 _uiState.value = _uiState.value.copy(isBuffering = playbackState == Player.STATE_BUFFERING)
-                // PlaybackController.connect() has its own onEnded callback for exactly this,
-                // but TgMusicApp's connect() call never passes one - STATE_ENDED fired into the
-                // void, so a song finishing just went silent instead of advancing. Reusing
-                // nextSong() itself (not duplicating PlaybackQueue's advance logic here) means
-                // this behaves identically to tapping the Next button - same wrap-at-the-end and
-                // repeat-one/repeat-all handling PlaybackQueue.next() already implements, no
-                // separate "how should the end of the queue behave" decision to get out of sync.
                 if (playbackState == Player.STATE_ENDED) {
-                    nextSong()
+                    val currentPlayingId = _uiState.value.song?.telegramMessageId
+                    val queueCurrentId = queue.currentSongId()
+                    // Avoid double-advancing: only advance if a new song isn't already loading
+                    // and the queue hasn't already been advanced for this ended track.
+                    if (_uiState.value.loadingSongId == null && (currentPlayingId == null || queueCurrentId == currentPlayingId)) {
+                        nextSong()
+                    }
                 }
             }
         })
@@ -428,19 +428,13 @@ class NowPlayingViewModel(
     private fun loadCurrentQueuePosition(songIdOverride: Long? = null) {
         loadJob?.cancel()
         pendingEphemeralVideoId = null
+        // Unconditionally stop whatever was playing right now, before any slow async work
+        // (YouTube stream resolution or Telegram prebuffer wait) begins - this immediately
+        // moves ExoPlayer out of STATE_ENDED into STATE_IDLE so duplicate auto-advance events
+        // cannot trigger during the network resolution wait.
+        playbackController.stop()
         loadJob = viewModelScope.launch {
             val songId = songIdOverride ?: queue.currentSongId() ?: return@launch
-
-            // Stops whatever was playing RIGHT NOW, before any of the slow work below (a
-            // YouTube stream resolve, a Telegram prebuffer wait) - see PlaybackController.stop's
-            // own doc for why this used to be missing: the old song kept audibly playing through
-            // that whole wait otherwise, which read as "it won't stop" rather than "the new one
-            // is loading". Skipped only when nothing was playing yet (first song of the app
-            // session) - nothing to stop, and stop() on an idle player is harmless anyway, but
-            // there's no reason to call it.
-            if (_uiState.value.song != null) {
-                playbackController.stop()
-            }
 
             _uiState.value = _uiState.value.copy(loadingSongId = songId)
 
@@ -475,20 +469,6 @@ class NowPlayingViewModel(
                 isShuffleEnabled = queue.isShuffleEnabled,
                 repeatMode = queue.repeatMode,
                 errorMessage = null,
-                // loadingSongId is deliberately NOT cleared here - it stays set through
-                // startPlayback() below, see that call's own note. Clearing it this early meant
-                // the artwork's own buffering spinner (NowPlayingScreen.kt, keyed on
-                // loadingSongId) switched off right as the real wait began for a YouTube-
-                // streamable row (see SongEntity.youtubeVideoId's own doc): resolving a fresh
-                // stream URL is a real ~2-3s network round trip (see
-                // MusicRepository.resolveDirectPlaybackUri), and nothing was showing during it -
-                // exactly what read as "shows zero info, no sign it's doing anything." A local/
-                // Telegram song resolves near-instantly either way, so this costs those nothing
-                // visible - the spinner just never has time to render for them.
-                // isDownloading belongs to whichever song was on screen when a download was
-                // started, not necessarily this new one - without resetting it here, skipping
-                // away from a song mid-download left the NEXT song showing a downloading
-                // spinner it had nothing to do with.
                 isDownloading = false
             )
 
@@ -497,6 +477,10 @@ class NowPlayingViewModel(
             // Zero automatic lyrics fetch on song change! Only manual when user taps button.
 
             startPlayback(song)
+
+            // Background pre-fetch the next track in queue so YouTube stream resolution
+            // happens ahead of time for instant (0ms) playback startup when auto-advancing.
+            prefetchNextTrack()
 
             // Only clears loadingSongId if this is still the song actually on screen - a fast
             // skip to the next/previous song while a slow YouTube resolve was still in flight
@@ -528,9 +512,24 @@ class NowPlayingViewModel(
             song.youtubeVideoId != null -> {
                 val uri = withContext(Dispatchers.IO) { repository.resolveDirectPlaybackUri(song) }
                 if (uri != null) {
+                    val freshSong = repository.getSongById(song.telegramMessageId)
+                    _uiState.value = _uiState.value.copy(
+                        song = freshSong ?: song,
+                        durationMs = ((freshSong?.durationSeconds ?: song.durationSeconds) * 1000L).takeIf { it > 0 } ?: _uiState.value.durationMs
+                    )
                     playbackController.playUri(uri, song.telegramMessageId, song.title, song.artist, song.albumArtUrl)
                 } else {
-                    _uiState.value = _uiState.value.copy(errorMessage = "Couldn't play \"${song.title}\" - the video may be unavailable")
+                    _uiState.value = _uiState.value.copy(
+                        errorMessage = "Couldn't play \"${song.title}\" - video may be unavailable",
+                        loadingSongId = null
+                    )
+                    // Auto-skip unplayable YouTube track after brief pause so playlist playback continues
+                    if (queue.hasNext()) {
+                        delay(1500)
+                        if (_uiState.value.song?.telegramMessageId == song.telegramMessageId && _uiState.value.loadingSongId == null) {
+                            nextSong()
+                        }
+                    }
                 }
             }
             else -> playbackController.playSong(song.telegramFileId, song.telegramMessageId, song.title, song.artist, song.albumArtUrl)
@@ -544,13 +543,26 @@ class NowPlayingViewModel(
                 val pos = playbackController.currentPositionMs()
                 val lines = _uiState.value.lyricLines
                 val activeIndex = lines.indexOfLast { it.timeMs <= pos }
+                val knownDurationMs = _uiState.value.song?.durationSeconds?.takeIf { it > 0 }?.times(1000L)
+                val effectiveDurationMs = knownDurationMs ?: playbackController.durationMs().coerceAtLeast(_uiState.value.durationMs)
                 _uiState.value = _uiState.value.copy(
                     currentPositionMs = pos,
-                    durationMs = playbackController.durationMs().coerceAtLeast(_uiState.value.durationMs),
+                    durationMs = effectiveDurationMs,
                     activeLyricIndex = activeIndex,
                     isPlaying = playbackController.isPlaying()
                 )
                 delay(300)
+            }
+        }
+    }
+
+    private fun prefetchNextTrack() {
+        prefetchJob?.cancel()
+        val nextId = queue.peekNextId() ?: return
+        prefetchJob = viewModelScope.launch(Dispatchers.IO) {
+            val nextSong = allSongsMap.value[nextId] ?: repository.getSongById(nextId) ?: return@launch
+            if (nextSong.youtubeVideoId != null && nextSong.localFilePath == null) {
+                repository.resolveDirectPlaybackUri(nextSong)
             }
         }
     }

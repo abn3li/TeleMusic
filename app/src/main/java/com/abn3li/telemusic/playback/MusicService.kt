@@ -88,6 +88,10 @@ class MusicService : MediaSessionService() {
         val app = application as TgMusicApp
         val song = withContext(Dispatchers.IO) { app.musicRepository.getSongById(songId) } ?: return
 
+        // Immediately stop whatever was playing right now so ExoPlayer exits STATE_ENDED
+        // before any slow async stream resolution begins
+        player.stop()
+
         val localPath = song.localFilePath
         val uri = when {
             localPath != null && File(localPath).let { it.exists() && it.length() > 0 } ->
@@ -117,8 +121,6 @@ class MusicService : MediaSessionService() {
                     .build()
             )
             .build()
-        // See PlaybackController.playUri()'s comment - same single-instance MediaItem swap
-        // requires an explicit stop() first to fully reset the audio renderer between songs.
         player.stop()
         player.setMediaItem(item)
         player.prepare()

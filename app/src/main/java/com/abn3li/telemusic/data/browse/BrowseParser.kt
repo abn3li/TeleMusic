@@ -195,12 +195,46 @@ object BrowseParser {
             ?.opt("thumbnail").obj()?.opt("thumbnails").arr()
         if (thumbnails.isWidescreen()) return null
 
+        var durationSecs = 0
+        val fixedColumns = renderer.opt("fixedColumns").arr()
+        if (fixedColumns != null) {
+            for (i in 0 until fixedColumns.length()) {
+                val txt = fixedColumns.optJSONObject(i)?.opt("musicResponsiveListItemFixedColumnRenderer").obj()
+                    ?.opt("text").obj()?.runs().orEmpty()
+                if (txt.contains(":") && txt.all { it.isDigit() || it == ':' }) {
+                    durationSecs = parseDurationTextSeconds(txt)
+                    if (durationSecs > 0) break
+                }
+            }
+        }
+        if (durationSecs == 0 && flexColumns != null) {
+            for (i in 0 until flexColumns.length()) {
+                val txt = flexColumns.optJSONObject(i)?.opt("musicResponsiveListItemFlexColumnRenderer").obj()
+                    ?.opt("text").obj()?.runs().orEmpty()
+                val match = Regex("""\b(\d{1,2}:\d{2}(?::\d{2})?)\b""").find(txt)
+                if (match != null) {
+                    durationSecs = parseDurationTextSeconds(match.groupValues[1])
+                    if (durationSecs > 0) break
+                }
+            }
+        }
+
         return BrowseTrack(
             videoId = videoId,
             title = title,
             artist = artist.ifBlank { "Unknown artist" },
-            thumbnailUrl = thumbnails.best()
+            thumbnailUrl = thumbnails.best(),
+            durationSeconds = durationSecs
         )
+    }
+
+    private fun parseDurationTextSeconds(text: String): Int {
+        val parts = text.trim().split(":").mapNotNull { it.toIntOrNull() }
+        return when (parts.size) {
+            2 -> parts[0] * 60 + parts[1]
+            3 -> parts[0] * 3600 + parts[1] * 60 + parts[2]
+            else -> 0
+        }
     }
 
     /** The token for a browse page's NEXT page of results, if it has one - a playlist/album
