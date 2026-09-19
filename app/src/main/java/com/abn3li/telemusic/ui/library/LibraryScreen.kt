@@ -565,66 +565,25 @@ private fun SubWaveTelegramIndicator(connected: Boolean, statusColor: Color, sta
     Row(
         modifier = modifier,
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(10.dp)
+        horizontalArrangement = Arrangement.spacedBy(6.dp)
     ) {
-        EqualizerWaveBars(animating = connected)
-
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            // Authentic-ish Telegram badge - filled circle + paper-plane glyph, matching the
-            // mockup's own mini emblem rather than a generic icon.
-            Box(
-                modifier = Modifier.size(16.dp).clip(CircleShape).background(Color(0xFF229ED9)),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    Icons.AutoMirrored.Filled.Send,
-                    contentDescription = null,
-                    tint = Color.White,
-                    modifier = Modifier.size(9.dp)
-                )
-            }
-
-            PulsingStatusDot(color = statusColor, pulsing = connected)
-
-            Text(text = statusText, color = statusColor, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
-        }
-    }
-}
-
-/** 4 vertical bars bobbing at their own independent height/speed - a "live audio" glyph, not
- * actually tied to any real waveform data (this is a status decoration, not a visualizer). */
-@Composable
-private fun EqualizerWaveBars(animating: Boolean, modifier: Modifier = Modifier) {
-    data class BarSpec(val minHeight: Dp, val maxHeight: Dp, val durationMs: Int, val color: Color)
-    val bars = remember {
-        listOf(
-            BarSpec(4.dp, 14.dp, 1050, Color(0xFF38BDF8)),
-            BarSpec(5.dp, 13.dp, 800, Color(0xFF34D399)),
-            BarSpec(6.dp, 15.dp, 1250, Color(0xFF38BDF8)),
-            BarSpec(4.dp, 11.dp, 950, Color(0xFF38BDF8))
-        )
-    }
-    Row(modifier = modifier.height(15.dp), horizontalArrangement = Arrangement.spacedBy(3.dp), verticalAlignment = Alignment.Bottom) {
-        bars.forEach { spec ->
-            val transition = rememberInfiniteTransition(label = "waveBar")
-            val height by if (animating) {
-                transition.animateFloat(
-                    initialValue = spec.minHeight.value,
-                    targetValue = spec.maxHeight.value,
-                    animationSpec = infiniteRepeatable(animation = tween(spec.durationMs, easing = LinearEasing), repeatMode = RepeatMode.Reverse),
-                    label = "waveBarHeight"
-                )
-            } else {
-                remember { mutableFloatStateOf(spec.minHeight.value) }
-            }
-            Box(
-                modifier = Modifier
-                    .width(2.5.dp)
-                    .height(height.dp)
-                    .clip(RoundedCornerShape(50))
-                    .background(spec.color)
+        // Authentic-ish Telegram badge - filled circle + paper-plane glyph, matching the
+        // mockup's own mini emblem rather than a generic icon.
+        Box(
+            modifier = Modifier.size(16.dp).clip(CircleShape).background(Color(0xFF229ED9)),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                Icons.AutoMirrored.Filled.Send,
+                contentDescription = null,
+                tint = Color.White,
+                modifier = Modifier.size(9.dp)
             )
         }
+
+        PulsingStatusDot(color = statusColor, pulsing = connected)
+
+        Text(text = statusText, color = statusColor, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
     }
 }
 
@@ -632,21 +591,9 @@ private fun EqualizerWaveBars(animating: Boolean, modifier: Modifier = Modifier)
  * [pulsing] (i.e. actually connected), sits still otherwise. */
 @Composable
 private fun PulsingStatusDot(color: Color, pulsing: Boolean, modifier: Modifier = Modifier) {
-    val transition = rememberInfiniteTransition(label = "statusPulse")
-    val scale by if (pulsing) {
-        transition.animateFloat(
-            initialValue = 1f,
-            targetValue = 1.15f,
-            animationSpec = infiniteRepeatable(animation = tween(1000, easing = LinearEasing), repeatMode = RepeatMode.Reverse),
-            label = "statusPulseScale"
-        )
-    } else {
-        remember { mutableFloatStateOf(1f) }
-    }
     Box(
         modifier = modifier
             .size(7.dp)
-            .graphicsLayer { scaleX = scale; scaleY = scale }
             .clip(CircleShape)
             .background(color)
     )

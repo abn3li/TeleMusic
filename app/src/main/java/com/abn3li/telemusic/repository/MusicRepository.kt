@@ -2,6 +2,7 @@ package com.abn3li.telemusic.repository
 
 import android.content.Context
 import android.net.Uri
+import android.util.Log
 import androidx.core.net.toUri
 import com.abn3li.telemusic.data.browse.BrowseTrack
 import com.abn3li.telemusic.data.local.AlbumSummary
@@ -393,9 +394,23 @@ class MusicRepository(
 
     /** [onProgress] fires per song, displaying live song title status. Keeps original song titles! */
     suspend fun enrichMissingMetadata(onProgress: (String) -> Unit = {}) {
-        for (song in songDao.getUnenriched()) {
+        songDao.markCompleteSongsEnriched()
+        val unenriched = songDao.getUnenriched()
+        Log.d("MusicRepo", "enrichMissingMetadata: ${unenriched.size} songs remaining to enrich")
+        if (unenriched.isEmpty()) return
+
+        for (song in unenriched) {
             val originalTitle = song.title
             val originalArtist = song.artist
+
+            val alreadyHasGoodInfo = originalTitle.isNotBlank() && originalTitle != "Unknown title"
+                    && originalArtist.isNotBlank() && originalArtist != "Unknown artist"
+                    && !song.albumArtUrl.isNullOrBlank()
+
+            if (alreadyHasGoodInfo) {
+                songDao.update(song.copy(metadataEnriched = true))
+                continue
+            }
 
             onProgress("Fetching info for $originalTitle...")
 

@@ -96,4 +96,7 @@ interface SongDao {
     // For the local-import picker's "already imported" check - see LocalAudioFile.stableSongId().
     @Query("SELECT telegramMessageId FROM songs WHERE isLocalImport = 1")
     suspend fun getLocalImportSongIds(): List<Long>
+
+    @Query("UPDATE songs SET metadataEnriched = 1 WHERE title IS NOT NULL AND title != '' AND title != 'Unknown title' AND artist IS NOT NULL AND artist != '' AND artist != 'Unknown artist' AND albumArtUrl IS NOT NULL AND albumArtUrl != ''")
+    suspend fun markCompleteSongsEnriched()
 }

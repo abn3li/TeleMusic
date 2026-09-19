@@ -130,8 +130,8 @@ fun PlayerSheetOverlay(viewModel: NowPlayingViewModel, modifier: Modifier = Modi
     // also read this same object - see stableUiState's own doc for why that mattered enough to
     // fix: that recomposition landing mid-frame during the expand/collapse spring animation is
     // what made that transition feel sluggish once this screen's tree grew heavier.
-    val state by viewModel.uiState.collectAsState()
     val stableState by viewModel.stableUiState.collectAsState()
+    val playbackProgress by viewModel.playbackProgress.collectAsState()
     val coroutineScope = rememberCoroutineScope()
 
     // Single source of truth for the sheet's position: 0 = collapsed (mini player only),
@@ -155,24 +155,14 @@ fun PlayerSheetOverlay(viewModel: NowPlayingViewModel, modifier: Modifier = Modi
         coroutineScope.launch { expansionFraction.animateTo(0f, SHEET_TRANSITION_SPEC) }
     }
 
-    // Plain BackHandler(enabled=isExpanded) only toggles an already-registered callback's
-    // enabled flag on recomposition - it never moves back to the front of the
-    // OnBackPressedDispatcher's own priority stack. NavHost re-registers ITS pop callback at
-    // the front on every navigation, so if the user reached this song from a pushed screen
-    // (e.g. playing a YouTube download from the Discovery/Browse screen, not Library directly),
-    // NavHost's callback - being the more recently touched one - won the FIRST back press even
-    // while this sheet was expanded, invisibly popping the hidden screen behind this
-    // full-screen overlay; only the second press (once NavHost had nothing left to pop) reached
-    // this handler. Wrapping in key(isExpanded) forces this BackHandler to fully unregister and
-    // re-register - reclaiming front-of-stack priority - every time the sheet expands, so it
-    // wins the very first back press regardless of what's on the NavHost stack underneath.
     key(isExpanded) {
         BackHandler(enabled = isExpanded) { collapse() }
     }
 
     Box(modifier.fillMaxSize()) {
         MiniPlayer(
-            state = state,
+            state = stableState,
+            playbackProgress = playbackProgress,
             onPlayPause = { viewModel.togglePlayPause() },
             onNext = { viewModel.nextSong() },
             onClick = { expand() },
@@ -190,6 +180,7 @@ fun PlayerSheetOverlay(viewModel: NowPlayingViewModel, modifier: Modifier = Modi
             viewModel = viewModel,
             expansionFraction = expansionFraction,
             screenHeightPx = screenHeightPx,
+            isExpanded = isExpanded,
             onCollapse = { collapse() },
             modifier = Modifier
                 .fillMaxSize()
@@ -253,6 +244,7 @@ private fun NowPlayingContent(
     viewModel: NowPlayingViewModel,
     expansionFraction: Animatable<Float, *>,
     screenHeightPx: Float,
+    isExpanded: Boolean,
     onCollapse: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -671,8 +663,8 @@ private fun NowPlayingContent(
                             fontSize = 23.sp,
                             fontWeight = FontWeight.Bold,
                             maxLines = 1,
-                            overflow = TextOverflow.Clip,
-                            modifier = Modifier.basicMarquee()
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = if (isExpanded) Modifier.basicMarquee() else Modifier
                         )
                         Spacer(Modifier.height(3.dp))
                         Text(

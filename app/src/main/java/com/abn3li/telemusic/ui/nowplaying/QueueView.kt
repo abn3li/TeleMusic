@@ -44,6 +44,7 @@ import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
@@ -526,7 +527,11 @@ private fun EqualizerIndicator(animating: Boolean) {
             Box(
                 modifier = Modifier
                     .width(2.5.dp)
-                    .fillMaxHeight(heightFraction)
+                    .height(14.dp)
+                    .graphicsLayer {
+                        scaleY = heightFraction
+                        transformOrigin = TransformOrigin(0.5f, 1.0f)
+                    }
                     .background(Color.White, RoundedCornerShape(1.dp))
             )
         }

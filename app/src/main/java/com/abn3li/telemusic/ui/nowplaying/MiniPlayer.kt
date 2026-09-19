@@ -49,6 +49,7 @@ val LocalMiniPlayerInset = compositionLocalOf { 0.dp }
 @Composable
 fun MiniPlayer(
     state: NowPlayingUiState,
+    playbackProgress: PlaybackProgress,
     onPlayPause: () -> Unit,
     onNext: () -> Unit,
     onClick: () -> Unit,
@@ -62,10 +63,6 @@ fun MiniPlayer(
     ) {
         val song = state.song ?: return@AnimatedVisibility
 
-        // A flat, darkened average of the artwork - not a copy of the artwork itself. Text and
-        // icons below are all explicit white/fixed colors (never inherited), since an arbitrary
-        // background color is exactly what caused text to disappear elsewhere - see
-        // GlassInfoRow in NowPlayingScreen.kt for that bug.
         val artworkColor = rememberArtworkColor(song.albumArtUrl)
 
         Surface(
@@ -77,8 +74,31 @@ fun MiniPlayer(
                 .fillMaxWidth()
                 .padding(horizontal = 12.dp, vertical = 6.dp)
         ) {
-            MiniPlayerContent(state, song, onPlayPause, onNext)
+            Column {
+                MiniPlayerContent(state, song, onPlayPause, onNext)
+                MiniPlayerProgressBar(progress = playbackProgress)
+            }
         }
+    }
+}
+
+@Composable
+private fun MiniPlayerProgressBar(progress: PlaybackProgress) {
+    if (progress.durationMs > 0L) {
+        val targetProgress = (progress.currentPositionMs.toFloat() / progress.durationMs.toFloat()).coerceIn(0f, 1f)
+        val progressFloat by animateFloatAsState(
+            targetValue = targetProgress,
+            animationSpec = tween(durationMillis = 300, easing = LinearEasing),
+            label = "miniPlayerProgress"
+        )
+        LinearProgressIndicator(
+            progress = { progressFloat },
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(2.5.dp),
+            color = Color.White,
+            trackColor = Color.White.copy(alpha = 0.2f)
+        )
     }
 }
 
@@ -187,26 +207,6 @@ private fun MiniPlayerContent(
                     tint = Color.White
                 )
             }
-        }
-
-        // Mini Progress Bar - eased toward each new tick instead of jumping straight to it, so
-        // the fill reads as continuously gliding rather than visibly stepping every poll
-        // interval (state.currentPositionMs only updates a few times a second, not every frame).
-        if (state.durationMs > 0L) {
-            val targetProgress = (state.currentPositionMs.toFloat() / state.durationMs.toFloat()).coerceIn(0f, 1f)
-            val progressFloat by animateFloatAsState(
-                targetValue = targetProgress,
-                animationSpec = tween(durationMillis = 300, easing = LinearEasing),
-                label = "miniPlayerProgress"
-            )
-            LinearProgressIndicator(
-                progress = { progressFloat },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(2.5.dp),
-                color = Color.White,
-                trackColor = Color.White.copy(alpha = 0.2f)
-            )
         }
     }
 }
