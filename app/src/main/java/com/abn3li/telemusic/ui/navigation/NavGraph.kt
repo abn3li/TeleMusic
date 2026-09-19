@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.LibraryMusic
@@ -239,14 +240,17 @@ private fun AppBottomNavBar(
     Surface(
         modifier = modifier
             .fillMaxWidth()
-            .height(78.dp),
+            .padding(horizontal = 14.dp, vertical = 8.dp)
+            .height(66.dp),
+        shape = RoundedCornerShape(26.dp),
         color = Color(0xF0121417),
-        border = BorderStroke(0.5.dp, Color.White.copy(alpha = 0.08f))
+        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.10f)),
+        shadowElevation = 12.dp
     ) {
         Row(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(start = 8.dp, end = 8.dp, bottom = 6.dp),
+                .padding(horizontal = 8.dp),
             horizontalArrangement = Arrangement.SpaceAround,
             verticalAlignment = Alignment.CenterVertically
         ) {
@@ -266,10 +270,10 @@ private fun AppBottomNavBar(
                     if (isSelected) {
                         Box(
                             modifier = Modifier
-                                .align(Alignment.TopCenter)
-                                .width(26.dp)
-                                .height(3.dp)
-                                .clip(RoundedCornerShape(99.dp))
+                                .align(Alignment.BottomCenter)
+                                .padding(bottom = 2.dp)
+                                .size(4.dp)
+                                .clip(CircleShape)
                                 .background(AccentGreen)
                         )
                     }
