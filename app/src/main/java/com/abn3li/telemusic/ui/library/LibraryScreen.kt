@@ -331,135 +331,69 @@ fun LibraryScreen(
         topBar = {
             Surface(color = Color.Transparent) {
                 Column {
-                    // No card/background here on purpose - floats directly over whatever the
-                    // screen body behind it is (Classic flat fill or Ambient blur), same as
-                    // every other row on this screen, instead of being its own separate boxed-in
-                    // surface.
-                    Box(modifier = Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 16.dp)) {
-                        Column {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                // "Library" is the ONLY thing in its column now (the sub-wave
-                                // status row moved below, under the icon toolbar instead - see
-                                // the Row right after this one) - CenterVertically now correctly
-                                // centers the title against the icon row itself, not against a
-                                // taller title+status block.
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Text(
-                                    text = "Library",
-                                    color = Color.White,
-                                    fontSize = 26.sp,
-                                    fontWeight = FontWeight.ExtraBold,
-                                    modifier = Modifier.weight(1f, fill = false)
-                                )
+                    Box(modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 12.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "Library",
+                                color = Color.White,
+                                fontSize = 32.sp,
+                                fontWeight = FontWeight.Bold,
+                                letterSpacing = (-0.6).sp
+                            )
 
-                                Row(
-                                    modifier = Modifier
-                                        .clip(CircleShape)
-                                        .background(Color.White.copy(alpha = 0.06f))
-                                        .border(1.dp, Color.White.copy(alpha = 0.10f), CircleShape)
-                                        .padding(3.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(1.dp)
-                                ) {
-                                    HeaderGlassButton(
-                                        icon = Icons.Default.Search,
-                                        contentDescription = "Search songs",
-                                        tint = if (isSearchActive) AccentGreen else Color.White.copy(alpha = 0.75f),
-                                        onClick = { isSearchActive = !isSearchActive }
-                                    )
-                                    HeaderGlassButton(
-                                        icon = Icons.Default.Sync,
-                                        contentDescription = "Sync from channel",
-                                        tint = if (isSyncing) AccentGreen else Color.White.copy(alpha = 0.75f),
-                                        onClick = onSyncClick,
-                                        modifier = Modifier.graphicsLayer {
-                                            rotationZ = if (isSyncing) syncRotationAngle.value else 0f
+                            Box(
+                                modifier = Modifier
+                                    .size(40.dp)
+                                    .clip(CircleShape)
+                                    .background(Color.White.copy(alpha = 0.08f))
+                                    .border(1.dp, Color.White.copy(alpha = 0.07f), CircleShape)
+                                    .clickable { isSearchActive = !isSearchActive },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    Icons.Default.Search,
+                                    contentDescription = "Search",
+                                    tint = if (isSearchActive) AccentGreen else Color.White,
+                                    modifier = Modifier.size(19.dp)
+                                )
+                            }
+                        }
+                    }
+
+                    AnimatedVisibility(visible = isSearchActive, enter = expandVertically(), exit = shrinkVertically()) {
+                        Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)) {
+                            OutlinedTextField(
+                                value = searchQuery,
+                                onValueChange = { searchQuery = it },
+                                placeholder = { Text("Search songs, artists, albums...") },
+                                leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = AccentGreen) },
+                                trailingIcon = {
+                                    if (searchQuery.isNotEmpty()) {
+                                        IconButton(onClick = { searchQuery = "" }) {
+                                            Icon(Icons.Default.Close, contentDescription = "Clear search", tint = TextSecondary)
                                         }
-                                    )
-                                    LibrarySourceToggle(
-                                        showYoutube = false,
-                                        onSelectLibrary = {},
-                                        onSelectYoutube = onYouTubeDownloadClick,
-                                        trackHeight = 34.dp,
-                                        segmentWidth = 28.dp,
-                                        segmentHeight = 26.dp,
-                                        trackColor = Color.Black.copy(alpha = 0.45f),
-                                        activeColor = Color(0xFF00D68F)
-                                    )
-                                    HeaderGlassButton(
-                                        icon = Icons.Default.Settings,
-                                        contentDescription = "Settings",
-                                        onClick = onSettingsClick
-                                    )
-                                }
-                            }
-
-                            // Status stays under the TITLE (left), same spot Option A had it.
-                            // Only the Reconnect action moved - it sits under the icon toolbar
-                            // (right), replacing the old standalone "Connecting taking
-                            // time... [Reconnect]" banner that used to be its own full-width row
-                            // elsewhere on the screen.
-                            Row(
-                                modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                SubWaveTelegramIndicator(
-                                    connected = connectionState == TelegramConnectionState.CONNECTED,
-                                    statusColor = statusColor,
-                                    statusText = statusText
-                                )
-                                AnimatedVisibility(visible = showReconnectButton, enter = fadeIn(), exit = fadeOut()) {
-                                    Row(
-                                        modifier = Modifier
-                                            .clip(RoundedCornerShape(50))
-                                            .background(CardColor)
-                                            .clickable { app.tdlibManager.reconnect(app.settingsStore.proxySettings) }
-                                            .padding(horizontal = 10.dp, vertical = 4.dp),
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        Icon(Icons.Default.Refresh, contentDescription = null, tint = AccentGreen, modifier = Modifier.size(13.dp))
-                                        Spacer(Modifier.width(4.dp))
-                                        Text("Reconnect", color = AccentGreen, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                    } else {
+                                        IconButton(onClick = { isSearchActive = false; searchQuery = "" }) {
+                                            Icon(Icons.Default.Close, contentDescription = "Close search", tint = TextSecondary)
+                                        }
                                     }
-                                }
-                            }
-
-                            AnimatedVisibility(visible = isSearchActive, enter = expandVertically(), exit = shrinkVertically()) {
-                                Column {
-                                    OutlinedTextField(
-                                        value = searchQuery,
-                                        onValueChange = { searchQuery = it },
-                                        placeholder = { Text("Search songs, artists, albums...") },
-                                        leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = AccentGreen) },
-                                        trailingIcon = {
-                                            if (searchQuery.isNotEmpty()) {
-                                                IconButton(onClick = { searchQuery = "" }) {
-                                                    Icon(Icons.Default.Close, contentDescription = "Clear search", tint = TextSecondary)
-                                                }
-                                            } else {
-                                                IconButton(onClick = { isSearchActive = false; searchQuery = "" }) {
-                                                    Icon(Icons.Default.Close, contentDescription = "Close search", tint = TextSecondary)
-                                                }
-                                            }
-                                        },
-                                        singleLine = true,
-                                        shape = RoundedCornerShape(16.dp),
-                                        colors = OutlinedTextFieldDefaults.colors(
-                                            focusedContainerColor = adaptivePanelFill(),
-                                            unfocusedContainerColor = adaptivePanelFill(),
-                                            focusedBorderColor = Color.Transparent,
-                                            unfocusedBorderColor = Color.Transparent,
-                                            focusedTextColor = Color.White,
-                                            unfocusedTextColor = Color.White
-                                        ),
-                                        modifier = Modifier.fillMaxWidth().padding(top = 14.dp)
-                                    )
-                                }
-                            }
+                                },
+                                singleLine = true,
+                                shape = RoundedCornerShape(16.dp),
+                                colors = OutlinedTextFieldDefaults.colors(
+                                    focusedContainerColor = adaptivePanelFill(),
+                                    unfocusedContainerColor = adaptivePanelFill(),
+                                    focusedBorderColor = Color.Transparent,
+                                    unfocusedBorderColor = Color.Transparent,
+                                    focusedTextColor = Color.White,
+                                    unfocusedTextColor = Color.White
+                                ),
+                                modifier = Modifier.fillMaxWidth()
+                            )
                         }
                     }
 

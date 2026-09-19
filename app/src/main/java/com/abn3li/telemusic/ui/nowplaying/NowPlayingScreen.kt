@@ -87,6 +87,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -122,25 +123,16 @@ private val SHEET_TRANSITION_SPEC = spring<Float>(dampingRatio = Spring.DampingR
  */
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
-fun PlayerSheetOverlay(viewModel: NowPlayingViewModel, modifier: Modifier = Modifier) {
-    // MiniPlayer is small and cheap, so it keeps reading the full, every-300ms-ticking state -
-    // it needs currentPositionMs/durationMs for its own thin progress bar anyway. The full
-    // Now Playing screen is the expensive one (mesh backdrop, every button, the artwork card),
-    // and previously recomposed its ENTIRE tree on every one of those ticks purely because it
-    // also read this same object - see stableUiState's own doc for why that mattered enough to
-    // fix: that recomposition landing mid-frame during the expand/collapse spring animation is
-    // what made that transition feel sluggish once this screen's tree grew heavier.
+fun PlayerSheetOverlay(
+    viewModel: NowPlayingViewModel,
+    bottomOffset: Dp = 84.dp,
+    modifier: Modifier = Modifier
+) {
     val stableState by viewModel.stableUiState.collectAsState()
     val playbackProgress by viewModel.playbackProgress.collectAsState()
     val coroutineScope = rememberCoroutineScope()
 
-    // Single source of truth for the sheet's position: 0 = collapsed (mini player only),
-    // 1 = fully expanded. Both the tap-to-expand transition and the drag-to-dismiss gesture
-    // manipulate this ONE Animatable - never delegated with `by` at composable scope, only
-    // ever read inside graphicsLayer/offset draw-phase lambdas below.
     val expansionFraction = remember { Animatable(0f) }
-    // Coarse flag purely for BackHandler gating - flips once per open/close, not per frame,
-    // so reading it at composable scope here is cheap and not part of the animation itself.
     var isExpanded by remember { mutableStateOf(false) }
 
     val configuration = LocalConfiguration.current
@@ -166,6 +158,7 @@ fun PlayerSheetOverlay(viewModel: NowPlayingViewModel, modifier: Modifier = Modi
             onPlayPause = { viewModel.togglePlayPause() },
             onNext = { viewModel.nextSong() },
             onClick = { expand() },
+            bottomOffset = bottomOffset,
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .graphicsLayer {

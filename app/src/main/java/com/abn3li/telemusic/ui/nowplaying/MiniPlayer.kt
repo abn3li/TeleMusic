@@ -53,13 +53,14 @@ fun MiniPlayer(
     onPlayPause: () -> Unit,
     onNext: () -> Unit,
     onClick: () -> Unit,
+    bottomOffset: Dp = 84.dp,
     modifier: Modifier = Modifier
 ) {
     AnimatedVisibility(
         visible = state.song != null,
         enter = slideInVertically { it },
         exit = slideOutVertically { it },
-        modifier = modifier
+        modifier = modifier.padding(bottom = bottomOffset)
     ) {
         val song = state.song ?: return@AnimatedVisibility
 

@@ -1,28 +1,57 @@
 package com.abn3li.telemusic.ui.navigation
 
 import android.net.Uri
-import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.ExitTransition
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.LibraryMusic
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Subscriptions
+import androidx.compose.material.icons.filled.Sync
+import androidx.compose.material3.Icon
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
+import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.abn3li.telemusic.TgMusicApp
 import com.abn3li.telemusic.ui.credentials.CredentialsScreen
 import com.abn3li.telemusic.ui.download.BrowseCollectionScreen
 import com.abn3li.telemusic.ui.download.YouTubeDownloadScreen
+import com.abn3li.telemusic.ui.library.AccentGreen
 import com.abn3li.telemusic.ui.library.AlbumDetailScreen
 import com.abn3li.telemusic.ui.library.ArtistDetailScreen
 import com.abn3li.telemusic.ui.library.LibraryScreen
@@ -54,52 +83,39 @@ object Routes {
     fun playlist(id: Long, name: String) = "playlist/$id/${Uri.encode(name)}"
     fun smartPlaylist(kind: SmartPlaylistKind) = "smart_playlist/${kind.name}"
 
-    // params is a required path segment (not optional query) to keep this route's argument
-    // handling simple - "none" stands in for "no params" rather than the segment itself being
-    // absent or empty, since Navigation Compose's route matcher rejects an empty path segment
-    // outright (the whole route fails to match anything in the graph, not just that argument).
     private const val NO_PARAMS = "none"
     fun youtubeBrowse(browseId: String, title: String, params: String?) =
         "youtube_browse/${Uri.encode(browseId)}/${Uri.encode(title)}/${Uri.encode(params ?: NO_PARAMS)}"
 }
 
 /**
- * Now Playing is deliberately NOT a NavHost destination. It's a persistent overlay
- * (PlayerSheetOverlay) mounted once here, right alongside the Scaffold - see the comment on
- * PlayerSheetOverlay for why: routing it through Navigation Compose meant every tap on the
- * mini player paid a full first-composition cost during the slide-in animation, which made
- * both opening and swipe-to-dismiss feel like a stutter instead of one continuous motion.
+ * Main application Navigation Graph with fixed Frosted Glass Bottom Bar and Floating MiniPlayer.
  */
 @Composable
 fun TgMusicNavGraph(navController: NavHostController = rememberNavController()) {
     val app = LocalContext.current.applicationContext as TgMusicApp
     val startDestination = if (app.credentialsStore.hasCredentials()) Routes.LIBRARY else Routes.CREDENTIALS
 
-    // Constructed once here at the navigation root - shared by the mini player and full player
-    // inside PlayerSheetOverlay, so there's exactly one poller/one source of truth for
-    // playback state for the whole app session instead of a fresh instance per navigation.
     val playerViewModel = remember {
         NowPlayingViewModel(app.musicRepository, app.playbackController, app.playbackQueue, app.ytDlpRepository, app.applicationContext)
     }
 
-    // Same reasoning as playerViewModel above: constructed once here so it survives navigating
-    // to Artist/Album/Playlist/Settings and back, instead of LibraryScreen creating its own via
-    // a local `remember` that NavHost disposes (and recreates from scratch) every round trip -
-    // see LibraryScreen's own doc on its viewModel param for what that broke.
     val libraryViewModel = remember { LibraryViewModel(app.musicRepository) }
 
-    // Plays the selected song by handing the queue straight to the shared player ViewModel -
-    // it's the single place responsible for starting playback, so this never races with it.
     val playSong: (List<Long>, Int) -> Unit = { ids, index ->
         playerViewModel.playFromQueue(ids, index)
     }
 
-    // stableUiState (not the fast-ticking uiState) so this only recomposes on an actual song
-    // swap/stop, not every 300ms tick - see its own doc in NowPlayingViewModel. Drives how much
-    // bottom padding every scrollable list reserves so its last item clears the floating
-    // MiniPlayer, which overlaps content rather than pushing it up (see below).
     val playerState by playerViewModel.stableUiState.collectAsState()
-    val miniPlayerInset = if (playerState.song != null) MiniPlayerHeight else 0.dp
+
+    val navBackStackEntry by navController.currentBackStackEntryAsState()
+    val currentRoute = navBackStackEntry?.destination?.route
+    val showBottomBar = currentRoute in listOf(Routes.LIBRARY, Routes.YOUTUBE_DOWNLOAD, Routes.SYNC, Routes.SETTINGS)
+
+    val miniPlayerBottomMargin = if (showBottomBar) 84.dp else 12.dp
+    val miniPlayerInset = if (playerState.song != null) {
+        if (showBottomBar) 154.dp else MiniPlayerHeight
+    } else if (showBottomBar) 84.dp else 0.dp
 
     Box(Modifier.fillMaxSize()) {
         Scaffold { innerPadding ->
@@ -108,15 +124,6 @@ fun TgMusicNavGraph(navController: NavHostController = rememberNavController()) 
                 navController = navController,
                 startDestination = startDestination,
                 modifier = Modifier.padding(innerPadding),
-                // Every screen in this app snaps instantly rather than sliding/fading - set
-                // once here for all four directions (enter/exit/popEnter/popExit) so every
-                // route pairs consistently with whatever it's pushed from or popped back to.
-                // Individual composable()s used to only override exitTransition/
-                // popEnterTransition (the properties that matter for the SOURCE of a push, e.g.
-                // Library), which left every PUSHED screen (Settings, Artist, Playlist, ...)
-                // still using Navigation Compose's own default animated enter/popExit - a
-                // mismatched pairing (one side instant, one side animated) that showed up as a
-                // visual flash/broken-layout frame on both the way in and the way back.
                 enterTransition = { EnterTransition.None },
                 exitTransition = { ExitTransition.None },
                 popEnterTransition = { EnterTransition.None },
@@ -124,9 +131,6 @@ fun TgMusicNavGraph(navController: NavHostController = rememberNavController()) 
             ) {
                 composable(Routes.CREDENTIALS) {
                     CredentialsScreen(onSaved = {
-                        // Land on Library first (so Sync has somewhere to go back to), then
-                        // push straight into phone-number sign-in instead of leaving the user
-                        // to find the Sync icon themselves on an empty library.
                         navController.navigate(Routes.LIBRARY) { popUpTo(Routes.CREDENTIALS) { inclusive = true } }
                         navController.navigate(Routes.SYNC)
                     })
@@ -193,6 +197,107 @@ fun TgMusicNavGraph(navController: NavHostController = rememberNavController()) 
             }
         }
 
-        PlayerSheetOverlay(viewModel = playerViewModel, modifier = Modifier.fillMaxSize())
+        if (showBottomBar) {
+            AppBottomNavBar(
+                currentRoute = currentRoute,
+                onNavigate = { route ->
+                    if (currentRoute != route) {
+                        navController.navigate(route) {
+                            popUpTo(Routes.LIBRARY) { saveState = true }
+                            launchSingleTop = true
+                            restoreState = true
+                        }
+                    }
+                },
+                modifier = Modifier.align(Alignment.BottomCenter)
+            )
+        }
+
+        PlayerSheetOverlay(
+            viewModel = playerViewModel,
+            bottomOffset = miniPlayerBottomMargin,
+            modifier = Modifier.fillMaxSize()
+        )
     }
 }
+
+@Composable
+private fun AppBottomNavBar(
+    currentRoute: String?,
+    onNavigate: (String) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val items = remember {
+        listOf(
+            NavigationItem(Routes.LIBRARY, "Library", Icons.Default.LibraryMusic),
+            NavigationItem(Routes.YOUTUBE_DOWNLOAD, "YouTube", Icons.Default.Subscriptions),
+            NavigationItem(Routes.SYNC, "Sync", Icons.Default.Sync),
+            NavigationItem(Routes.SETTINGS, "Settings", Icons.Default.Settings)
+        )
+    }
+
+    Surface(
+        modifier = modifier
+            .fillMaxWidth()
+            .height(78.dp),
+        color = Color(0xF0121417),
+        border = BorderStroke(0.5.dp, Color.White.copy(alpha = 0.08f))
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(start = 8.dp, end = 8.dp, bottom = 6.dp),
+            horizontalArrangement = Arrangement.SpaceAround,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            items.forEach { item ->
+                val isSelected = currentRoute == item.route
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxHeight()
+                        .clickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = null,
+                            onClick = { onNavigate(item.route) }
+                        ),
+                    contentAlignment = Alignment.Center
+                ) {
+                    if (isSelected) {
+                        Box(
+                            modifier = Modifier
+                                .align(Alignment.TopCenter)
+                                .width(26.dp)
+                                .height(3.dp)
+                                .clip(RoundedCornerShape(99.dp))
+                                .background(AccentGreen)
+                        )
+                    }
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Icon(
+                            imageVector = item.icon,
+                            contentDescription = item.label,
+                            tint = if (isSelected) AccentGreen else Color(0xFF7B8390),
+                            modifier = Modifier.size(22.dp)
+                        )
+                        Text(
+                            text = item.label,
+                            color = if (isSelected) AccentGreen else Color(0xFF7B8390),
+                            fontSize = 11.sp,
+                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+private data class NavigationItem(
+    val route: String,
+    val label: String,
+    val icon: ImageVector
+)
