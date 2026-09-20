@@ -23,6 +23,10 @@ class ThumbnailGenerator(private val context: Context) {
     private val directory by lazy { File(context.filesDir, "thumbnails").apply { mkdirs() } }
 
     suspend fun generate(songId: Long, sourceUrl: String): String? = withContext(Dispatchers.IO) {
+        val file = File(directory, "$songId.jpg")
+        if (file.exists() && file.length() > 0) {
+            return@withContext file.absolutePath
+        }
         runCatching {
             val request = ImageRequest.Builder(context)
                 .data(sourceUrl)
@@ -31,7 +35,6 @@ class ThumbnailGenerator(private val context: Context) {
                 .build()
             val bitmap = (context.imageLoader.execute(request).drawable as? BitmapDrawable)?.bitmap
                 ?: return@withContext null
-            val file = File(directory, "$songId.jpg")
             FileOutputStream(file).use { out -> bitmap.compress(Bitmap.CompressFormat.JPEG, 82, out) }
             file.absolutePath
         }.getOrNull()

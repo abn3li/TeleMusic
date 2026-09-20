@@ -657,7 +657,7 @@ private fun NowPlayingContent(
                             fontWeight = FontWeight.Bold,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
-                            modifier = if (isExpanded) Modifier.basicMarquee() else Modifier
+                            modifier = if (isExpanded) Modifier.basicMarquee(iterations = 2) else Modifier
                         )
                         Spacer(Modifier.height(3.dp))
                         Text(

@@ -484,19 +484,31 @@ class MusicRepository(
 
     /** Generates a small local thumbnail for [songId] from [artUrl] if it doesn't have one yet. */
     private suspend fun ensureThumbnail(songId: Long, artUrl: String) {
-        thumbnailGenerator.generate(songId, artUrl)?.let { path -> songDao.setThumbnailPath(songId, path) }
+        val path = thumbnailGenerator.generate(songId, artUrl)
+        if (path != null) {
+            songDao.setThumbnailPath(songId, path)
+        } else {
+            // Mark failed so getSongsMissingThumbnail() never queries this failed URL again!
+            songDao.setThumbnailPath(songId, "none")
+        }
     }
 
     /**
-     * One-shot pass over every already-enriched song that predates the thumbnail cache (or
-     * whose earlier generation attempt failed). Safe to call repeatedly - only songs missing a
-     * thumbnail do any work. Called once from the app's own background scope at startup rather
-     * than blocking any particular screen's load.
+     * One-shot pass over every already-enriched song that predates the thumbnail cache.
+     * Safe to call repeatedly - only songs missing a thumbnail do any work. Paced with 100ms
+     * delays to ensure 0% CPU background impact.
      */
     suspend fun backfillThumbnails() {
-        for (song in songDao.getSongsMissingThumbnail()) {
-            val artUrl = song.albumArtUrl ?: continue
+        val missing = songDao.getSongsMissingThumbnail()
+        if (missing.isEmpty()) return
+        for (song in missing) {
+            val artUrl = song.albumArtUrl
+            if (artUrl.isNullOrBlank()) {
+                songDao.setThumbnailPath(song.telegramMessageId, "none")
+                continue
+            }
             ensureThumbnail(song.telegramMessageId, artUrl)
+            delay(100)
         }
     }
 
