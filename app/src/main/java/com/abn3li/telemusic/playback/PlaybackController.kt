@@ -95,15 +95,7 @@ class PlaybackController(context: Context) {
                 .setTitle(title).setArtist(artist)
                 .setArtworkUri(artworkUrl?.let { it.toUri() }).build()
         ).build()
-        // Every song swap replaces the SAME player instance's one MediaItem rather than
-        // advancing a real multi-item timeline (see PlaybackQueue's own doc) - without an
-        // explicit stop() first, the audio renderer can still be mid-way through draining a
-        // decoded buffer from the PREVIOUS song when the new item's decoder output arrives,
-        // which trips DefaultAudioSink's internal "same buffer object" assertion
-        // (Assertions.checkArgument(inputBuffer == null || buffer == inputBuffer)) and crashes
-        // playback. stop() forces a full, synchronous renderer reset first.
-        controller?.stop()
-        controller?.setMediaItem(item)
+        controller?.setMediaItem(item, true)
         controller?.prepare()
         controller?.play()
     }

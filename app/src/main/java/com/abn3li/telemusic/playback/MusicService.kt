@@ -2,9 +2,11 @@ package com.abn3li.telemusic.playback
 
 import android.app.PendingIntent
 import android.content.Intent
+import androidx.annotation.OptIn
 import androidx.core.net.toUri
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
+import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
@@ -26,6 +28,7 @@ class MusicService : MediaSessionService() {
     private lateinit var player: ExoPlayer
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
 
+    @OptIn(UnstableApi::class)
     override fun onCreate() {
         super.onCreate()
         val app = application as TgMusicApp
@@ -88,10 +91,6 @@ class MusicService : MediaSessionService() {
         val app = application as TgMusicApp
         val song = withContext(Dispatchers.IO) { app.musicRepository.getSongById(songId) } ?: return
 
-        // Immediately stop whatever was playing right now so ExoPlayer exits STATE_ENDED
-        // before any slow async stream resolution begins
-        player.stop()
-
         val localPath = song.localFilePath
         val uri = when {
             localPath != null && File(localPath).let { it.exists() && it.length() > 0 } ->
@@ -121,8 +120,7 @@ class MusicService : MediaSessionService() {
                     .build()
             )
             .build()
-        player.stop()
-        player.setMediaItem(item)
+        player.setMediaItem(item, true)
         player.prepare()
         player.play()
 
