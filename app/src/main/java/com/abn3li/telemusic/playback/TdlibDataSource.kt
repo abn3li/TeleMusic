@@ -2,7 +2,9 @@ package com.abn3li.telemusic.playback
 
 import android.net.Uri
 import android.util.Log
+import androidx.annotation.OptIn
 import androidx.media3.common.C
+import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.BaseDataSource
 import androidx.media3.datasource.DataSource
 import androidx.media3.datasource.DataSpec
@@ -30,6 +32,7 @@ class TdlibDataSource(private val tdlibManager: TdlibManager) : BaseDataSource(t
     private var dataSpecUri: Uri? = null
     private var opened: Boolean = false
 
+    @OptIn(UnstableApi::class)
     override fun open(dataSpec: DataSpec): Long {
         dataSpecUri = dataSpec.uri
         fileId = dataSpec.uri.lastPathSegment?.toIntOrNull() ?: -1

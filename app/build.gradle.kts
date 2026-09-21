@@ -24,7 +24,7 @@ kotlin {
 
 android {
     namespace = "com.abn3li.telemusic"
-    compileSdk = 34
+    compileSdk = 36
     defaultConfig {
         applicationId = "com.abn3li.telemusic"
         minSdk = 26
@@ -117,6 +117,7 @@ dependencies {
     implementation("androidx.media3:media3-exoplayer:1.4.0")
     implementation("androidx.media3:media3-session:1.4.0")
     implementation("androidx.media3:media3-common:1.4.0")
+    implementation(files("libs/media3-ffmpeg-audio.aar"))
 
     implementation("androidx.room:room-runtime:2.6.1")
     implementation("androidx.room:room-ktx:2.6.1")

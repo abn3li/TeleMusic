@@ -1541,6 +1541,7 @@ private fun detectAudioFormat(filePath: String?, durationSec: Int): Pair<String,
             "flac" -> "FLAC (Lossless)"
             "ogg", "opus" -> "OGG / Opus"
             "wav" -> "WAV"
+            "dsf", "dff" -> "DSD / DSF"
             else -> ext.uppercase(Locale.US).ifBlank { "Audio Track" }
         }
         return fmt to "320 kbps"
@@ -1553,6 +1554,11 @@ private fun detectAudioFormat(filePath: String?, durationSec: Int): Pair<String,
 
             val fileBytes = file.length()
             val bitrateKbps = (fileBytes * 8 / duration / 1000)
+
+            // 0. DSD / DSF Container ("DSD " at byte 0..3)
+            if (header[0] == 0x44.toByte() && header[1] == 0x53.toByte() && header[2] == 0x44.toByte() && header[3] == 0x20.toByte()) {
+                return "DSD / DSF" to "Hi-Res DSD"
+            }
 
             // 1. MP3 ("ID3" at byte 0..2 or 0xFF 0xFB)
             if ((header[0] == 0x49.toByte() && header[1] == 0x44.toByte() && header[2] == 0x33.toByte()) ||

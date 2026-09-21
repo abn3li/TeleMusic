@@ -382,16 +382,43 @@ class TdlibManager(private val context: Context) {
         null
     }
 
-    suspend fun fetchAudioMessages(chatId: Long, fromMessageId: Long = 0, limit: Int = 50): List<TelegramAudioMessage> {
-        val result = sendSuspend(
-            TdApi.SearchChatMessages(chatId, null, "", null, fromMessageId, 0, limit, TdApi.SearchMessagesFilterAudio())
-        ) as TdApi.FoundChatMessages
+    private val AUDIO_EXTENSIONS_SET = setOf("dsf", "dff", "flac", "wav", "m4a", "mp3", "ogg", "opus", "aac", "alac", "wma", "weba")
 
-        return result.messages.mapNotNull { message ->
+    suspend fun fetchAudioMessages(chatId: Long, fromMessageId: Long = 0, limit: Int = 50): List<TelegramAudioMessage> {
+        val audioResult = runCatching {
+            sendSuspend(TdApi.SearchChatMessages(chatId, null, "", null, fromMessageId, 0, limit, TdApi.SearchMessagesFilterAudio())) as TdApi.FoundChatMessages
+        }.getOrNull()
+
+        val docResult = runCatching {
+            sendSuspend(TdApi.SearchChatMessages(chatId, null, "", null, fromMessageId, 0, limit, TdApi.SearchMessagesFilterDocument())) as TdApi.FoundChatMessages
+        }.getOrNull()
+
+        val audioMessages = audioResult?.messages?.mapNotNull { message ->
             val audio = (message.content as? TdApi.MessageAudio)?.audio ?: return@mapNotNull null
-            TelegramAudioMessage(message.id, audio.audio.id,
-                audio.title.ifBlank { audio.fileName }, audio.performer, audio.duration)
-        }
+            TelegramAudioMessage(
+                message.id,
+                audio.audio.id,
+                audio.title.ifBlank { audio.fileName },
+                audio.performer,
+                audio.duration
+            )
+        }.orEmpty()
+
+        val docMessages = docResult?.messages?.mapNotNull { message ->
+            val doc = (message.content as? TdApi.MessageDocument)?.document ?: return@mapNotNull null
+            val ext = doc.fileName.substringAfterLast('.', "").lowercase()
+            if (ext in AUDIO_EXTENSIONS_SET) {
+                TelegramAudioMessage(
+                    message.id,
+                    doc.document.id,
+                    doc.fileName.substringBeforeLast('.'),
+                    "Telegram Document",
+                    0
+                )
+            } else null
+        }.orEmpty()
+
+        return (audioMessages + docMessages).distinctBy { it.messageId }
     }
 
     /** Fetches the current valid session-local file ID for a message from TDLib. [chatId] is
@@ -414,11 +441,12 @@ class TdlibManager(private val context: Context) {
                 val messages = sendSuspend(TdApi.GetMessages(chatId, longArrayOf(messageId))) as? TdApi.Messages
                 message = messages?.messages?.firstOrNull()
             }
-            val audio = (message?.content as? TdApi.MessageAudio)?.audio
-            if (audio == null) {
-                Log.w("TdlibManager", "getFreshFileId(chatId=$chatId, messageId=$messageId): message=${message != null}, not an audio message")
+            val fileId = (message?.content as? TdApi.MessageAudio)?.audio?.audio?.id
+                ?: (message?.content as? TdApi.MessageDocument)?.document?.document?.id
+            if (fileId == null) {
+                Log.w("TdlibManager", "getFreshFileId(chatId=$chatId, messageId=$messageId): message=${message != null}, not audio or document")
             }
-            audio?.audio?.id
+            fileId
         } catch (e: Exception) {
             Log.w("TdlibManager", "getFreshFileId(chatId=$chatId, messageId=$messageId) failed: ${e.message}")
             null

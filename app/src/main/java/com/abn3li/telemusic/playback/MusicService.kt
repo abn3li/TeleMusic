@@ -2,15 +2,21 @@ package com.abn3li.telemusic.playback
 
 import android.app.PendingIntent
 import android.content.Intent
+import android.util.Log
 import androidx.annotation.OptIn
 import androidx.core.net.toUri
+import androidx.media3.common.AudioAttributes
+import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DefaultDataSource
+import androidx.media3.decoder.ffmpeg.FfmpegLibrary
+import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.extractor.DefaultExtractorsFactory
+import androidx.media3.extractor.mp4.Mp4Extractor
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
 import com.abn3li.telemusic.MainActivity
@@ -36,21 +42,32 @@ class MusicService : MediaSessionService() {
 
         val extractorsFactory = DefaultExtractorsFactory()
             .setConstantBitrateSeekingEnabled(true)
+            .setMp4ExtractorFlags(Mp4Extractor.FLAG_READ_SEF_DATA)
 
         val mediaSourceFactory = DefaultMediaSourceFactory(dataSourceFactory, extractorsFactory)
 
-        player = ExoPlayer.Builder(this)
+        // Dynamic Audio Engine: Prioritize software extension decoders (FFmpeg ALAC/FLAC/Opus) over system MediaCodec
+        val isFfmpegAvailable = FfmpegLibrary.isAvailable()
+        val supportsAlac = FfmpegLibrary.supportsFormat("audio/alac")
+        val supportsFlac = FfmpegLibrary.supportsFormat("audio/flac")
+        Log.d("MusicService", "FFmpeg Native Engine Loaded: $isFfmpegAvailable, ALAC: $supportsAlac, FLAC: $supportsFlac")
+
+        val renderersFactory = DefaultRenderersFactory(this)
+            .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_PREFER)
+            .setEnableAudioFloatOutput(false)
+            .setEnableAudioTrackPlaybackParams(true)
+
+        val audioAttributes = AudioAttributes.Builder()
+            .setUsage(C.USAGE_MEDIA)
+            .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC)
+            .build()
+
+        player = ExoPlayer.Builder(this, renderersFactory)
             .setMediaSourceFactory(mediaSourceFactory)
+            .setAudioAttributes(audioAttributes, true)
             .setHandleAudioBecomingNoisy(true)
             .build()
 
-        // The app manages next/previous itself via PlaybackQueue rather than giving ExoPlayer a
-        // real multi-item timeline (each song simply replaces the player's one MediaItem), so
-        // the raw player always reports a single-item timeline and the system media
-        // notification (which reads availability straight off the player) never showed a skip
-        // button at all. This wrapper answers both "is there a next/previous song" and "what
-        // happens when that command is invoked" from the app's own queue instead - see its own
-        // doc for the full explanation.
         val queueAwarePlayer = QueueAwareForwardingPlayer(
             player = player,
             queueHasNext = { app.playbackQueue.hasNext() },
@@ -59,9 +76,6 @@ class MusicService : MediaSessionService() {
             onSeekToPrevious = { serviceScope.launch { playAdjacentSong(app.playbackQueue.previous()) } }
         )
 
-        // Without a session activity, tapping the notification's body (as opposed to one of
-        // its transport buttons, which already worked) did nothing at all - Media3's default
-        // notification uses exactly this PendingIntent as its content intent.
         val sessionActivity = PendingIntent.getActivity(
             this,
             0,
@@ -76,16 +90,6 @@ class MusicService : MediaSessionService() {
             .build()
     }
 
-    /**
-     * Mirrors the essential parts of NowPlayingViewModel.loadCurrentQueuePosition() - fetch the
-     * song, refresh its Telegram file id if needed, and hand the player a new MediaItem - but
-     * scoped to this service so the system notification's next/previous buttons work even when
-     * no Activity/ViewModel currently exists (app swiped away, controlling from a locked
-     * screen). [app.playbackQueue] has already been advanced by the caller by the time this
-     * runs; NowPlayingViewModel picks up the resulting song/lyrics change on its own via the
-     * player's onMediaItemTransition callback (see PlaybackController.addListener) rather than
-     * this service touching any UI state directly.
-     */
     private suspend fun playAdjacentSong(songId: Long?) {
         if (songId == null) return
         val app = application as TgMusicApp
@@ -100,10 +104,6 @@ class MusicService : MediaSessionService() {
         val uri = when {
             localPath != null && File(localPath).length() > 0 ->
                 File(localPath).toURI().toString().toUri()
-            // A real library row backed by a YouTube video that hasn't been downloaded (see
-            // MusicRepository.importPlaylistTrackAsStreamable's own doc) - same resolution
-            // NowPlayingViewModel.startPlayback uses, needed here too so the system
-            // notification's own next/previous buttons work for one of these rows.
             song.youtubeVideoId != null -> {
                 val resolved = withContext(Dispatchers.IO) { app.musicRepository.resolveDirectPlaybackUri(song) }
                 resolved ?: return

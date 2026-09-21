@@ -133,6 +133,6 @@ class LocalAudioImporter(private val context: Context) {
         // ytdlp_bridge.py's own doc) - included so re-importing a .weba file (moved from another
         // folder, restored from backup, shared from another install) is recognized as real audio
         // instead of silently skipped by the scanner.
-        private val AUDIO_EXTENSIONS = listOf(".mp3", ".m4a", ".flac", ".ogg", ".wav", ".aac", ".opus", ".wma", ".weba")
+        private val AUDIO_EXTENSIONS = listOf(".mp3", ".m4a", ".flac", ".ogg", ".wav", ".aac", ".opus", ".wma", ".weba", ".dsf", ".dff")
     }
 }
