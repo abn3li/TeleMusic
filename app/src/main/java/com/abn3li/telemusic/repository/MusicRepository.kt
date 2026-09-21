@@ -282,6 +282,12 @@ class MusicRepository(
     fun observeSongsByArtist(artist: String, sortField: SortField, ascending: Boolean) =
         songDao.observeSongsByArtist(artist).map { it.sortedByField(sortField, ascending) }
 
+    suspend fun clearStaleLocalPath(songId: Long) {
+        songDao.getById(songId)?.let { song ->
+            songDao.update(song.copy(localFilePath = null))
+        }
+    }
+
     // ---- Playlists ----
     fun observePlaylists(): Flow<List<PlaylistEntity>> = playlistDao.observeAll()
     fun observePlaylistSummaries(): Flow<List<com.abn3li.telemusic.data.local.PlaylistSummary>> = playlistDao.observeAllWithArt()
@@ -346,22 +352,24 @@ class MusicRepository(
                 val existingDuplicate = existingByTitleArtist ?: existingByTitleDuration
 
                 if (existingDuplicate != null) {
-                    // Song already in library! Update file & message ID without creating duplicate entry
+                    // Song already in library! Update file, message ID, AND resolvedChatId to new chat
                     songDao.update(
                         existingDuplicate.copy(
                             telegramMessageId = msg.messageId,
-                            telegramFileId = msg.fileId
+                            telegramFileId = msg.fileId,
+                            resolvedChatId = chatId
                         )
                     )
                 } else {
-                    // Truly a new song! Insert into library
+                    // Truly a new song! Insert into library with resolvedChatId set
                     songDao.upsert(
                         SongEntity(
                             telegramMessageId = msg.messageId,
                             telegramFileId = msg.fileId,
                             title = title,
                             artist = artist,
-                            durationSeconds = msg.durationSeconds
+                            durationSeconds = msg.durationSeconds,
+                            resolvedChatId = chatId
                         )
                     )
                 }

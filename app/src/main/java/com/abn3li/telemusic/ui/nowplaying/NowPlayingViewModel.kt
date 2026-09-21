@@ -502,9 +502,13 @@ class NowPlayingViewModel(
     }
 
     private suspend fun startPlayback(song: SongEntity) {
-        val localPath = song.localFilePath
+        var localPath = song.localFilePath
+        if (localPath != null && !File(localPath).exists()) {
+            withContext(Dispatchers.IO) { repository.clearStaleLocalPath(song.telegramMessageId) }
+            localPath = null
+        }
         when {
-            localPath != null && File(localPath).let { it.exists() && it.length() > 0 } ->
+            localPath != null && File(localPath).length() > 0 ->
                 playbackController.playLocalFile(localPath, song.telegramMessageId, song.title, song.artist, song.albumArtUrl)
             // A real library row backed by a YouTube video that hasn't been downloaded (see
             // MusicRepository.importPlaylistTrackAsStreamable's own doc) - resolves a fresh
