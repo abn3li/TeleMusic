@@ -91,9 +91,14 @@ class MusicService : MediaSessionService() {
         val app = application as TgMusicApp
         val song = withContext(Dispatchers.IO) { app.musicRepository.getSongById(songId) } ?: return
 
-        val localPath = song.localFilePath
+        var localPath = song.localFilePath
+        if (localPath != null && !File(localPath).exists()) {
+            withContext(Dispatchers.IO) { app.musicRepository.clearStaleLocalPath(song.telegramMessageId) }
+            localPath = null
+        }
+
         val uri = when {
-            localPath != null && File(localPath).let { it.exists() && it.length() > 0 } ->
+            localPath != null && File(localPath).length() > 0 ->
                 File(localPath).toURI().toString().toUri()
             // A real library row backed by a YouTube video that hasn't been downloaded (see
             // MusicRepository.importPlaylistTrackAsStreamable's own doc) - same resolution
