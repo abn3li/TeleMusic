@@ -142,6 +142,13 @@ fun PlayerSheetOverlay(
         onOpenAlbum = { album -> collapse(); onOpenAlbum(album) },
         modifier = Modifier
             .fillMaxSize()
+            .offset {
+                // Parked off-screen while collapsed so it never intercepts touches meant for the
+                // screen underneath. Applied before graphicsLayer so the layer itself moves -
+                // otherwise the layer's outline shadow stayed behind, drawing a faint ghost of the
+                // mini player's rectangle above the nav bar even with no song loaded.
+                if (expansionFraction.value <= 0.001f) IntOffset(0, parentHeightPx.roundToInt() + 100) else IntOffset.Zero
+            }
             .graphicsLayer {
                 // The whole card is one layer: it starts as the mini player's rectangle and grows
                 // to fill the screen. Content is laid out full size and simply revealed by the
@@ -152,12 +159,7 @@ fun PlayerSheetOverlay(
                 translationY = lerpFloat(miniTopPx, 0f, progress)
                 shape = RevealCardShape(side, cardHeight, lerpFloat(miniCornerPx, 0f, progress))
                 clip = true
-                shadowElevation = if (progress < 0.999f) cardShadowPx else 0f
-            }
-            .offset {
-                // Parked off-screen while collapsed so it never intercepts touches meant for the
-                // screen underneath.
-                if (expansionFraction.value <= 0.001f) IntOffset(0, parentHeightPx.roundToInt() + 100) else IntOffset.Zero
+                shadowElevation = if (progress > 0.001f && progress < 0.999f) cardShadowPx else 0f
             }
     )
 

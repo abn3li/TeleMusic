@@ -16,6 +16,7 @@ import com.abn3li.telemusic.playback.PlaybackQueue
 import com.abn3li.telemusic.playback.RepeatMode
 import com.abn3li.telemusic.repository.MusicRepository
 import com.abn3li.telemusic.repository.SortField
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -74,6 +75,7 @@ class NowPlayingViewModel(
     private var tickerJob: Job? = null
     private var loadJob: Job? = null
     private var prefetchJob: Job? = null
+    private var lyricsJob: Job? = null
     // Set by playEphemeral() for a YouTube "Play" stream, cleared the moment a real song loads -
     // downloadCurrentSong() needs this to actually download the video (see its own doc for why
     // the ordinary downloadExplicitly() path can't: there's no Telegram message behind this row
@@ -262,6 +264,7 @@ class NowPlayingViewModel(
      * [startPlayback] or otherwise touch the transport - it only re-reads what's now playing.
      */
     private fun resyncToExternallyChangedSong(songId: Long, resetPosition: Boolean = true) {
+        cancelLyricsFetch()
         viewModelScope.launch {
             val song = allSongsMap.value[songId]
                 ?: withContext(Dispatchers.IO) { repository.getSongById(songId) }
@@ -313,6 +316,7 @@ class NowPlayingViewModel(
      * taps Download while it's playing - see that function's own doc. */
     fun playEphemeral(song: SongEntity, streamUri: Uri, videoId: String) {
         loadJob?.cancel()
+        cancelLyricsFetch()
         queue.clear()
         pendingEphemeralVideoId = videoId
         _uiState.value = _uiState.value.copy(
@@ -332,26 +336,43 @@ class NowPlayingViewModel(
 
     fun fetchLyricsOnDemand() {
         val song = _uiState.value.song ?: return
-        viewModelScope.launch {
+        fetchLyrics(song, query = song)
+    }
+
+    fun fetchLyricsCustom(customTitle: String, customArtist: String) {
+        val song = _uiState.value.song ?: return
+        fetchLyrics(song, query = song.copy(title = customTitle.trim(), artist = customArtist.trim()))
+    }
+
+    /**
+     * Searches lyrics for [song] using [query]'s title/artist. One search at a time: a new search
+     * or a song change (see cancelLyricsFetch) cancels the previous one, and a finished search only
+     * applies if [song] is still the one playing - otherwise a slow search for the previous song
+     * wrote that song (and its lyrics) back into state after a skip, briefly showing the wrong
+     * lyrics until the player resynced.
+     */
+    private fun fetchLyrics(song: SongEntity, query: SongEntity) {
+        lyricsJob?.cancel()
+        lyricsJob = viewModelScope.launch {
             _uiState.value = _uiState.value.copy(isFetchingLyrics = true)
-            val result = runCatching {
-                withContext(Dispatchers.IO) { repository.fetchLyricsForSong(song) }
-            }.getOrNull()
+            val result = try {
+                withContext(Dispatchers.IO) { repository.fetchLyricsForSong(query) }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                null
+            }
 
             val freshDbSong = withContext(Dispatchers.IO) { repository.getSongById(song.telegramMessageId) }
             val plain = result?.plain ?: freshDbSong?.lyricsPlain ?: song.lyricsPlain
             val synced = result?.synced ?: freshDbSong?.lyricsSynced ?: song.lyricsSynced
-
             val rawLrc = synced.takeIf { !it.isNullOrBlank() }
                 ?: plain.takeIf { !it.isNullOrBlank() && it.contains("[00:") }
-
             val lines = withContext(Dispatchers.Default) { rawLrc?.let(::parseLrc).orEmpty() }
 
-            // Update state.song too, not just lyricLines - the plain-lyrics view in the UI
-            // reads state.song?.lyricsPlain directly, and for anything that isn't LRC-synced
-            // (i.e. every plain-text result from lyrics.ovh or the Google fallback), lyricLines
-            // stays empty by design. Without this, a successful plain-lyrics fetch never
-            // actually became visible even though it was correctly saved to the database.
+            if (_uiState.value.song?.telegramMessageId != song.telegramMessageId) return@launch
+            // state.song carries the lyrics too: the plain-lyrics view reads song.lyricsPlain,
+            // and lyricLines stays empty for any result that isn't LRC-synced.
             _uiState.value = _uiState.value.copy(
                 song = (freshDbSong ?: song).copy(lyricsPlain = plain, lyricsSynced = synced),
                 lyricLines = lines,
@@ -360,33 +381,10 @@ class NowPlayingViewModel(
         }
     }
 
-    fun fetchLyricsCustom(customTitle: String, customArtist: String) {
-        val song = _uiState.value.song ?: return
-        viewModelScope.launch {
-            _uiState.value = _uiState.value.copy(isFetchingLyrics = true)
-            val customSong = song.copy(title = customTitle.trim(), artist = customArtist.trim())
-            val result = runCatching {
-                withContext(Dispatchers.IO) { repository.fetchLyricsForSong(customSong) }
-            }.getOrNull()
-
-            val freshDbSong = withContext(Dispatchers.IO) { repository.getSongById(song.telegramMessageId) }
-            val plain = result?.plain ?: freshDbSong?.lyricsPlain ?: song.lyricsPlain
-            val synced = result?.synced ?: freshDbSong?.lyricsSynced ?: song.lyricsSynced
-
-            val rawLrc = synced.takeIf { !it.isNullOrBlank() }
-                ?: plain.takeIf { !it.isNullOrBlank() && it.contains("[00:") }
-
-            val lines = withContext(Dispatchers.Default) { rawLrc?.let(::parseLrc).orEmpty() }
-
-            // Same fix as fetchLyricsOnDemand(): state.song must carry the fetched lyrics too,
-            // since the plain-lyrics UI branch reads state.song?.lyricsPlain directly and
-            // lyricLines only ever gets populated for LRC-synced results.
-            _uiState.value = _uiState.value.copy(
-                song = (freshDbSong ?: song).copy(lyricsPlain = plain, lyricsSynced = synced),
-                lyricLines = lines,
-                isFetchingLyrics = false
-            )
-        }
+    private fun cancelLyricsFetch() {
+        lyricsJob?.cancel()
+        lyricsJob = null
+        if (_uiState.value.isFetchingLyrics) _uiState.value = _uiState.value.copy(isFetchingLyrics = false)
     }
 
     fun nextSong() {
@@ -484,6 +482,7 @@ class NowPlayingViewModel(
 
     private fun loadCurrentQueuePosition(songIdOverride: Long? = null) {
         loadJob?.cancel()
+        cancelLyricsFetch()
         pendingEphemeralVideoId = null
         // Unconditionally stop whatever was playing right now, before any slow async work
         // (YouTube stream resolution or Telegram prebuffer wait) begins - this immediately
