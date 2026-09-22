@@ -523,41 +523,39 @@ class NowPlayingViewModel(
     }
 
     private suspend fun startPlayback(song: SongEntity) {
-        var localPath = song.localFilePath
-        if (localPath != null && !File(localPath).exists()) {
-            withContext(Dispatchers.IO) { repository.clearStaleLocalPath(song.telegramMessageId) }
-            localPath = null
-        }
-        when {
-            localPath != null && File(localPath).length() > 0 ->
-                playbackController.playLocalFile(localPath, song.telegramMessageId, song.title, song.artist, song.displayArtwork)
-            // A real library row backed by a YouTube video that hasn't been downloaded (see
-            // MusicRepository.importPlaylistTrackAsStreamable's own doc) - resolves a fresh
-            // stream URL on demand instead of asking TDLib for a file id that doesn't exist.
-            song.youtubeVideoId != null -> {
-                val uri = withContext(Dispatchers.IO) { repository.resolveDirectPlaybackUri(song) }
-                if (uri != null) {
-                    val freshSong = repository.getSongById(song.telegramMessageId)
-                    _uiState.value = _uiState.value.copy(
-                        song = freshSong ?: song,
-                        durationMs = ((freshSong?.durationSeconds ?: song.durationSeconds) * 1000L).takeIf { it > 0 } ?: _uiState.value.durationMs
-                    )
-                    playbackController.playUri(uri, song.telegramMessageId, song.title, song.artist, song.displayArtwork)
-                } else {
-                    _uiState.value = _uiState.value.copy(
-                        errorMessage = "Couldn't play \"${song.title}\" - video may be unavailable",
-                        loadingSongId = null
-                    )
-                    // Auto-skip unplayable YouTube track after brief pause so playlist playback continues
-                    if (queue.hasNext()) {
-                        delay(1500)
-                        if (_uiState.value.song?.telegramMessageId == song.telegramMessageId && _uiState.value.loadingSongId == null) {
-                            nextSong()
-                        }
-                    }
+        // repository.resolvePlaybackUri() is the one shared "how do I actually play this song"
+        // resolution (local file/referenced content:// URI first, then YouTube stream, then a
+        // fresh TDLib file id) - MusicService's next/previous handling and the Android Auto
+        // browse tree already go through it, so this no longer duplicates that chain (and no
+        // longer risks going stale from it the way a separate copy already has once - see
+        // SongEntity.isLocalImport's own doc for why a plain File(path) check specifically would
+        // silently break a referenced, not copied, local import).
+        val uri = withContext(Dispatchers.IO) { repository.resolvePlaybackUri(song) }
+        if (uri != null) {
+            // A real library row backed by a YouTube video that had no local/cached copy - this
+            // is the one case where a fresh resolve can also learn a corrected duration, so pull
+            // the just-updated row (see MusicRepository.resolveDirectPlaybackUri's own doc).
+            if (song.youtubeVideoId != null && song.localFilePath == null) {
+                val freshSong = repository.getSongById(song.telegramMessageId)
+                _uiState.value = _uiState.value.copy(
+                    song = freshSong ?: song,
+                    durationMs = ((freshSong?.durationSeconds ?: song.durationSeconds) * 1000L).takeIf { it > 0 } ?: _uiState.value.durationMs
+                )
+            }
+            playbackController.playUri(uri, song.telegramMessageId, song.title, song.artist, song.displayArtwork)
+        } else {
+            val reason = if (song.isLocalImport) "file may have been moved or deleted" else "video may be unavailable"
+            _uiState.value = _uiState.value.copy(
+                errorMessage = "Couldn't play \"${song.title}\" - $reason",
+                loadingSongId = null
+            )
+            // Auto-skip unplayable track after brief pause so playlist playback continues
+            if (queue.hasNext()) {
+                delay(1500)
+                if (_uiState.value.song?.telegramMessageId == song.telegramMessageId && _uiState.value.loadingSongId == null) {
+                    nextSong()
                 }
             }
-            else -> playbackController.playSong(song.telegramFileId, song.telegramMessageId, song.title, song.artist, song.displayArtwork)
         }
     }
 

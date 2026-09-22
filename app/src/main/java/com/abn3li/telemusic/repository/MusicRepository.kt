@@ -1,6 +1,7 @@
 package com.abn3li.telemusic.repository
 
 import android.content.Context
+import android.content.Intent
 import android.net.Uri
 import android.util.Log
 import androidx.core.net.toUri
@@ -143,14 +144,25 @@ class MusicRepository(
      * picker sheet show them as checked/disabled instead of the user re-importing blind. */
     suspend fun getLocalImportSongIds(): Set<Long> = songDao.getLocalImportSongIds().toSet()
 
-    /** Copies each file into the app's own private storage (never leaves it depending on the
-     * picked folder's URI staying valid) and upserts it as a song - see LocalAudioFile's own
+    /** References each file's own content:// URI directly, playing straight from it forever
+     * instead of copying its bytes - the same approach most real media players (VLC, Poweramp)
+     * use. Works because the picked folder's TREE URI already had its read permission persisted
+     * the moment the user picked it (see SettingsScreen's importFolderLauncher); that grant
+     * covers every file inside the tree, so nothing further needs to be requested per file - just
+     * confirmed readable (see LocalAudioImporter.isReadable's own doc for why NOT calling
+     * takePersistableUriPermission again per file matters here). Falls back to an actual copy
+     * into the app's own private storage only if a file isn't readable at all (rare - a genuinely
+     * broken provider). Upserts each as a song either way - see LocalAudioFile's own
      * stableSongId() doc for why re-picking the same file resolves to the same row rather than
      * duplicating. */
     suspend fun importLocalSongs(files: List<LocalAudioFile>) {
         for (file in files) {
             val songId = file.stableSongId()
-            val copiedPath = localAudioImporter.importToPrivateStorage(file, songId) ?: continue
+            val localPath = if (localAudioImporter.isReadable(file)) {
+                file.uri.toString()
+            } else {
+                localAudioImporter.importToPrivateStorage(file, songId) ?: continue
+            }
             songDao.upsert(
                 SongEntity(
                     telegramMessageId = songId,
@@ -159,7 +171,7 @@ class MusicRepository(
                     artist = file.artist,
                     album = file.album,
                     durationSeconds = file.durationSeconds,
-                    localFilePath = copiedPath,
+                    localFilePath = localPath,
                     isLocalImport = true,
                     // Left unenriched on purpose - metadataEnriched only flips to true once
                     // enrichMissingMetadata() (called right below via the embedded-artwork check,
@@ -286,21 +298,36 @@ class MusicRepository(
      * resolution behave differently for one caller than the other. Local file first (clearing a
      * stale path if the file's gone missing since last recorded), then a YouTube stream resolve,
      * then falling back to a fresh TDLib file id. Null only when nothing could resolve at all (a
-     * dead YouTube stream with no local copy).
+     * dead YouTube stream with no local copy, or a local import whose referenced content:// URI
+     * permission is no longer valid - see SongEntity.isLocalImport's own doc for why localFilePath
+     * can be either a real path or a content:// reference, and why only the latter has nowhere
+     * else to fall back to).
      */
     suspend fun resolvePlaybackUri(song: SongEntity): Uri? {
         var localPath = song.localFilePath
-        if (localPath != null && !File(localPath).exists()) {
+        if (localPath != null && !isLocalFileValid(localPath)) {
             clearStaleLocalPath(song.telegramMessageId)
             localPath = null
         }
         return when {
-            localPath != null && File(localPath).length() > 0 ->
-                File(localPath).toURI().toString().toUri()
+            localPath != null -> localFileToUri(localPath)
+            song.isLocalImport -> null
             song.youtubeVideoId != null -> resolveDirectPlaybackUri(song)
             else -> TdlibDataSource.uriFor(getFreshFileIdForSong(song))
         }
     }
+
+    private fun isLocalFileValid(path: String): Boolean =
+        if (path.startsWith("content://")) {
+            runCatching {
+                appContext.contentResolver.openInputStream(Uri.parse(path))?.use { true } ?: false
+            }.getOrDefault(false)
+        } else {
+            File(path).exists() && File(path).length() > 0
+        }
+
+    private fun localFileToUri(path: String): Uri =
+        if (path.startsWith("content://")) Uri.parse(path) else File(path).toURI().toString().toUri()
 
     // ---- One-time cleanup: collapse collab credits into their primary artist ----
     /** A track credited "The Weeknd, Daft Punk" used to become its own separate Artists-tab
@@ -629,9 +656,24 @@ class MusicRepository(
      * local copy it has - an auto-cached stream, an explicit download, or a local import's own
      * private copy - and any exported shared-storage copy, so nothing orphaned is left behind. */
     suspend fun clearSong(song: SongEntity) {
-        song.localFilePath?.let { path -> runCatching { File(path).delete() } }
+        song.localFilePath?.let(::releaseLocalFile)
         song.exportedFileUri?.let { uri -> runCatching { mediaFolderExporter.delete(android.net.Uri.parse(uri)) } }
         songDao.delete(song.telegramMessageId)
+    }
+
+    /** Releases whatever [path] actually represents - deletes it if it's a real file this app
+     * owns (an auto-cached stream, an explicit download, or a copied local import), or just
+     * releases the persisted read grant if it's a referenced local import's own content:// URI
+     * (see SongEntity.isLocalImport's own doc) - that file is the user's own original, never
+     * this app's to delete. */
+    private fun releaseLocalFile(path: String) {
+        if (path.startsWith("content://")) {
+            runCatching {
+                appContext.contentResolver.releasePersistableUriPermission(Uri.parse(path), Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+        } else {
+            runCatching { File(path).delete() }
+        }
     }
 
     /** Removes the local downloaded copy of [song] - the row's own "Delete song" menu item,
@@ -644,7 +686,7 @@ class MusicRepository(
      * from before youtubeVideoId existed, has nowhere to fall back to, so removing its only file
      * removes the whole row instead of leaving a dead, unplayable entry behind. */
     suspend fun removeDownload(song: SongEntity) {
-        song.localFilePath?.let { path -> runCatching { File(path).delete() } }
+        song.localFilePath?.let(::releaseLocalFile)
         song.exportedFileUri?.let { uri -> mediaFolderExporter.delete(android.net.Uri.parse(uri)) }
         if (song.youtubeVideoId != null || song.telegramFileId != 0) {
             songDao.update(song.copy(localFilePath = null, isExplicitDownload = false, exportedFileUri = null))
@@ -690,17 +732,12 @@ class MusicRepository(
 
     /** Deletes EVERY song - Telegram-synced, YouTube-downloaded, and local imports alike - plus
      * playlists and every cached/downloaded/exported audio file on disk, for a 100% fresh start.
-     * A local import's localFilePath is the app's own private COPY (see importLocalSongs - the
-     * original file the user picked is never touched, it's copied into app storage on import),
-     * so deleting it here is exactly as safe as deleting any other row's file. */
+     * See [releaseLocalFile] for why a local import's localFilePath isn't always safe to delete
+     * outright - a referenced (not copied) one is the user's own original file. */
     suspend fun clearAllLibrarySongs() {
         val allSongs = songDao.observeAll().firstOrNull().orEmpty()
         for (song in allSongs) {
-            val path = song.localFilePath
-            if (path != null) {
-                val file = File(path)
-                if (file.exists()) file.delete()
-            }
+            song.localFilePath?.let(::releaseLocalFile)
             song.exportedFileUri?.let { uri -> runCatching { mediaFolderExporter.delete(android.net.Uri.parse(uri)) } }
             songDao.delete(song.telegramMessageId)
         }

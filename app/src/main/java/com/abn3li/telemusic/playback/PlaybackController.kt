@@ -115,14 +115,6 @@ class PlaybackController(context: Context) {
         }
     }
 
-    fun playSong(fileId: Int, songId: Long, title: String, artist: String, artworkUrl: String?) {
-        playUri(TdlibDataSource.uriFor(fileId), songId, title, artist, artworkUrl)
-    }
-
-    fun playLocalFile(filePath: String, songId: Long, title: String, artist: String, artworkUrl: String?) {
-        playUri(File(filePath).toURI().toString().toUri(), songId, title, artist, artworkUrl)
-    }
-
     /** Stops the current song immediately, without starting anything new - used right when the
      * user picks a different song, BEFORE any slow resolve step (a YouTube stream URL, a Telegram
      * prebuffer wait) runs. Without this, the OLD song kept audibly playing through that whole

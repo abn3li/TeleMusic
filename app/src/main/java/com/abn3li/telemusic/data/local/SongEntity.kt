@@ -29,12 +29,16 @@ data class SongEntity(
     // and what cache eviction must NEVER touch.
     val isExplicitDownload: Boolean = false,
     // True for a song imported directly from the device's own storage rather than synced from
-    // Telegram - telegramFileId is meaningless (0) for these. localFilePath points at the app's
-    // OWN private copy (see LocalAudioImporter.importToPrivateStorage - the original file the
-    // user picked is copied in, never referenced directly), so it's exactly as safe to delete as
-    // any other row's file (see MusicRepository.clearSong/clearAllLibrarySongs). Cache eviction
-    // and getFreshFileIdForSong() must still NEVER touch these: touching telegramFileId would
-    // spam TDLib with lookups for a message that doesn't exist, and cache eviction only ever
+    // Telegram - telegramFileId is meaningless (0) for these. localFilePath is normally the
+    // original file's own content:// URI (LocalAudioImporter.persistReadPermission - a
+    // persisted read grant, same as most real media players use, not a copy), falling back to
+    // an app-private COPY (LocalAudioImporter.importToPrivateStorage) only when that grant
+    // couldn't be persisted. MusicRepository.resolvePlaybackUri/clearSong/clearAllLibrarySongs
+    // all branch on the "content://" prefix to tell which one a given row has - a copy is safe
+    // to delete outright, a referenced URI is not (it's the user's own original file; only its
+    // permission grant gets released). Cache eviction and getFreshFileIdForSong() must still
+    // NEVER touch these: touching telegramFileId would spam TDLib with lookups for a message
+    // that doesn't exist, and cache eviction only ever
     // targets auto-cached (non-explicit, non-import) files in the first place.
     val isLocalImport: Boolean = false,
     // The SAF document Uri of this song's exported copy in the user's chosen shared-storage

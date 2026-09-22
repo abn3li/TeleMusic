@@ -126,10 +126,27 @@ class LocalAudioImporter(private val context: Context) {
         }
     }
 
-    /** Copies [file]'s bytes into the app's own private storage, so it plays back and is
-     * managed exactly like any other song's localFilePath - see SongEntity.isLocalImport's own
-     * doc for why a raw content:// URI can't just be stored there directly instead. Returns the
-     * copy's absolute path, or null if the copy failed (source unreadable, disk full, etc). */
+    /**
+     * Confirms [file]'s own content:// URI is readable right now, so it can be referenced
+     * directly - the same way real media players (VLC, Poweramp) handle an imported file, never
+     * copying it at all. No permission call needed here: the picked folder's TREE URI already
+     * had takePersistableUriPermission() called on it the moment the user picked it (see
+     * SettingsScreen's importFolderLauncher), and that grant already covers every document
+     * inside the tree permanently - calling takePersistableUriPermission() AGAIN on an individual
+     * child document URI (as an earlier version of this function did) actually throws a
+     * SecurityException, since that API only accepts a URI a system picker handed back directly,
+     * never one an app constructs itself via DocumentsContract.buildDocumentUriUsingTree(). That
+     * silently-caught exception was returning false for every single file, which was exactly why
+     * every import fell through to [importToPrivateStorage]'s copy regardless.
+     */
+    fun isReadable(file: LocalAudioFile): Boolean = runCatching {
+        context.contentResolver.openInputStream(file.uri)?.use { true } ?: false
+    }.getOrDefault(false)
+
+    /** Fallback for when [isReadable] can't confirm read access - copies [file]'s
+     * bytes into the app's own private storage instead, so it still plays back and is managed
+     * exactly like any other song's localFilePath. Returns the copy's absolute path, or null if
+     * the copy failed too (source unreadable, disk full, etc). */
     fun importToPrivateStorage(file: LocalAudioFile, songId: Long): String? {
         val directory = File(context.filesDir, "local_imports").apply { mkdirs() }
         val extension = file.displayName.substringAfterLast('.', "mp3")

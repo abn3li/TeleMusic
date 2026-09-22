@@ -5,6 +5,8 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.media.AudioManager
+import android.net.Uri
+import android.provider.OpenableColumns
 import androidx.core.content.ContextCompat
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.Crossfade
@@ -933,11 +935,10 @@ private fun NowPlayingContent(
             exit = fadeOut(animationSpec = tween(180)) + scaleOut(animationSpec = tween(180), targetScale = 0.88f)
         ) {
             val song = state.song!!
-            val fileOnDisk = song.localFilePath?.let { File(it) }
-            val sizeInBytes = fileOnDisk?.takeIf { it.exists() }?.length() ?: 0L
+            val sizeInBytes = song.localFilePath?.let { localFileSizeBytes(context, it) } ?: 0L
             val sizeMB = if (sizeInBytes > 0) String.format(Locale.US, "%.2f MB", sizeInBytes / (1024.0 * 1024.0)) else "Streaming"
 
-            val (containerFormat, bitrateText) = detectAudioFormat(song.localFilePath, song.durationSeconds)
+            val (containerFormat, bitrateText) = detectAudioFormat(context, song.localFilePath, song.durationSeconds)
 
             val storageStatus = when {
                 // isLocalImport is also true for an in-memory YouTube "Play" stream (see
@@ -1142,9 +1143,10 @@ private fun SeekbarSection(
             // players show here - reuses detectAudioFormat, the same real-header-sniffing +
             // file-size-derived-bitrate logic the Song Info popup already shows, instead of the
             // source label (Telegram/YouTube/Local) this slot showed before.
+            val context = LocalContext.current
             val badgeText = remember(song?.telegramMessageId, song?.localFilePath) {
                 if (song == null) "" else {
-                    val (format, bitrate) = detectAudioFormat(song.localFilePath, song.durationSeconds)
+                    val (format, bitrate) = detectAudioFormat(context, song.localFilePath, song.durationSeconds)
                     val shortFormat = format.substringBefore(" ").substringBefore("(").trim()
                     if (bitrate.isBlank()) shortFormat else "$shortFormat · $bitrate"
                 }
@@ -1526,72 +1528,117 @@ internal fun rememberPressScale(interactionSource: InteractionSource): Float {
     return scale
 }
 
+/** Extension-only guess, used both as the final fallback and as the immediate answer for a file
+ * too small to have a real header. */
+private fun formatFromExtension(ext: String): String = when (ext.lowercase(Locale.US)) {
+    "mp3" -> "MP3"
+    "m4a", "aac", "mp4" -> "M4A / AAC"
+    "flac" -> "FLAC (Lossless)"
+    "ogg", "opus" -> "OGG / Opus"
+    "wav" -> "WAV"
+    "dsf", "dff" -> "DSD / DSF"
+    else -> ext.uppercase(Locale.US).ifBlank { "Audio Track" }
+}
+
+/** The actual magic-byte sniffing, shared by both the real-file and content:// URI paths below -
+ * [header] is the file/stream's first 16 bytes, [bitrateKbps] already derived from its total
+ * size. Returns null (caller falls back to an extension guess) if nothing matched. */
+private fun formatFromHeader(header: ByteArray, bitrateKbps: Long): Pair<String, String>? = when {
+    // 0. DSD / DSF Container ("DSD " at byte 0..3)
+    header[0] == 0x44.toByte() && header[1] == 0x53.toByte() && header[2] == 0x44.toByte() && header[3] == 0x20.toByte() ->
+        "DSD / DSF" to "Hi-Res DSD"
+    // 1. MP3 ("ID3" at byte 0..2 or 0xFF 0xFB)
+    (header[0] == 0x49.toByte() && header[1] == 0x44.toByte() && header[2] == 0x33.toByte()) ||
+        (header[0] == 0xFF.toByte() && (header[1].toInt() and 0xE0) == 0xE0) ->
+        "MP3" to "$bitrateKbps kbps"
+    // 2. M4A / AAC ("ftyp" at byte 4..7)
+    header[4] == 0x66.toByte() && header[5] == 0x74.toByte() && header[6] == 0x79.toByte() && header[7] == 0x70.toByte() ->
+        "M4A / AAC" to "$bitrateKbps kbps"
+    // 3. FLAC ("fLaC" at byte 0..3)
+    header[0] == 0x66.toByte() && header[1] == 0x4C.toByte() && header[2] == 0x61.toByte() && header[3] == 0x43.toByte() ->
+        "FLAC (Lossless)" to "Hi-Res Lossless"
+    // 4. OGG / Opus ("OggS" at byte 0..3)
+    header[0] == 0x4F.toByte() && header[1] == 0x67.toByte() && header[2] == 0x68.toByte() && header[3] == 0x53.toByte() ->
+        "OGG / Opus" to "$bitrateKbps kbps"
+    // 5. WAV ("RIFF" at byte 0..3)
+    header[0] == 0x52.toByte() && header[1] == 0x56.toByte() && header[2] == 0x46.toByte() && header[3] == 0x46.toByte() ->
+        "WAV (Uncompressed)" to "Uncompressed Audio"
+    else -> null
+}
+
 /**
- * Inspects file headers to detect the exact audio codec/container format (MP3, M4A/AAC, FLAC, OGG, WAV).
+ * Inspects file headers to detect the exact audio codec/container format (MP3, M4A/AAC, FLAC,
+ * OGG, WAV). [filePath] is either a real filesystem path or a referenced local import's own
+ * content:// URI (see SongEntity.isLocalImport's own doc) - java.io.File/RandomAccessFile can't
+ * open the latter at all, so that case goes through ContentResolver instead, reading the same
+ * first-16-bytes header sequentially rather than via random access (a plain InputStream is all a
+ * content:// URI reliably offers).
  */
-private fun detectAudioFormat(filePath: String?, durationSec: Int): Pair<String, String> {
+private fun detectAudioFormat(context: Context, filePath: String?, durationSec: Int): Pair<String, String> {
     if (filePath == null) return "Audio Track" to "320 kbps"
-    val file = File(filePath)
     val duration = durationSec.coerceAtLeast(1)
 
-    if (!file.exists() || file.length() < 12) {
-        val ext = file.extension.lowercase(Locale.US)
-        val fmt = when (ext) {
-            "mp3" -> "MP3"
-            "m4a", "aac", "mp4" -> "M4A / AAC"
-            "flac" -> "FLAC (Lossless)"
-            "ogg", "opus" -> "OGG / Opus"
-            "wav" -> "WAV"
-            "dsf", "dff" -> "DSD / DSF"
-            else -> ext.uppercase(Locale.US).ifBlank { "Audio Track" }
+    if (filePath.startsWith("content://")) {
+        val uri = Uri.parse(filePath)
+        val extGuess = formatFromExtension(queryDisplayName(context, uri)?.substringAfterLast('.', "").orEmpty())
+        return try {
+            context.contentResolver.openAssetFileDescriptor(uri, "r")?.use { afd ->
+                val header = ByteArray(16)
+                val bytesRead = afd.createInputStream().use { it.read(header) }
+                val fileBytes = afd.length
+                if (bytesRead < 12 || fileBytes <= 0) {
+                    extGuess to "320 kbps"
+                } else {
+                    val bitrateKbps = fileBytes * 8 / duration / 1000
+                    formatFromHeader(header, bitrateKbps) ?: (extGuess to "320 kbps")
+                }
+            } ?: (extGuess to "320 kbps")
+        } catch (_: Exception) {
+            extGuess to "320 kbps"
         }
-        return fmt to "320 kbps"
+    }
+
+    val file = File(filePath)
+    if (!file.exists() || file.length() < 12) {
+        return formatFromExtension(file.extension) to "320 kbps"
     }
 
     try {
         RandomAccessFile(file, "r").use { raf ->
             val header = ByteArray(16)
             raf.readFully(header)
-
-            val fileBytes = file.length()
-            val bitrateKbps = (fileBytes * 8 / duration / 1000)
-
-            // 0. DSD / DSF Container ("DSD " at byte 0..3)
-            if (header[0] == 0x44.toByte() && header[1] == 0x53.toByte() && header[2] == 0x44.toByte() && header[3] == 0x20.toByte()) {
-                return "DSD / DSF" to "Hi-Res DSD"
-            }
-
-            // 1. MP3 ("ID3" at byte 0..2 or 0xFF 0xFB)
-            if ((header[0] == 0x49.toByte() && header[1] == 0x44.toByte() && header[2] == 0x33.toByte()) ||
-                (header[0] == 0xFF.toByte() && (header[1].toInt() and 0xE0) == 0xE0)) {
-                return "MP3" to "$bitrateKbps kbps"
-            }
-
-            // 2. M4A / AAC ("ftyp" at byte 4..7)
-            if (header[4] == 0x66.toByte() && header[5] == 0x74.toByte() && header[6] == 0x79.toByte() && header[7] == 0x70.toByte()) {
-                return "M4A / AAC" to "$bitrateKbps kbps"
-            }
-
-            // 3. FLAC ("fLaC" at byte 0..3)
-            if (header[0] == 0x66.toByte() && header[1] == 0x4C.toByte() && header[2] == 0x61.toByte() && header[3] == 0x43.toByte()) {
-                return "FLAC (Lossless)" to "Hi-Res Lossless"
-            }
-
-            // 4. OGG / Opus ("OggS" at byte 0..3)
-            if (header[0] == 0x4F.toByte() && header[1] == 0x67.toByte() && header[2] == 0x68.toByte() && header[3] == 0x53.toByte()) {
-                return "OGG / Opus" to "$bitrateKbps kbps"
-            }
-
-            // 5. WAV ("RIFF" at byte 0..3)
-            if (header[0] == 0x52.toByte() && header[1] == 0x56.toByte() && header[2] == 0x46.toByte() && header[3] == 0x46.toByte()) {
-                return "WAV (Uncompressed)" to "Uncompressed Audio"
-            }
+            val bitrateKbps = file.length() * 8 / duration / 1000
+            formatFromHeader(header, bitrateKbps)?.let { return it }
         }
     } catch (_: Exception) {
     }
 
-    val ext = file.extension.uppercase(Locale.US).ifBlank { "Audio Track" }
-    return ext to "320 kbps"
+    return formatFromExtension(file.extension) to "320 kbps"
+}
+
+/** Size on disk for the Song Info popup - handles both a real filesystem path and a referenced
+ * local import's own content:// URI (see detectAudioFormat's own doc for why the two need
+ * separate handling). Zero (shown as "Streaming") if the path is missing/unreadable rather than
+ * a real size. */
+private fun localFileSizeBytes(context: Context, path: String): Long = try {
+    if (path.startsWith("content://")) {
+        context.contentResolver.openAssetFileDescriptor(Uri.parse(path), "r")?.use { it.length } ?: 0L
+    } else {
+        File(path).takeIf { it.exists() }?.length() ?: 0L
+    }
+} catch (_: Exception) {
+    0L
+}
+
+/** [OpenableColumns.DISPLAY_NAME] for a content:// URI - the only reliable way to recover a
+ * referenced local import's original filename/extension, since the URI itself is an opaque
+ * document id, not a real path. Null if the provider won't answer (rare, but not guaranteed). */
+private fun queryDisplayName(context: Context, uri: Uri): String? = try {
+    context.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
+        if (cursor.moveToFirst()) cursor.getString(0) else null
+    }
+} catch (_: Exception) {
+    null
 }
 
 @Composable
