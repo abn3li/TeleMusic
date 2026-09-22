@@ -9,6 +9,11 @@ interface SongDao {
     @Query("SELECT * FROM songs ORDER BY addedAtMillis DESC")
     fun observeAll(): Flow<List<SongEntity>>
 
+    // Android Auto's "Recently Played" browse category - see MusicService's MediaLibrarySession
+    // callback. Excludes lastPlayedAtMillis = 0 (never actually played, just added/synced).
+    @Query("SELECT * FROM songs WHERE lastPlayedAtMillis > 0 ORDER BY lastPlayedAtMillis DESC LIMIT :limit")
+    suspend fun getRecentlyPlayed(limit: Int = 50): List<SongEntity>
+
     @Query("SELECT * FROM songs WHERE telegramMessageId = :id")
     suspend fun getById(id: Long): SongEntity?
 

@@ -31,6 +31,10 @@
             android:exported="true"
             android:foregroundServiceType="mediaPlayback">
             <intent-filter>
+                <!-- MediaLibraryService's own action - what Android Auto/Automotive's browser
+                     looks for. MediaSessionService's action is kept alongside it so any host
+                     that only knows the older, non-browsable action can still bind. -->
+                <action android:name="androidx.media3.session.MediaLibraryService" />
                 <action android:name="androidx.media3.session.MediaSessionService" />
             </intent-filter>
         </service>
@@ -41,6 +45,13 @@
             android:name=".sync.SyncService"
             android:exported="false"
             android:foregroundServiceType="dataSync" />
+
+        <!-- Declares this app as an Android Auto media app - required for Auto's launcher to
+             list it at all, separate from the MediaLibraryService intent-filter above (that's
+             what lets Auto's browser actually connect once it does). -->
+        <meta-data
+            android:name="com.google.android.gms.car.application"
+            android:resource="@xml/automotive_app_desc" />
 
     </application>
 </manifest>

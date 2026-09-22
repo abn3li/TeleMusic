@@ -17,8 +17,9 @@ import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.extractor.DefaultExtractorsFactory
 import androidx.media3.extractor.mp4.Mp4Extractor
+import androidx.media3.session.MediaLibraryService
+import androidx.media3.session.MediaLibraryService.MediaLibrarySession
 import androidx.media3.session.MediaSession
-import androidx.media3.session.MediaSessionService
 import com.abn3li.telemusic.MainActivity
 import com.abn3li.telemusic.TgMusicApp
 import com.abn3li.telemusic.data.local.displayArtworkUri
@@ -30,8 +31,11 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
 
-class MusicService : MediaSessionService() {
-    private var mediaSession: MediaSession? = null
+class MusicService : MediaLibraryService() {
+    // MediaLibrarySession (not a plain MediaSession) is what makes this service browsable by
+    // Android Auto/Automotive - see AutoLibraryCallback for the actual browse tree/car playback
+    // resolution wired in below via .setCallback().
+    private var mediaSession: MediaLibrarySession? = null
     private lateinit var player: ExoPlayer
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
 
@@ -86,7 +90,9 @@ class MusicService : MediaSessionService() {
             PendingIntent.FLAG_IMMUTABLE
         )
 
-        mediaSession = MediaSession.Builder(this, queueAwarePlayer)
+        mediaSession = MediaLibrarySession.Builder(
+            this, queueAwarePlayer, AutoLibraryCallback(app.musicRepository, app.playbackQueue, serviceScope)
+        )
             .setSessionActivity(sessionActivity)
             .build()
     }
@@ -95,25 +101,7 @@ class MusicService : MediaSessionService() {
         if (songId == null) return
         val app = application as TgMusicApp
         val song = withContext(Dispatchers.IO) { app.musicRepository.getSongById(songId) } ?: return
-
-        var localPath = song.localFilePath
-        if (localPath != null && !File(localPath).exists()) {
-            withContext(Dispatchers.IO) { app.musicRepository.clearStaleLocalPath(song.telegramMessageId) }
-            localPath = null
-        }
-
-        val uri = when {
-            localPath != null && File(localPath).length() > 0 ->
-                File(localPath).toURI().toString().toUri()
-            song.youtubeVideoId != null -> {
-                val resolved = withContext(Dispatchers.IO) { app.musicRepository.resolveDirectPlaybackUri(song) }
-                resolved ?: return
-            }
-            else -> {
-                val freshFileId = withContext(Dispatchers.IO) { app.musicRepository.getFreshFileIdForSong(song) }
-                TdlibDataSource.uriFor(freshFileId)
-            }
-        }
+        val uri = withContext(Dispatchers.IO) { app.musicRepository.resolvePlaybackUri(song) } ?: return
 
         val item = MediaItem.Builder()
             .setUri(uri)
@@ -133,7 +121,7 @@ class MusicService : MediaSessionService() {
         withContext(Dispatchers.IO) { app.musicRepository.stampLastPlayed(song) }
     }
 
-    override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? = mediaSession
+    override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaLibrarySession? = mediaSession
 
     override fun onTaskRemoved(rootIntent: Intent?) {
         val player = mediaSession?.player ?: return

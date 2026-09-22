@@ -18,6 +18,7 @@ import com.abn3li.telemusic.data.download.YtDlpRepository
 import com.abn3li.telemusic.data.download.ytDlpStableSongId
 import com.abn3li.telemusic.data.settings.AppSettingsStore
 import com.abn3li.telemusic.data.telegram.TdlibManager
+import com.abn3li.telemusic.playback.TdlibDataSource
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
@@ -116,6 +117,9 @@ class MusicRepository(
 
     suspend fun getSongById(id: Long): SongEntity? = songDao.getById(id)
     fun search(query: String): Flow<List<SongEntity>> = songDao.search(query)
+
+    /** Android Auto's "Recently Played" browse category - see MusicService's MediaLibrarySession. */
+    suspend fun getRecentlyPlayed(limit: Int = 50): List<SongEntity> = songDao.getRecentlyPlayed(limit)
 
     fun observeFavorites(sortField: SortField, ascending: Boolean): Flow<List<SongEntity>> =
         songDao.observeFavorites().map { it.sortedByField(sortField, ascending) }
@@ -272,6 +276,30 @@ class MusicRepository(
 
     fun invalidateStreamCache(videoId: String) {
         ytDlpRepository.invalidateStreamCache(videoId)
+    }
+
+    /**
+     * The one true "how do I actually play this song" resolution, shared by MusicService's
+     * next/previous handling and the Android Auto browse tree (MusicService's
+     * MediaLibrarySession.Callback) - previously duplicated only in MusicService.playAdjacentSong,
+     * which is exactly the kind of drift that made local-file staleness or YouTube-stream
+     * resolution behave differently for one caller than the other. Local file first (clearing a
+     * stale path if the file's gone missing since last recorded), then a YouTube stream resolve,
+     * then falling back to a fresh TDLib file id. Null only when nothing could resolve at all (a
+     * dead YouTube stream with no local copy).
+     */
+    suspend fun resolvePlaybackUri(song: SongEntity): Uri? {
+        var localPath = song.localFilePath
+        if (localPath != null && !File(localPath).exists()) {
+            clearStaleLocalPath(song.telegramMessageId)
+            localPath = null
+        }
+        return when {
+            localPath != null && File(localPath).length() > 0 ->
+                File(localPath).toURI().toString().toUri()
+            song.youtubeVideoId != null -> resolveDirectPlaybackUri(song)
+            else -> TdlibDataSource.uriFor(getFreshFileIdForSong(song))
+        }
     }
 
     // ---- One-time cleanup: collapse collab credits into their primary artist ----
