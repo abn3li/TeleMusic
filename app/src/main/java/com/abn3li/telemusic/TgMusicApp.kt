@@ -22,6 +22,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 class TgMusicApp : Application(), ImageLoaderFactory {
     lateinit var tdlibManager: TdlibManager; private set
@@ -82,6 +83,25 @@ class TgMusicApp : Application(), ImageLoaderFactory {
      */
     fun enrichLibraryInBackground() {
         appScope.launch { musicRepository.enrichMissingMetadata() }
+    }
+
+    /**
+     * Runs importLocalSongs() on this Application-scoped coroutine for the exact same reason
+     * enrichLibraryInBackground() above does - it copies every selected file's bytes into the
+     * app's own storage one at a time (see LocalAudioImporter.importToPrivateStorage's own doc),
+     * which for a large folder is easily slow enough to still be running after the user taps
+     * Import and moves on. This was previously launched on the Settings screen's own
+     * rememberCoroutineScope(), which gets cancelled the moment that screen leaves composition
+     * (e.g. switching bottom-nav tabs) - the import silently stopped wherever it happened to be,
+     * even though the "Import (N)" button's own count was always correct. That mismatch (a
+     * correct count, an incomplete result) is exactly what made it look like some fixed built-in
+     * limit, when the real cause was navigating away mid-copy.
+     */
+    fun importLocalSongsInBackground(files: List<com.abn3li.telemusic.repository.LocalAudioFile>, onImported: () -> Unit) {
+        appScope.launch {
+            musicRepository.importLocalSongs(files)
+            withContext(Dispatchers.Main) { onImported() }
+        }
     }
 
     /**

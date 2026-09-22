@@ -996,17 +996,19 @@ fun SettingsScreen(onBack: () -> Unit, onLoggedOut: () -> Unit) {
             isScanning = isScanningLocalFolder,
             onImport = { selected ->
                 val count = selected.size
-                scope.launch {
-                    // The import itself is just file copies + DB writes - fine on this
-                    // screen-scoped coroutine even if the user navigates away right after.
-                    // Enrichment is the part that can't live here: see
-                    // TgMusicApp.enrichLibraryInBackground()'s own doc for why.
-                    app.musicRepository.importLocalSongs(selected)
-                    if (enrichEnabled) {
+                // Runs on TgMusicApp's own app-scoped coroutine, not this screen's
+                // rememberCoroutineScope() - a large folder's file-copy loop can easily outlast
+                // this screen's composition if the user switches tabs right after tapping
+                // Import, and a screen-scoped coroutine would get silently cancelled mid-copy
+                // (see importLocalSongsInBackground's own doc - this was the actual cause of
+                // "only some songs" imports, not a real limit).
+                storageActionStatus = "Importing $count song(s)..."
+                app.importLocalSongsInBackground(selected) {
+                    storageActionStatus = if (enrichEnabled) {
                         app.enrichLibraryInBackground()
-                        storageActionStatus = "Imported $count song(s) - fetching artwork in the background..."
+                        "Imported $count song(s) - fetching artwork in the background..."
                     } else {
-                        storageActionStatus = "Imported $count song(s)!"
+                        "Imported $count song(s)!"
                     }
                 }
                 showImportSheet = false
