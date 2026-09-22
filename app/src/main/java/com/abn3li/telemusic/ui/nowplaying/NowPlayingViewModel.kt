@@ -10,6 +10,7 @@ import com.abn3li.telemusic.data.download.DownloadQuality
 import com.abn3li.telemusic.data.download.YtDlpRepository
 import com.abn3li.telemusic.data.download.ytDlpStableSongId
 import com.abn3li.telemusic.data.local.SongEntity
+import com.abn3li.telemusic.data.local.displayArtwork
 import com.abn3li.telemusic.playback.PlaybackController
 import com.abn3li.telemusic.playback.PlaybackQueue
 import com.abn3li.telemusic.playback.RepeatMode
@@ -270,7 +271,7 @@ class NowPlayingViewModel(
             errorMessage = null,
             isDownloading = false
         )
-        playbackController.playUri(streamUri, song.telegramMessageId, song.title, song.artist, song.albumArtUrl)
+        playbackController.playUri(streamUri, song.telegramMessageId, song.title, song.artist, song.displayArtwork)
     }
 
     fun fetchLyricsOnDemand() {
@@ -509,7 +510,7 @@ class NowPlayingViewModel(
         }
         when {
             localPath != null && File(localPath).length() > 0 ->
-                playbackController.playLocalFile(localPath, song.telegramMessageId, song.title, song.artist, song.albumArtUrl)
+                playbackController.playLocalFile(localPath, song.telegramMessageId, song.title, song.artist, song.displayArtwork)
             // A real library row backed by a YouTube video that hasn't been downloaded (see
             // MusicRepository.importPlaylistTrackAsStreamable's own doc) - resolves a fresh
             // stream URL on demand instead of asking TDLib for a file id that doesn't exist.
@@ -521,7 +522,7 @@ class NowPlayingViewModel(
                         song = freshSong ?: song,
                         durationMs = ((freshSong?.durationSeconds ?: song.durationSeconds) * 1000L).takeIf { it > 0 } ?: _uiState.value.durationMs
                     )
-                    playbackController.playUri(uri, song.telegramMessageId, song.title, song.artist, song.albumArtUrl)
+                    playbackController.playUri(uri, song.telegramMessageId, song.title, song.artist, song.displayArtwork)
                 } else {
                     _uiState.value = _uiState.value.copy(
                         errorMessage = "Couldn't play \"${song.title}\" - video may be unavailable",
@@ -536,7 +537,7 @@ class NowPlayingViewModel(
                     }
                 }
             }
-            else -> playbackController.playSong(song.telegramFileId, song.telegramMessageId, song.title, song.artist, song.albumArtUrl)
+            else -> playbackController.playSong(song.telegramFileId, song.telegramMessageId, song.title, song.artist, song.displayArtwork)
         }
     }
 

@@ -55,6 +55,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.abn3li.telemusic.data.local.SongEntity
+import com.abn3li.telemusic.data.local.displayArtwork
 import com.abn3li.telemusic.playback.RepeatMode
 
 /**
@@ -78,7 +79,7 @@ fun QueueView(
 
     Box(modifier = modifier.fillMaxSize().background(Color.Black)) {
         AsyncImage(
-            model = song?.albumArtUrl,
+            model = song?.displayArtwork,
             contentDescription = null,
             contentScale = ContentScale.Crop,
             modifier = Modifier.fillMaxSize().blur(55.dp)
@@ -495,8 +496,8 @@ private fun UpcomingTrackRow(
 @Composable
 private fun TrackArt(song: SongEntity) {
     Box(modifier = Modifier.size(44.dp).clip(RoundedCornerShape(10.dp)).background(Color.White.copy(alpha = 0.08f))) {
-        if (!song.albumArtUrl.isNullOrEmpty()) {
-            AsyncImage(model = song.albumArtUrl, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+        if (!song.displayArtwork.isNullOrEmpty()) {
+            AsyncImage(model = song.displayArtwork, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
         } else {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Icon(Icons.Default.MusicNote, contentDescription = null, tint = Color.White.copy(alpha = 0.4f), modifier = Modifier.size(20.dp))

@@ -27,6 +27,13 @@ interface SongDao {
     @Query("UPDATE songs SET thumbnailPath = :path WHERE telegramMessageId = :id")
     suspend fun setThumbnailPath(id: Long, path: String)
 
+    // Full-size local artwork path (ThumbnailGenerator.saveFullArtwork) for embedded/Telegram-
+    // provided art that has no online URL of its own - see displayArtwork's own doc for why this
+    // reuses the albumArtUrl column rather than adding a new one (every artwork-display site
+    // already reads that column first).
+    @Query("UPDATE songs SET albumArtUrl = :path WHERE telegramMessageId = :id")
+    suspend fun setAlbumArtUrl(id: Long, path: String)
+
     @Query("SELECT * FROM songs WHERE title LIKE '%' || :query || '%' OR artist LIKE '%' || :query || '%'")
     fun search(query: String): Flow<List<SongEntity>>
 
@@ -97,6 +104,13 @@ interface SongDao {
     @Query("SELECT telegramMessageId FROM songs WHERE isLocalImport = 1")
     suspend fun getLocalImportSongIds(): List<Long>
 
-    @Query("UPDATE songs SET metadataEnriched = 1 WHERE title IS NOT NULL AND title != '' AND title != 'Unknown title' AND artist IS NOT NULL AND artist != '' AND artist != 'Unknown artist' AND albumArtUrl IS NOT NULL AND albumArtUrl != ''")
+    // Artwork already in hand counts as "has artwork" whether it came from an online lookup
+    // (albumArtUrl) or was pulled straight from the source - an embedded picture for a local
+    // import, a Telegram-provided cover for a synced song (both land in thumbnailPath with no
+    // albumArtUrl at all). Without the thumbnailPath half of this OR, a song with real local/
+    // Telegram artwork would never satisfy this query, stay metadataEnriched=0 forever, and get
+    // re-queued for an online lookup on every single enrichMissingMetadata() run - the exact
+    // repeated-work loop this flag exists to prevent.
+    @Query("UPDATE songs SET metadataEnriched = 1 WHERE title IS NOT NULL AND title != '' AND title != 'Unknown title' AND artist IS NOT NULL AND artist != '' AND artist != 'Unknown artist' AND ((albumArtUrl IS NOT NULL AND albumArtUrl != '') OR (thumbnailPath IS NOT NULL AND thumbnailPath != ''))")
     suspend fun markCompleteSongsEnriched()
 }

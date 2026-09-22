@@ -21,6 +21,7 @@ import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
 import com.abn3li.telemusic.MainActivity
 import com.abn3li.telemusic.TgMusicApp
+import com.abn3li.telemusic.data.local.displayArtworkUri
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -121,7 +122,7 @@ class MusicService : MediaSessionService() {
                 MediaMetadata.Builder()
                     .setTitle(song.title)
                     .setArtist(song.artist)
-                    .setArtworkUri(song.albumArtUrl?.toUri())
+                    .setArtworkUri(song.displayArtworkUri)
                     .build()
             )
             .build()

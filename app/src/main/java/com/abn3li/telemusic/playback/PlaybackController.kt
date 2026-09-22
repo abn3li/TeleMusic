@@ -93,11 +93,26 @@ class PlaybackController(context: Context) {
         val item = MediaItem.Builder().setUri(uri).setMediaId(songId.toString()).setMediaMetadata(
             MediaMetadata.Builder()
                 .setTitle(title).setArtist(artist)
-                .setArtworkUri(artworkUrl?.let { it.toUri() }).build()
+                .setArtworkUri(artworkUriOf(artworkUrl)).build()
         ).build()
         controller?.setMediaItem(item, true)
         controller?.prepare()
         controller?.play()
+    }
+
+    /** [artworkUrl] arrives here as either a real https:// URL (SongEntity.albumArtUrl) or a
+     * bare local filesystem path with no scheme (SongEntity.thumbnailPath, e.g. an embedded/
+     * Telegram-provided cover with no URL of its own - see SongEntity.displayArtwork) - callers
+     * pass whichever one exists. A bare path handed straight to toUri() has no scheme, which the
+     * media notification/lock screen artwork loader won't resolve, so it needs wrapping through
+     * File(...).toUri() to become a real file:// Uri instead. */
+    private fun artworkUriOf(artworkUrl: String?): Uri? {
+        if (artworkUrl.isNullOrBlank()) return null
+        return if (artworkUrl.startsWith("http://") || artworkUrl.startsWith("https://") || artworkUrl.startsWith("content://")) {
+            artworkUrl.toUri()
+        } else {
+            File(artworkUrl).toUri()
+        }
     }
 
     fun playSong(fileId: Int, songId: Long, title: String, artist: String, artworkUrl: String?) {

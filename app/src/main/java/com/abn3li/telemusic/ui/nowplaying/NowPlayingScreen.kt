@@ -94,6 +94,7 @@ import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import com.abn3li.telemusic.data.local.SongEntity
+import com.abn3li.telemusic.data.local.displayArtwork
 import com.abn3li.telemusic.playback.RepeatMode
 import kotlinx.coroutines.launch
 import java.io.File
@@ -304,13 +305,13 @@ private fun NowPlayingContent(
 
     val backgroundColor = MaterialTheme.colorScheme.background
 
-    val artworkRequest = remember(state.song?.albumArtUrl, context) {
+    val artworkRequest = remember(state.song?.displayArtwork, context) {
         ImageRequest.Builder(context)
-            .data(state.song?.albumArtUrl)
+            .data(state.song?.displayArtwork)
             .crossfade(200)
             .allowHardware(true)
-            .memoryCacheKey(state.song?.albumArtUrl)
-            .diskCacheKey(state.song?.albumArtUrl)
+            .memoryCacheKey(state.song?.displayArtwork)
+            .diskCacheKey(state.song?.displayArtwork)
             .build()
     }
 
@@ -585,7 +586,7 @@ private fun NowPlayingContent(
                                     )
 
                                     // Artwork Image rendered seamlessly on top
-                                    if (!state.song?.albumArtUrl.isNullOrEmpty()) {
+                                    if (!state.song?.displayArtwork.isNullOrEmpty()) {
                                         AsyncImage(
                                             model = artworkRequest,
                                             contentDescription = "Album Artwork",
@@ -993,9 +994,9 @@ private fun NowPlayingContent(
                 ) {
                     Box(modifier = Modifier.fillMaxWidth()) {
                         // Blurred album artwork overlay inside card
-                        if (!song.albumArtUrl.isNullOrEmpty()) {
+                        if (!song.displayArtwork.isNullOrEmpty()) {
                             AsyncImage(
-                                model = song.albumArtUrl,
+                                model = song.displayArtwork,
                                 contentDescription = null,
                                 contentScale = ContentScale.Crop,
                                 modifier = Modifier

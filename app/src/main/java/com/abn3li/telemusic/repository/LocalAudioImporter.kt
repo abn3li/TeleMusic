@@ -108,6 +108,24 @@ class LocalAudioImporter(private val context: Context) {
         }
     }
 
+    /** Extracts the embedded cover art from [file]'s own tags, if it has any. Deliberately not
+     * read during scanFolder()/readMetadata() above - that runs over an entire picked folder just
+     * to list what's there, often before the user has chosen anything to import, and holding
+     * decoded artwork bytes for every file in a large folder in memory at once for songs that may
+     * never even get imported is real avoidable memory pressure. Called once per file, only for
+     * the ones the user actually chose to import. */
+    fun extractEmbeddedArtwork(file: LocalAudioFile): ByteArray? {
+        val retriever = MediaMetadataRetriever()
+        return try {
+            retriever.setDataSource(context, file.uri)
+            retriever.embeddedPicture
+        } catch (e: Exception) {
+            null
+        } finally {
+            runCatching { retriever.release() }
+        }
+    }
+
     /** Copies [file]'s bytes into the app's own private storage, so it plays back and is
      * managed exactly like any other song's localFilePath - see SongEntity.isLocalImport's own
      * doc for why a raw content:// URI can't just be stored there directly instead. Returns the

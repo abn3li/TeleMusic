@@ -1,7 +1,10 @@
 package com.abn3li.telemusic.data.local
 
+import android.net.Uri
+import androidx.core.net.toUri
 import androidx.room.Entity
 import androidx.room.PrimaryKey
+import java.io.File
 
 @Entity(tableName = "songs")
 data class SongEntity(
@@ -63,3 +66,44 @@ data class SongEntity(
     // correct it, never worse than not caching at all.
     val resolvedChatId: Long? = null
 )
+
+/**
+ * The best artwork this song has for a full-size display (Now Playing's big cover, the media
+ * notification/lock screen, MiniPlayer, Queue, Lyrics) - prefers [SongEntity.albumArtUrl] (either
+ * the full-res 600-1000px online source, or a local import's embedded cover art saved as-is via
+ * ThumbnailGenerator.saveFullArtwork - see LocalAudioImporter.extractEmbeddedArtwork) when set,
+ * otherwise falls back to [SongEntity.thumbnailPath] (the small 160x160 list-row copy, better
+ * than nothing for a song that predates either artwork path having run yet).
+ *
+ * Telegram-synced songs deliberately do NOT get this treatment - they rely entirely on
+ * MusicRepository.enrichMissingMetadata()'s online iTunes/Deezer/MusicBrainz lookup for artwork,
+ * same as always. Every artwork-display site should read this instead of albumArtUrl directly -
+ * see [displayArtworkUri] for the MediaMetadata (notification/lock screen) equivalent, which
+ * needs a real Uri instead of a plain path string.
+ *
+ * Excludes the literal "none" sentinel [ThumbnailGenerator]/ensureThumbnail's failure path writes
+ * to thumbnailPath - that string is not a path, it's a "don't retry" marker.
+ */
+val SongEntity.displayArtwork: String?
+    get() = albumArtUrl?.takeIf { it.isNotBlank() }
+        ?: thumbnailPath?.takeIf { it.isNotBlank() && it != "none" }
+
+/**
+ * Same source as [displayArtwork], but as a real [Uri] for MediaMetadata (the media notification/
+ * lock screen/Android Auto artwork, set via MediaMetadata.Builder.setArtworkUri) rather than
+ * Coil's AsyncImage - Coil resolves a bare local file path string fine (proven by the Library
+ * list already doing exactly that via thumbnailPath), but MediaMetadata's artwork consumers need
+ * an actual scheme. A real https:// URL (the online enrichment path) already has one; a local
+ * path (a local import's saved embedded artwork, or thumbnailPath) has none at all, so that case
+ * needs wrapping through File(...).toUri() to become a proper file:// Uri instead of being
+ * handed to androidx.core.net.toUri() as-is.
+ */
+val SongEntity.displayArtworkUri: Uri?
+    get() {
+        val art = displayArtwork ?: return null
+        return if (art.startsWith("http://") || art.startsWith("https://") || art.startsWith("content://")) {
+            art.toUri()
+        } else {
+            File(art).toUri()
+        }
+    }

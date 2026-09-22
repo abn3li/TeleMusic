@@ -40,6 +40,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
+import com.abn3li.telemusic.data.local.displayArtwork
 
 /**
  * Full-screen "Lyrics View" - its own glassmorphic screen (blurred backdrop, compact header,
@@ -84,7 +85,7 @@ fun LyricsView(
         // Modifier.blur() is a no-op below API 31 (no RenderEffect there) - the art renders
         // sharp instead of blurred on those devices, which is the graceful fallback.
         AsyncImage(
-            model = song?.albumArtUrl,
+            model = song?.displayArtwork,
             contentDescription = null,
             contentScale = ContentScale.Crop,
             modifier = Modifier.fillMaxSize().blur(55.dp)
@@ -121,8 +122,8 @@ fun LyricsView(
                     Box(
                         modifier = Modifier.size(44.dp).clip(RoundedCornerShape(10.dp)).background(Color.White.copy(alpha = 0.08f))
                     ) {
-                        if (!song?.albumArtUrl.isNullOrEmpty()) {
-                            AsyncImage(model = song.albumArtUrl, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+                        if (!song?.displayArtwork.isNullOrEmpty()) {
+                            AsyncImage(model = song.displayArtwork, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
                         }
                     }
                     Column {

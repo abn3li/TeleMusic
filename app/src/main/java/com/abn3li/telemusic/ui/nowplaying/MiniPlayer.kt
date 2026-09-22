@@ -50,6 +50,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.abn3li.telemusic.data.local.SongEntity
+import com.abn3li.telemusic.data.local.displayArtwork
 import com.abn3li.telemusic.ui.library.AccentGreen
 
 /** Rendered height of the compact floating capsule MiniPlayer, incl. vertical margins. */
@@ -80,7 +81,7 @@ fun MiniPlayer(
         modifier = modifier.padding(bottom = bottomOffset)
     ) {
         val song = state.song ?: return@AnimatedVisibility
-        val artworkColor = rememberArtworkColor(song.albumArtUrl)
+        val artworkColor = rememberArtworkColor(song.displayArtwork)
 
         Surface(
             onClick = onClick,
@@ -109,9 +110,9 @@ fun MiniPlayer(
                             .size(36.dp)
                             .clip(CircleShape)
                     ) {
-                        if (!song.albumArtUrl.isNullOrEmpty()) {
+                        if (!song.displayArtwork.isNullOrEmpty()) {
                             AsyncImage(
-                                model = song.albumArtUrl,
+                                model = song.displayArtwork,
                                 contentDescription = null,
                                 contentScale = ContentScale.Crop,
                                 modifier = Modifier.fillMaxSize()

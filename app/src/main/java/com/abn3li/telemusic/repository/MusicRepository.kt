@@ -157,15 +157,31 @@ class MusicRepository(
                     durationSeconds = file.durationSeconds,
                     localFilePath = copiedPath,
                     isLocalImport = true,
-                    // Left unenriched on purpose - it already has a real title/artist from the
-                    // device's own tags, so enrichMissingMetadata() won't touch those, but it
-                    // still has no artwork (nothing extracts embedded cover art from an imported
-                    // file), so it still needs that pass to fetch one. Call
-                    // enrichMissingMetadata() after this import to fetch it right away rather
-                    // than waiting for a Telegram sync that may never come.
+                    // Left unenriched on purpose - metadataEnriched only flips to true once
+                    // enrichMissingMetadata() (called right below via the embedded-artwork check,
+                    // or by the caller afterward) confirms this song has both real title/artist
+                    // AND real artwork - see that function's hasArtwork check.
                     metadataEnriched = false
                 )
             )
+
+            // Pull cover art straight from the file's own tags first - real, instant, no network
+            // call - and only fall back to enrichMissingMetadata()'s online iTunes/Deezer/
+            // MusicBrainz lookup for files that genuinely have none embedded. thumbnailGenerator
+            // caches by songId and returns the existing path if already generated, so this is
+            // safe to call even if the same file gets re-imported later.
+            val embeddedArtwork = localAudioImporter.extractEmbeddedArtwork(file)
+            if (embeddedArtwork != null) {
+                // Full-size copy first for Now Playing/the media notification (displayArtwork
+                // prefers albumArtUrl) - the small thumbnailPath copy alone looked visibly
+                // blurry stretched across a full-screen backdrop; see saveFullArtwork's own doc.
+                thumbnailGenerator.saveFullArtwork(songId, embeddedArtwork)?.let { path ->
+                    songDao.setAlbumArtUrl(songId, path)
+                }
+                thumbnailGenerator.generateFromBytes(songId, embeddedArtwork)?.let { path ->
+                    songDao.setThumbnailPath(songId, path)
+                }
+            }
         }
     }
 
@@ -410,10 +426,17 @@ class MusicRepository(
         for (song in unenriched) {
             val originalTitle = song.title
             val originalArtist = song.artist
+            // Artwork already in hand - either from an online lookup (albumArtUrl) or pulled
+            // straight from the source during import/sync (thumbnailPath, no URL involved) -
+            // counts the same here. Gating only on albumArtUrl would send every local-import/
+            // Telegram-cover song that already has real art back through an online lookup on
+            // every single call, forever - exactly the repeated-work loop this check exists to
+            // prevent.
+            val hasArtwork = !song.albumArtUrl.isNullOrBlank() || !song.thumbnailPath.isNullOrBlank()
 
             val alreadyHasGoodInfo = originalTitle.isNotBlank() && originalTitle != "Unknown title"
                     && originalArtist.isNotBlank() && originalArtist != "Unknown artist"
-                    && !song.albumArtUrl.isNullOrBlank()
+                    && hasArtwork
 
             if (alreadyHasGoodInfo) {
                 songDao.update(song.copy(metadataEnriched = true))
@@ -422,12 +445,12 @@ class MusicRepository(
 
             onProgress("Fetching info for $originalTitle...")
 
-            // A local import always has a real title/artist from its own tags, so the first two
-            // checks rarely fire for one - but it never has artwork either (nothing extracts
-            // embedded cover art from an imported file), so without that third check a local
-            // import that happens to already carry an album tag would never get a lookup at all
-            // and would silently stay coverless forever.
-            val needsMetadataGuess = originalTitle == "Unknown title" || song.album == null || song.albumArtUrl == null
+            // A local import/Telegram sync always has a real title/artist from its own tags, so
+            // the first two checks rarely fire - but only needs a lookup for artwork when it
+            // truly has none of its own (see hasArtwork above; LocalAudioImporter and
+            // TdlibManager's sync path now extract embedded/Telegram-provided cover art directly
+            // into thumbnailPath before this ever runs).
+            val needsMetadataGuess = originalTitle == "Unknown title" || song.album == null || !hasArtwork
             val enriched = if (needsMetadataGuess) {
                 metadataRepository.enrich("$originalTitle $originalArtist".trim())
             } else null
