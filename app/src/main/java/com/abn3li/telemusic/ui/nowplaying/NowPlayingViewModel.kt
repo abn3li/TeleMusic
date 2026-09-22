@@ -454,6 +454,19 @@ class NowPlayingViewModel(
         // moves ExoPlayer out of STATE_ENDED into STATE_IDLE so duplicate auto-advance events
         // cannot trigger during the network resolution wait.
         playbackController.stop()
+
+        // The song being navigated AWAY from - if it was still mid-stream (no localFilePath yet,
+        // so markStreamedFileCached's poll never caught it finishing), tell TDLib to actually
+        // stop downloading it. Our own poll coroutine dying (it's a child of the loadJob just
+        // cancelled above) doesn't do this on its own - see MusicRepository
+        // .cancelStreamingDownload's own doc for why that mattered for storage.
+        val outgoingSong = _uiState.value.song
+        if (outgoingSong != null && !outgoingSong.isLocalImport && outgoingSong.youtubeVideoId == null &&
+            !outgoingSong.isExplicitDownload && outgoingSong.localFilePath == null
+        ) {
+            viewModelScope.launch(Dispatchers.IO) { repository.cancelStreamingDownload(outgoingSong.telegramFileId) }
+        }
+
         loadJob = viewModelScope.launch {
             val songId = songIdOverride ?: queue.currentSongId() ?: return@launch
 
@@ -513,9 +526,12 @@ class NowPlayingViewModel(
 
             // Streamed-only auto-cache bookkeeping (does NOT set isExplicitDownload). A local
             // import or a YouTube-streamable row (youtubeVideoId set) is already fully on-device
-            // or plays via yt-dlp, either way with no real TDLib file behind it to poll for -
-            // markStreamedFileCached would otherwise loop forever waiting for a TDLib download
-            // completion that can never come.
+            // or plays via yt-dlp, either way with no real TDLib file behind it to poll for.
+            // This launch is a structured child of loadJob (the coroutine this whole block runs
+            // in), so it's automatically cancelled the next time loadCurrentQueuePosition() runs
+            // for a different song - see that function's own doc for the other half of this: our
+            // poll coroutine dying doesn't stop TDLib's own independent download, which needs an
+            // explicit cancel.
             if (!song.isLocalImport && song.youtubeVideoId == null) {
                 launch(Dispatchers.IO) { repository.markStreamedFileCached(song) }
             }

@@ -71,6 +71,7 @@ class TgMusicApp : Application(), ImageLoaderFactory {
         // in the background at startup rather than blocking the Library screen's first load.
         appScope.launch { musicRepository.backfillThumbnails() }
         appScope.launch { musicRepository.normalizeArtistCredits() }
+        appScope.launch { musicRepository.reconcileOrphanedTdlibFiles() }
     }
 
     /**

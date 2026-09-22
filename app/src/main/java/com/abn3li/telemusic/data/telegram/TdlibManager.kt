@@ -518,6 +518,41 @@ class TdlibManager(private val context: Context) {
     /** Diagnostic only - see TdlibDataSource.open()'s own doc on why this is being checked. */
     fun hasStartedDownload(fileId: Int): Boolean = fileId in downloadsStarted
 
+    /**
+     * Stops TDLib actually downloading [fileId] in the background - beginStreamingDownload()
+     * requests the WHOLE file at real priority, and TDLib keeps working on that request
+     * regardless of whether the song is still playing, so without an explicit cancel every
+     * skipped-past streamed song kept silently downloading to completion (consuming bandwidth
+     * and disk MusicRepository.enforceCacheLimit() has no way to know about or bound until each
+     * one finishes - see NowPlayingViewModel's own doc on the job this backs). Removing the
+     * fileId from downloadsStarted too so a later replay of the same song calls DownloadFile
+     * again instead of skipping straight to a stale GetFile that won't resume anything.
+     *
+     * CancelDownloadFile alone only stops further progress - it does NOT remove the partial
+     * bytes TDLib already wrote to its own storage directory. Since MusicRepository only ever
+     * records a song's localFilePath once markStreamedFileCached() observes a real completion,
+     * a cancelled-but-incomplete download's partial file never gets a DB row at all - making it
+     * permanently invisible to enforceCacheLimit()'s DB-driven accounting despite very much
+     * taking up real disk space. DeleteFile is what actually removes it, so it's called here too
+     * (skipped if the download had already finished by the time this ran - deleting a
+     * genuinely-completed, about-to-be-tracked cache file would be its own bug).
+     *
+     * The completion check re-fetches via GetFile rather than trusting the cached fileProgress
+     * map: that map is only updated by TDLib's own async UpdateFile push, so it can still say
+     * "incomplete" for a moment after the download has actually finished (e.g. skipping to the
+     * next song at the exact instant the outgoing one completes) - trusting the stale value
+     * there would delete a file that just became a legitimate, about-to-be-tracked cache entry.
+     */
+    suspend fun cancelDownload(fileId: Int) {
+        downloadsStarted.remove(fileId)
+        val freshFile = runCatching { sendSuspend(TdApi.GetFile(fileId)) as? TdApi.File }.getOrNull()
+        val wasIncomplete = freshFile?.local?.isDownloadingCompleted != true
+        runCatching { sendSuspend(TdApi.CancelDownloadFile(fileId, false)) }
+        if (wasIncomplete) {
+            runCatching { sendSuspend(TdApi.DeleteFile(fileId)) }
+        }
+    }
+
     private suspend fun sendSuspend(function: TdApi.Function<*>): TdApi.Object =
         suspendCancellableCoroutine { cont ->
             client?.send(function) { result ->

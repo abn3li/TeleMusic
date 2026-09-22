@@ -33,6 +33,9 @@ import java.io.File
 
 enum class SortField(val label: String) { TITLE("Name"), ARTIST("Artist"), ALBUM("Album"), DATE_ADDED("Date added") }
 
+// ~10 minutes at the 1s poll interval below - see markStreamedFileCached's own doc.
+private const val MAX_CACHE_POLL_ATTEMPTS = 600
+
 // Mirrors ytdlp_bridge.py's _ARTIST_SPLIT regex exactly - same separators, same "first segment
 // wins" rule, so a collab credit collapses to the same primary artist regardless of which path
 // (a fresh download vs this cleanup pass) it went through.
@@ -700,11 +703,24 @@ class MusicRepository(
      * already true from a prior explicit download), so the download icon and cache eviction
      * both treat this correctly as "not a real download." */
     suspend fun markStreamedFileCached(song: SongEntity) {
-        while (true) {
+        // Bounded so a download that genuinely never finishes (paused indefinitely, network
+        // dies, or - before NowPlayingViewModel started cancelling the previous song's download
+        // on skip - simply deprioritized behind newer requests) can't poll forever. The caller
+        // cancelling the old download on skip is the real fix for that case; this is just a
+        // safety net so this loop can never become one of the unbounded background coroutines
+        // that caused the storage/CPU leak in the first place, even if some future caller forgets
+        // to cancel.
+        repeat(MAX_CACHE_POLL_ATTEMPTS) {
             val progress = tdlibManager.getCachedFileProgress(song.telegramFileId)
             if (progress?.local?.isDownloadingCompleted == true) {
                 val current = songDao.getById(song.telegramMessageId) ?: return
-                if (current.localFilePath == null) {
+                // Always sync to TDLib's real current path, not just when it was null - a song
+                // cancelled+deleted mid-stream (see TdlibManager.cancelDownload's own doc) and
+                // later replayed to a fresh completion still had its OLD, now-deleted path
+                // sitting in the DB, so the "only if null" version of this check silently left
+                // that fresh file's real path unrecorded forever - orphaned on disk, invisible to
+                // enforceCacheLimit()'s DB-driven accounting no matter how correctly it ran.
+                if (current.localFilePath != progress.local.path) {
                     songDao.update(current.copy(localFilePath = progress.local.path))
                 }
                 enforceCacheLimit(excludeSongId = song.telegramMessageId)
@@ -713,6 +729,15 @@ class MusicRepository(
             delay(1000)
         }
     }
+
+    /** Tells TDLib to actually stop downloading [fileId] - see TdlibManager.cancelDownload's own
+     * doc for why this matters: cancelling our own markStreamedFileCached polling coroutine (a
+     * structured child of NowPlayingViewModel's loadJob, so it's already cancelled automatically
+     * when the user skips to a new song) does NOT stop TDLib's independent background download
+     * of the song being skipped away from - without this, every streamed song kept silently
+     * downloading to completion regardless of whether it was still playing, consuming disk space
+     * enforceCacheLimit() has no way to know about until each one finishes. */
+    suspend fun cancelStreamingDownload(fileId: Int) = tdlibManager.cancelDownload(fileId)
 
     /** Deletes all auto-cached streaming audio files from disk and resets localFilePath in DB. */
     suspend fun clearStreamingCache(): Int {
@@ -856,6 +881,46 @@ class MusicRepository(
             if (file.exists()) file.delete()
             songDao.update(song.copy(localFilePath = null))
             totalSize -= size
+        }
+    }
+
+    /**
+     * One-time-per-launch cleanup for files left behind by a since-fixed bug: a streamed song
+     * that was cancelled mid-download and later replayed to a fresh completion could end up with
+     * TDLib's real current file on disk while the DB still pointed at its old, already-deleted
+     * path - making the fresh file permanently invisible to enforceCacheLimit()'s DB-driven
+     * accounting (confirmed on-device: it tracked ~99MB while files/tdlib/music actually held
+     * 424MB). That root cause is fixed (see markStreamedFileCached's own doc), but files it
+     * already orphaned before the fix don't get found by any future scan since nothing in the DB
+     * ever pointed at them - this reconciles disk against the DB once to clear that backlog.
+     *
+     * A single flat listing + set diff over one directory, called once from TgMusicApp's startup
+     * (same place backfillThumbnails/normalizeArtistCredits already run) - no loop, no retry, no
+     * repeated re-scan of files it already handled.
+     */
+    suspend fun reconcileOrphanedTdlibFiles() {
+        val musicDir = File(appContext.filesDir, "tdlib/music")
+        val files = musicDir.listFiles() ?: return
+        // canonicalPath, not absolutePath: Context.filesDir resolves to /data/user/0/<pkg>/files
+        // on this device while TDLib records its own paths as /data/data/<pkg>/files/... - the
+        // same real directory via a symlink, but different STRINGS, so a plain absolutePath
+        // comparison here treated every file as unreferenced regardless of the DB - confirmed
+        // on-device: it deleted 28 files including several just-cached songs still actively
+        // pointed at by the DB, not just the intended pre-existing orphans. canonicalPath
+        // resolves the symlink on both sides so this can't happen again.
+        val referenced = songDao.getAllReferencedLocalFilePaths()
+            .mapNotNullTo(HashSet()) { runCatching { File(it).canonicalPath }.getOrNull() }
+        var deleted = 0
+        var freedBytes = 0L
+        for (file in files) {
+            val canonical = runCatching { file.canonicalPath }.getOrNull() ?: continue
+            if (canonical !in referenced) {
+                freedBytes += file.length()
+                if (file.delete()) deleted++
+            }
+        }
+        if (deleted > 0) {
+            Log.d("CacheDebug", "reconcileOrphanedTdlibFiles: deleted=$deleted freedBytes=$freedBytes")
         }
     }
 }

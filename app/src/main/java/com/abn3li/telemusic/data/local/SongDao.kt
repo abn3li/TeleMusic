@@ -93,6 +93,12 @@ interface SongDao {
     @Query("SELECT * FROM songs WHERE localFilePath IS NOT NULL AND isExplicitDownload = 0 AND isLocalImport = 0 ORDER BY lastPlayedAtMillis ASC")
     suspend fun getAutoCachedSongsOldestFirst(): List<SongEntity>
 
+    // Every localFilePath currently referenced by ANY song row, regardless of source/flags - see
+    // MusicRepository.reconcileOrphanedTdlibFiles's own doc for why this needs to span the whole
+    // table rather than just the auto-cache subset.
+    @Query("SELECT localFilePath FROM songs WHERE localFilePath IS NOT NULL")
+    suspend fun getAllReferencedLocalFilePaths(): List<String>
+
     @Query("UPDATE songs SET lastPlayedAtMillis = :timestamp WHERE telegramMessageId = :id")
     suspend fun stampLastPlayed(id: Long, timestamp: Long)
 
