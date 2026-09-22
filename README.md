@@ -14,7 +14,13 @@
 ---
 
 <p align="center">
-  <img src="docs/banner.png" alt="TeleMusic banner" width="100%">
+  <img src="https://raw.githubusercontent.com/abn3li/TeleMusic/master/docs/banner.png" alt="TeleMusic banner" width="100%">
+</p>
+
+<p align="center">
+  <img src="https://raw.githubusercontent.com/abn3li/TeleMusic/master/assets/screenshot-library.png" alt="Library screen" width="30%">
+  <img src="https://raw.githubusercontent.com/abn3li/TeleMusic/master/assets/screenshot-lyrics.png" alt="Lyrics screen" width="30%">
+  <img src="https://raw.githubusercontent.com/abn3li/TeleMusic/master/assets/screenshot-library-2.png" alt="Library screen (status bar)" width="30%">
 </p>
 
 ---
