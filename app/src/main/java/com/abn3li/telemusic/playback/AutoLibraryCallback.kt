@@ -140,15 +140,29 @@ class AutoLibraryCallback(
      * reconstructed here) so the rest of the app's queue-driven UI (MiniPlayer, Now Playing)
      * stays consistent with what the car started playing, exactly like every other "play this one
      * song" entry point already does.
+     *
+     * Media3's framework routes EVERY controller's setMediaItem()/addMediaItems() call through
+     * this same session-wide callback, not just Android Auto's - including PlaybackController
+     * .playUri(), which the phone's own in-app UI uses for every single song play. An item that
+     * already has a real URI (item.localConfiguration != null) is one of those - already fully
+     * resolved and already correctly queued by NowPlayingViewModel - and MUST pass through
+     * unchanged here. Without this check, every ordinary phone-side song change was ALSO stomping
+     * the real multi-song queue down to a 1-song one via the branch below, which is exactly what
+     * made Next/Previous appear to restart the same song: hasNext()/hasPrevious() both go false
+     * the instant the queue only has one entry.
      */
     override fun onAddMediaItems(
         mediaSession: MediaSession,
         controller: MediaSession.ControllerInfo,
         mediaItems: MutableList<MediaItem>
     ): ListenableFuture<List<MediaItem>> {
+        if (mediaItems.all { it.localConfiguration != null }) {
+            return Futures.immediateFuture(mediaItems)
+        }
         val result = SettableFuture.create<List<MediaItem>>()
         serviceScope.launch {
             val resolved = mediaItems.mapNotNull { item ->
+                if (item.localConfiguration != null) return@mapNotNull item.mediaId.toLongOrNull()?.let { it to item }
                 val songId = item.mediaId.toLongOrNull() ?: return@mapNotNull null
                 val song = repository.getSongById(songId) ?: return@mapNotNull null
                 val uri = repository.resolvePlaybackUri(song) ?: return@mapNotNull null
