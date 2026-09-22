@@ -135,4 +135,10 @@ class PlaybackController(context: Context) {
     fun currentPositionMs(): Long = controller?.currentPosition ?: 0L
     fun durationMs(): Long = controller?.duration?.takeIf { it > 0 } ?: 0L
     fun isPlaying(): Boolean = controller?.isPlaying ?: false
+
+    /** The song id already playing on the shared MediaSession, if any - lets a freshly created
+     * NowPlayingViewModel (see its own init{} doc) recover "what's actually playing right now"
+     * instead of starting from a blank song=null state and waiting on a transition event that,
+     * for a song that already started before this instance existed, will never fire. */
+    fun currentSongId(): Long? = controller?.currentMediaItem?.mediaId?.toLongOrNull()
 }

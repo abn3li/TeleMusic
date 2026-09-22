@@ -43,6 +43,9 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.lifecycle.viewmodel.initializer
+import androidx.lifecycle.viewmodel.viewModelFactory
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -97,9 +100,22 @@ fun TgMusicNavGraph(navController: NavHostController = rememberNavController()) 
     val app = LocalContext.current.applicationContext as TgMusicApp
     val startDestination = if (app.credentialsStore.hasCredentials()) Routes.LIBRARY else Routes.CREDENTIALS
 
-    val playerViewModel = remember {
-        NowPlayingViewModel(app.musicRepository, app.playbackController, app.playbackQueue, app.ytDlpRepository, app.applicationContext)
-    }
+    // viewModel() (not remember{}) so this survives a config change (rotation) via the Activity's
+    // own ViewModelStore - TgMusicNavGraph is composed directly in MainActivity's setContent, so
+    // LocalViewModelStoreOwner resolves to the Activity itself. A plain remember{} block is torn
+    // down and rebuilt on every Activity recreation (rotation included, unless the manifest
+    // handles the config change itself, which this app doesn't), which silently reset song=null
+    // and made the MiniPlayer disappear on rotate even though the song was still audibly playing
+    // - see NowPlayingViewModel.init{}'s own doc for the other half of this fix (recovering the
+    // already-playing song for the still-separate case of a fresh process after being cleared
+    // from recents, which a ViewModelStore can't help with since the whole process was killed).
+    val playerViewModel = viewModel<NowPlayingViewModel>(
+        factory = viewModelFactory {
+            initializer {
+                NowPlayingViewModel(app.musicRepository, app.playbackController, app.playbackQueue, app.ytDlpRepository, app.applicationContext)
+            }
+        }
+    )
 
     val libraryViewModel = remember { LibraryViewModel(app.musicRepository) }
 

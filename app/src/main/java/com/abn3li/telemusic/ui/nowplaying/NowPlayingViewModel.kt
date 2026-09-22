@@ -204,6 +204,20 @@ class NowPlayingViewModel(
                 }
             }
         })
+
+        // This ViewModel instance may be brand new while a song is already playing on the
+        // shared MediaSession - e.g. the process was killed after being cleared from recents
+        // and the app just relaunched (MusicService's own foreground service survives that
+        // independently - see MusicService's own doc), or (before the NavGraph fix pairing
+        // this) an Activity recreation. Either way, _uiState still starts at song=null and the
+        // transition listener above won't help - it only fires on the NEXT change, and this
+        // song already started before this instance existed. Recover it directly instead of
+        // showing an empty MiniPlayer/Now Playing screen for audio that's audibly still going.
+        playbackController.currentSongId()?.let { songId ->
+            if (songId != _uiState.value.song?.telegramMessageId) {
+                resyncToExternallyChangedSong(songId, resetPosition = false)
+            }
+        }
     }
 
     /**
@@ -213,7 +227,7 @@ class NowPlayingViewModel(
      * playback is already under way, so unlike [loadCurrentQueuePosition] this must never call
      * [startPlayback] or otherwise touch the transport - it only re-reads what's now playing.
      */
-    private fun resyncToExternallyChangedSong(songId: Long) {
+    private fun resyncToExternallyChangedSong(songId: Long, resetPosition: Boolean = true) {
         viewModelScope.launch {
             val song = allSongsMap.value[songId]
                 ?: withContext(Dispatchers.IO) { repository.getSongById(songId) }
@@ -221,15 +235,21 @@ class NowPlayingViewModel(
             val rawLrc = song.lyricsSynced.takeIf { !it.isNullOrBlank() }
                 ?: song.lyricsPlain.takeIf { !it.isNullOrBlank() && it.contains("[00:") }
             val lines = withContext(Dispatchers.Default) { rawLrc?.let(::parseLrc).orEmpty() }
+            // resetPosition=false is the reconnect-to-an-already-playing-song path (see init{}'s
+            // own doc) - that song is somewhere in the middle of playing, not starting over, so
+            // pull its REAL current position/playing state from the controller instead of
+            // snapping the seekbar back to 0 the way an actual new-song transition should.
+            val positionMs = if (resetPosition) 0L else playbackController.currentPositionMs()
             _uiState.value = _uiState.value.copy(
                 song = song,
                 lyricLines = lines,
-                currentPositionMs = 0L,
+                currentPositionMs = positionMs,
                 durationMs = (song.durationSeconds * 1000L).coerceAtLeast(1L),
                 hasNext = queue.hasNext(),
                 hasPrevious = queue.hasPrevious(),
                 errorMessage = null,
-                isDownloading = false
+                isDownloading = false,
+                isPlaying = if (resetPosition) _uiState.value.isPlaying else playbackController.isPlaying()
             )
             withContext(Dispatchers.IO) { repository.stampLastPlayed(song) }
         }
