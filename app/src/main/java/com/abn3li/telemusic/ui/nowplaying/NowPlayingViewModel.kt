@@ -27,15 +27,18 @@ import java.io.File
 data class LyricLine(val timeMs: Long, val text: String)
 
 /**
- * The three fields the 300ms position ticker actually updates every tick. Split out of
- * [NowPlayingUiState] into its own flow (see [NowPlayingViewModel.playbackProgress]) so only the
- * seekbar and the lyrics view's active-line highlight - the two things that genuinely need to
- * react every tick - recompose that often, instead of the whole Now Playing screen.
+ * The fields the position ticker updates every tick. Split out of [NowPlayingUiState] into its
+ * own flow (see [NowPlayingViewModel.playbackProgress]) so only the scrubber and the lyrics'
+ * active line react that often, instead of the whole Now Playing screen.
  */
 data class PlaybackProgress(
     val currentPositionMs: Long = 0L,
-    val durationMs: Long = 0L,
-    val activeLyricIndex: Int = -1
+    val durationMs: Long = 0L
+)
+
+data class QueueUiState(
+    val nextInQueue: List<SongEntity> = emptyList(),
+    val upNext: List<SongEntity> = emptyList()
 )
 
 data class NowPlayingUiState(
@@ -43,7 +46,6 @@ data class NowPlayingUiState(
     val lyricLines: List<LyricLine> = emptyList(),
     val currentPositionMs: Long = 0L,
     val durationMs: Long = 0L,
-    val activeLyricIndex: Int = -1,
     val isPlaying: Boolean = false,
     val isBuffering: Boolean = false,
     // The song ID currently being fetched/prepared, if any - distinct from `song` (which still
@@ -78,45 +80,74 @@ class NowPlayingViewModel(
     // at all, only a video id, which nothing else in NowPlayingUiState/SongEntity carries).
     private var pendingEphemeralVideoId: String? = null
 
-    // The Queue screen's "Up Next" list - resolved SongEntity rows for everything queued after
-    // the currently playing song (see PlaybackQueue.orderedIds/currentIndexValue). Deliberately
-    // NOT folded into NowPlayingUiState: it only needs to refresh on an actual queue-order
-    // change (song change, shuffle toggle, reorder, clear), never on the 300ms position tick,
-    // and giving it its own StateFlow keeps the Queue screen from recomposing off ticks it
-    // doesn't care about, same reasoning as playbackProgress being split out below.
-    private val _upcomingQueue = MutableStateFlow<List<SongEntity>>(emptyList())
-    val upcomingQueue: StateFlow<List<SongEntity>> = _upcomingQueue
+    // The Queue page's two sections. Kept out of NowPlayingUiState so the queue list only
+    // recomposes on a real queue change, never on the 300ms position tick.
+    private val _queueState = MutableStateFlow(QueueUiState())
+    val queueState: StateFlow<QueueUiState> = _queueState
+    private var queueRefreshJob: Job? = null
 
-    private fun refreshUpcomingQueue() {
-        viewModelScope.launch {
-            val upcomingIds = queue.orderedIds().drop(queue.currentIndexValue() + 1)
-            _upcomingQueue.value = withContext(Dispatchers.IO) { upcomingIds.mapNotNull { repository.getSongById(it) } }
+    private fun refreshQueue() {
+        val nextIds = queue.nextInQueueIds()
+        val upNextIds = queue.upNextIds()
+        _uiState.value = _uiState.value.copy(hasNext = queue.hasNext(), hasPrevious = queue.hasPrevious())
+        queueRefreshJob?.cancel()
+        queueRefreshJob = viewModelScope.launch {
+            val known = allSongsMap.value
+            val resolve: suspend (List<Long>) -> List<SongEntity> = { ids ->
+                withContext(Dispatchers.IO) { ids.mapNotNull { known[it] ?: repository.getSongById(it) } }
+            }
+            _queueState.value = QueueUiState(nextInQueue = resolve(nextIds), upNext = resolve(upNextIds))
         }
     }
 
-    /** Queue screen's "tap an upcoming track" action - [offsetInUpcoming] is its position within
-     * [upcomingQueue], not an absolute queue index. */
-    fun jumpToQueueItem(offsetInUpcoming: Int) {
-        val id = queue.jumpToIndex(queue.currentIndexValue() + 1 + offsetInUpcoming) ?: return
+    fun playNext(songId: Long) {
+        if (queue.playNext(songId)) {
+            loadCurrentQueuePosition(songIdOverride = songId)
+        }
+        refreshQueue()
+    }
+
+    fun jumpToNextInQueue(offset: Int) {
+        val id = queue.jumpToNextInQueue(offset) ?: return
         loadCurrentQueuePosition(songIdOverride = id)
-        // Missing here (unlike every other queue-mutating function above/below) left
-        // upcomingQueue holding its stale pre-jump list - the tapped song (now currentIndex)
-        // stayed listed as "upcoming" too, so the Queue screen showed duplicate/stale rows and
-        // drag-to-reorder's offset math got thrown off against a list that no longer matched
-        // the real queue.
-        refreshUpcomingQueue()
+        refreshQueue()
     }
 
-    /** Queue screen's "Clear Queue" action - keeps the currently playing song, drops the rest. */
-    fun clearUpcomingQueue() {
-        queue.removeUpcoming()
-        refreshUpcomingQueue()
+    fun jumpToUpNext(offset: Int) {
+        val id = queue.jumpToUpNext(offset) ?: return
+        loadCurrentQueuePosition(songIdOverride = id)
+        refreshQueue()
     }
 
-    /** Queue screen's drag-to-reorder - offsets are positions within [upcomingQueue]. */
-    fun moveQueueItem(fromOffset: Int, toOffset: Int) {
-        queue.moveUpcoming(fromOffset, toOffset)
-        refreshUpcomingQueue()
+    fun clearNextInQueue() {
+        queue.clearNextInQueue()
+        refreshQueue()
+    }
+
+    fun removeNextInQueue(offset: Int) {
+        queue.removeNextInQueue(offset)
+        refreshQueue()
+    }
+
+    fun removeUpNext(offset: Int) {
+        queue.removeUpNext(offset)
+        refreshQueue()
+    }
+
+    fun moveNextInQueue(fromOffset: Int, toOffset: Int) {
+        queue.moveNextInQueue(fromOffset, toOffset)
+        refreshQueue()
+    }
+
+    fun moveUpNext(fromOffset: Int, toOffset: Int) {
+        queue.moveUpNext(fromOffset, toOffset)
+        refreshQueue()
+    }
+
+    fun moveUpNextToNextInQueue(offset: Int): Boolean {
+        val moved = queue.moveUpNextToNextInQueue(offset)
+        refreshQueue()
+        return moved
     }
 
     /**
@@ -125,7 +156,7 @@ class NowPlayingViewModel(
      * on their own - see [PlaybackProgress].
      */
     val playbackProgress: StateFlow<PlaybackProgress> = uiState
-        .map { PlaybackProgress(it.currentPositionMs, it.durationMs, it.activeLyricIndex) }
+        .map { PlaybackProgress(it.currentPositionMs, it.durationMs) }
         .distinctUntilChanged()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), PlaybackProgress())
 
@@ -157,10 +188,13 @@ class NowPlayingViewModel(
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), NowPlayingUiState())
 
-    // Pre-computed memory map of all library songs by ID for 0ms instant artwork card rendering in Pager
+    // In-memory index of the library by id, so a song change and every queue refresh resolve
+    // songs without a database query each. Eagerly, not WhileSubscribed: nothing collects this
+    // flow (callers only read .value), so WhileSubscribed never started it and it stayed empty -
+    // every lookup silently fell through to one getSongById() per song.
     val allSongsMap: StateFlow<Map<Long, SongEntity>> = repository.observeLibrary(SortField.TITLE, true)
         .map { list -> list.associateBy { it.telegramMessageId } }
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyMap())
+        .stateIn(viewModelScope, SharingStarted.Eagerly, emptyMap())
 
     init {
         // A single persistent ticker for the life of this ViewModel (now app-session-scoped,
@@ -251,6 +285,7 @@ class NowPlayingViewModel(
                 isDownloading = false,
                 isPlaying = if (resetPosition) _uiState.value.isPlaying else playbackController.isPlaying()
             )
+            refreshQueue()
             withContext(Dispatchers.IO) { repository.stampLastPlayed(song) }
         }
     }
@@ -259,7 +294,7 @@ class NowPlayingViewModel(
     fun playFromQueue(ids: List<Long>, startIndex: Int) {
         queue.setQueue(ids, startIndex)
         loadCurrentQueuePosition(songIdOverride = queue.currentSongId())
-        refreshUpcomingQueue()
+        refreshQueue()
     }
 
     /** Plays a single song that was never added to the library - the YouTube "Play" button (see
@@ -292,6 +327,7 @@ class NowPlayingViewModel(
             isDownloading = false
         )
         playbackController.playUri(streamUri, song.telegramMessageId, song.title, song.artist, song.displayArtwork)
+        refreshQueue()
     }
 
     fun fetchLyricsOnDemand() {
@@ -356,13 +392,13 @@ class NowPlayingViewModel(
     fun nextSong() {
         val id = queue.next() ?: return
         loadCurrentQueuePosition(songIdOverride = id)
-        refreshUpcomingQueue()
+        refreshQueue()
     }
 
     fun previousSong() {
         val id = queue.previous() ?: return
         loadCurrentQueuePosition(songIdOverride = id)
-        refreshUpcomingQueue()
+        refreshQueue()
     }
 
     fun toggleShuffle() {
@@ -372,7 +408,7 @@ class NowPlayingViewModel(
             hasNext = queue.hasNext(),
             hasPrevious = queue.hasPrevious()
         )
-        refreshUpcomingQueue()
+        refreshQueue()
     }
 
     fun toggleRepeat() {
@@ -580,17 +616,17 @@ class NowPlayingViewModel(
         tickerJob = viewModelScope.launch {
             while (true) {
                 val pos = playbackController.currentPositionMs()
-                val lines = _uiState.value.lyricLines
-                val activeIndex = lines.indexOfLast { it.timeMs <= pos }
+                val playing = playbackController.isPlaying()
                 val knownDurationMs = _uiState.value.song?.durationSeconds?.takeIf { it > 0 }?.times(1000L)
                 val effectiveDurationMs = knownDurationMs ?: playbackController.durationMs().coerceAtLeast(_uiState.value.durationMs)
                 _uiState.value = _uiState.value.copy(
                     currentPositionMs = pos,
                     durationMs = effectiveDurationMs,
-                    activeLyricIndex = activeIndex,
-                    isPlaying = playbackController.isPlaying()
+                    isPlaying = playing
                 )
-                delay(300)
+                // Nothing moves while paused; a slower poll still catches a resume from the
+                // notification or headset within a second.
+                delay(if (playing) 300 else 1000)
             }
         }
     }

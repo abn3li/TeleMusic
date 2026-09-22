@@ -17,7 +17,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -64,6 +63,7 @@ import com.abn3li.telemusic.ui.library.PlaylistDetailScreen
 import com.abn3li.telemusic.ui.library.SmartPlaylistDetailScreen
 import com.abn3li.telemusic.ui.library.SmartPlaylistKind
 import com.abn3li.telemusic.ui.nowplaying.LocalMiniPlayerInset
+import com.abn3li.telemusic.ui.nowplaying.LocalPlayNext
 import com.abn3li.telemusic.ui.nowplaying.MiniPlayerHeight
 import com.abn3li.telemusic.ui.nowplaying.NowPlayingViewModel
 import com.abn3li.telemusic.ui.nowplaying.PlayerSheetOverlay
@@ -122,6 +122,7 @@ fun TgMusicNavGraph(navController: NavHostController = rememberNavController()) 
     val playSong: (List<Long>, Int) -> Unit = { ids, index ->
         playerViewModel.playFromQueue(ids, index)
     }
+    val playNext: (Long) -> Unit = remember(playerViewModel) { { id -> playerViewModel.playNext(id) } }
 
     val playerState by playerViewModel.stableUiState.collectAsState()
 
@@ -136,7 +137,10 @@ fun TgMusicNavGraph(navController: NavHostController = rememberNavController()) 
 
     Box(Modifier.fillMaxSize()) {
         Scaffold { innerPadding ->
-            CompositionLocalProvider(LocalMiniPlayerInset provides miniPlayerInset) {
+            CompositionLocalProvider(
+                LocalMiniPlayerInset provides miniPlayerInset,
+                LocalPlayNext provides playNext
+            ) {
             NavHost(
                 navController = navController,
                 startDestination = startDestination,
@@ -233,6 +237,8 @@ fun TgMusicNavGraph(navController: NavHostController = rememberNavController()) 
         PlayerSheetOverlay(
             viewModel = playerViewModel,
             bottomOffset = miniPlayerBottomMargin,
+            onOpenArtist = { artist -> navController.navigate(Routes.artist(artist)) },
+            onOpenAlbum = { album -> navController.navigate(Routes.album(album)) },
             modifier = Modifier.fillMaxSize()
         )
     }

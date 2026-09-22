@@ -9,8 +9,8 @@ package com.abn3li.telemusic.ui.library
  * "frosted glass" surfaces on top are just a translucent fill + thin border, which reads as glass
  * without needing an actual backdrop-blur pass.
  *
- * Unlike ArtworkMeshBackdrop.kt's cached-texture approach (deliberately avoiding a live
- * Modifier.blur() there for per-frame GPU cost reasons), these blobs ARE a live blur - static
+ * Unlike the player's FloatingArtworkBackground (blurred once on the CPU, deliberately avoiding
+ * a live Modifier.blur() for per-frame GPU cost reasons), these blobs ARE a live blur - static
  * position/size so there's no per-frame relayout, but the compositor still re-does the blur pass
  * on every frame this screen is on screen. Traded off explicitly here per the pasted reference.
  */

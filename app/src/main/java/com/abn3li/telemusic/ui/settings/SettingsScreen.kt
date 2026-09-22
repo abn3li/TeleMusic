@@ -57,6 +57,7 @@ fun SettingsScreen(onBack: () -> Unit, onLoggedOut: () -> Unit) {
     val clipboardManager = LocalClipboardManager.current
 
     var enrichEnabled by remember { mutableStateOf(app.settingsStore.enrichMetadataOnSync) }
+    val playerEffects by app.settingsStore.playerEffects.collectAsState()
     var cacheLimit by remember { mutableStateOf(app.settingsStore.maxCacheSizeBytes) }
 
     // DNS Resolver State
@@ -568,6 +569,52 @@ fun SettingsScreen(onBack: () -> Unit, onLoggedOut: () -> Unit) {
                 }
             }
 
+            // ---- NOW PLAYING EFFECTS SECTION ----
+            Card(
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+                shape = RoundedCornerShape(20.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(Modifier.padding(16.dp)) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Icon(
+                            Icons.Default.Lyrics,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary
+                        )
+                        Text(
+                            "Now Playing",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                    Spacer(Modifier.height(12.dp))
+                    EffectSwitchRow(
+                        title = "Lyrics glow",
+                        subtitle = "Lyrics shine over the artwork and the current line gets a soft halo",
+                        checked = playerEffects.lyricsGlow,
+                        onCheckedChange = { on -> app.settingsStore.updatePlayerEffects { it.copy(lyricsGlow = on) } }
+                    )
+                    Spacer(Modifier.height(12.dp))
+                    EffectSwitchRow(
+                        title = "Lyrics blur",
+                        subtitle = "Blurs lines away from the one being sung (Android 12+). Uses more GPU",
+                        checked = playerEffects.lyricsBlur,
+                        onCheckedChange = { on -> app.settingsStore.updatePlayerEffects { it.copy(lyricsBlur = on) } }
+                    )
+                    Spacer(Modifier.height(12.dp))
+                    EffectSwitchRow(
+                        title = "Animated background",
+                        subtitle = "The artwork backdrop slowly drifts while music plays",
+                        checked = playerEffects.animatedBackground,
+                        onCheckedChange = { on -> app.settingsStore.updatePlayerEffects { it.copy(animatedBackground = on) } }
+                    )
+                }
+            }
+
             // ---- STORAGE & LIBRARY MANAGEMENT SECTION ----
             Card(
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
@@ -1022,6 +1069,21 @@ fun SettingsScreen(onBack: () -> Unit, onLoggedOut: () -> Unit) {
 }
 
 /** One selectable pill in the Appearance section's Classic/Ambient blur choice. */
+@Composable
+private fun EffectSwitchRow(title: String, subtitle: String, checked: Boolean, onCheckedChange: (Boolean) -> Unit) {
+    Row(
+        Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Column(Modifier.weight(1f).padding(end = 12.dp)) {
+            Text(title, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
+            Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        Switch(checked = checked, onCheckedChange = onCheckedChange)
+    }
+}
+
 @Composable
 private fun AppearanceOptionChip(label: String, selected: Boolean, onClick: () -> Unit, modifier: Modifier = Modifier) {
     Box(

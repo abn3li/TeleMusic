@@ -18,6 +18,7 @@ import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.PhoneAndroid
+import androidx.compose.material.icons.filled.QueuePlayNext
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -34,6 +35,8 @@ import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import com.abn3li.telemusic.data.local.PlaylistEntity
+import com.abn3li.telemusic.ui.nowplaying.LocalPlayNext
+import android.widget.Toast
 import kotlinx.coroutines.launch
 
 // Recomputing this per row, per recomposition, added up across hundreds of rows during a
@@ -223,6 +226,20 @@ fun SongRow(
 
                 if (menuExpanded) {
                     DropdownMenu(expanded = true, onDismissRequest = { menuExpanded = false }) {
+                        val playNext = LocalPlayNext.current
+                        val context = LocalContext.current
+                        if (playNext != null) {
+                            DropdownMenuItem(
+                                leadingIcon = { Icon(Icons.Default.QueuePlayNext, contentDescription = null) },
+                                text = { Text("Play next") },
+                                onClick = {
+                                    menuExpanded = false
+                                    playNext(song.id)
+                                    Toast.makeText(context, "Playing next", Toast.LENGTH_SHORT).show()
+                                }
+                            )
+                            HorizontalDivider()
+                        }
                         // Nothing to download for a local import (already fully on-device), an
                         // already-downloaded song (the row's own CloudDone icon covers that), or
                         // one currently downloading (its spinner is feedback enough).

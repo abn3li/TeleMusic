@@ -2,6 +2,15 @@ package com.abn3li.telemusic.data.settings
 
 import android.content.Context
 import android.net.Uri
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+
+/** Now Playing visual effects the user can switch off in Settings. */
+data class PlayerEffects(
+    val lyricsGlow: Boolean = true,
+    val lyricsBlur: Boolean = true,
+    val animatedBackground: Boolean = true
+)
 
 /** The Library/detail/Settings screens' own visual style - see the Settings screen's
  * "Appearance" row. CLASSIC is the original flat dark-card look; AMBIENT_BLUR is the blurred
@@ -162,7 +171,31 @@ class AppSettingsStore(context: Context) {
         }
         set(value) = prefs.edit().putString(KEY_AMBIENT_COLOR_SET, value.name).apply()
 
+    // A flow rather than plain getters: the player is mounted once at the nav root and has to
+    // react the moment one of these is flipped in Settings.
+    private val _playerEffects = MutableStateFlow(
+        PlayerEffects(
+            lyricsGlow = prefs.getBoolean(KEY_LYRICS_GLOW, true),
+            lyricsBlur = prefs.getBoolean(KEY_LYRICS_BLUR, true),
+            animatedBackground = prefs.getBoolean(KEY_ANIMATED_BACKGROUND, true)
+        )
+    )
+    val playerEffects: StateFlow<PlayerEffects> = _playerEffects
+
+    fun updatePlayerEffects(transform: (PlayerEffects) -> PlayerEffects) {
+        val updated = transform(_playerEffects.value)
+        prefs.edit()
+            .putBoolean(KEY_LYRICS_GLOW, updated.lyricsGlow)
+            .putBoolean(KEY_LYRICS_BLUR, updated.lyricsBlur)
+            .putBoolean(KEY_ANIMATED_BACKGROUND, updated.animatedBackground)
+            .apply()
+        _playerEffects.value = updated
+    }
+
     companion object {
+        private const val KEY_LYRICS_GLOW = "player_lyrics_glow"
+        private const val KEY_LYRICS_BLUR = "player_lyrics_blur"
+        private const val KEY_ANIMATED_BACKGROUND = "player_animated_background"
         private const val KEY_DNS_RESOLVER = "dns_resolver"
         private const val KEY_CUSTOM_DNS_IPS = "custom_dns_ips"
         private const val KEY_PROXY_ENABLED = "proxy_enabled"
