@@ -3,7 +3,6 @@ package com.abn3li.telemusic.ui.navigation
 import android.net.Uri
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -18,7 +17,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.LibraryMusic
 import androidx.compose.material.icons.filled.Settings
@@ -26,9 +24,9 @@ import androidx.compose.material.icons.filled.Subscriptions
 import androidx.compose.material.icons.filled.Sync
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -36,6 +34,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
@@ -54,10 +53,16 @@ import com.abn3li.telemusic.TgMusicApp
 import com.abn3li.telemusic.ui.credentials.CredentialsScreen
 import com.abn3li.telemusic.ui.download.BrowseCollectionScreen
 import com.abn3li.telemusic.ui.download.YouTubeDownloadScreen
-import com.abn3li.telemusic.ui.library.AccentGreen
+import com.abn3li.telemusic.ui.library.AppAccent
 import com.abn3li.telemusic.ui.library.AlbumDetailScreen
 import com.abn3li.telemusic.ui.library.ArtistDetailScreen
-import com.abn3li.telemusic.ui.library.LibraryScreen
+import com.abn3li.telemusic.ui.library.ArtistSongsScreen
+import com.abn3li.telemusic.ui.library.LibraryAlbumsScreen
+import com.abn3li.telemusic.ui.library.LibraryArtistsScreen
+import com.abn3li.telemusic.ui.library.LibraryCallbacks
+import com.abn3li.telemusic.ui.library.LibraryHomeScreen
+import com.abn3li.telemusic.ui.library.LibraryPlaylistsScreen
+import com.abn3li.telemusic.ui.library.LibrarySongsScreen
 import com.abn3li.telemusic.ui.library.LibraryViewModel
 import com.abn3li.telemusic.ui.library.PlaylistDetailScreen
 import com.abn3li.telemusic.ui.library.SmartPlaylistDetailScreen
@@ -70,9 +75,19 @@ import com.abn3li.telemusic.ui.nowplaying.PlayerSheetOverlay
 import com.abn3li.telemusic.ui.settings.SettingsScreen
 import com.abn3li.telemusic.ui.sync.SyncScreen
 
+private val LibraryRoutes = setOf(
+    Routes.LIBRARY, Routes.LIBRARY_SONGS, Routes.LIBRARY_ALBUMS, Routes.LIBRARY_ARTISTS, Routes.LIBRARY_PLAYLISTS,
+    Routes.ALBUM, Routes.ARTIST, Routes.ARTIST_SONGS, Routes.PLAYLIST, Routes.SMART_PLAYLIST
+)
+
 object Routes {
     const val CREDENTIALS = "credentials"
     const val LIBRARY = "library"
+    const val LIBRARY_SONGS = "library/songs"
+    const val LIBRARY_ALBUMS = "library/albums"
+    const val LIBRARY_ARTISTS = "library/artists"
+    const val LIBRARY_PLAYLISTS = "library/playlists"
+    const val ARTIST_SONGS = "artist_songs/{artist}"
     const val SYNC = "sync"
     const val SETTINGS = "settings"
     const val ALBUM = "album/{album}"
@@ -84,6 +99,7 @@ object Routes {
 
     fun album(name: String) = "album/${Uri.encode(name)}"
     fun artist(name: String) = "artist/${Uri.encode(name)}"
+    fun artistSongs(name: String) = "artist_songs/${Uri.encode(name)}"
     fun playlist(id: Long, name: String) = "playlist/$id/${Uri.encode(name)}"
     fun smartPlaylist(kind: SmartPlaylistKind) = "smart_playlist/${kind.name}"
 
@@ -119,21 +135,39 @@ fun TgMusicNavGraph(navController: NavHostController = rememberNavController()) 
 
     val libraryViewModel = remember { LibraryViewModel(app.musicRepository) }
 
-    val playSong: (List<Long>, Int) -> Unit = { ids, index ->
-        playerViewModel.playFromQueue(ids, index)
-    }
     val playNext: (Long) -> Unit = remember(playerViewModel) { { id -> playerViewModel.playNext(id) } }
+    val libraryCallbacks = remember(navController, playerViewModel) {
+        LibraryCallbacks(
+            onBack = { navController.popBackStack() },
+            onPlay = { ids, index -> playerViewModel.playFromQueue(ids, index) },
+            onPlayCollection = { ids, shuffle -> playerViewModel.playCollection(ids, shuffle) },
+            onPlayNext = { id -> playerViewModel.playNext(id) },
+            onOpenArtist = { artist -> navController.navigate(Routes.artist(artist)) },
+            onOpenAlbum = { album -> navController.navigate(Routes.album(album)) },
+            onOpenArtistSongs = { artist -> navController.navigate(Routes.artistSongs(artist)) }
+        )
+    }
 
     val playerState by playerViewModel.stableUiState.collectAsState()
 
+    // After Android kills and recreates the app, NavHost restores its saved back stack, which
+    // can still hold the first-run Welcome page. The saved credentials are what decide
+    // whether the user is signed in, so skip past it.
+    LaunchedEffect(Unit) {
+        if (navController.currentDestination?.route == Routes.CREDENTIALS && app.credentialsStore.hasCredentials()) {
+            navController.navigate(Routes.LIBRARY) { popUpTo(0) { inclusive = true } }
+        }
+    }
+
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = navBackStackEntry?.destination?.route
-    val showBottomBar = currentRoute in listOf(Routes.LIBRARY, Routes.YOUTUBE_DOWNLOAD, Routes.SYNC, Routes.SETTINGS)
+    val inLibrary = currentRoute in LibraryRoutes
+    val showBottomBar = inLibrary || currentRoute in listOf(Routes.YOUTUBE_DOWNLOAD, Routes.SYNC, Routes.SETTINGS)
 
-    val miniPlayerBottomMargin = if (showBottomBar) 84.dp else 12.dp
+    val miniPlayerBottomMargin = if (showBottomBar) NavBarHeight + 4.dp else 12.dp
     val miniPlayerInset = if (playerState.song != null) {
-        if (showBottomBar) 154.dp else MiniPlayerHeight
-    } else if (showBottomBar) 84.dp else 0.dp
+        if (showBottomBar) NavBarHeight + 4.dp + MiniPlayerHeight + 12.dp else MiniPlayerHeight
+    } else if (showBottomBar) NavBarHeight + 12.dp else 0.dp
 
     Box(Modifier.fillMaxSize()) {
         Scaffold { innerPadding ->
@@ -157,16 +191,37 @@ fun TgMusicNavGraph(navController: NavHostController = rememberNavController()) 
                     })
                 }
                 composable(Routes.LIBRARY) {
-                    LibraryScreen(
+                    LibraryHomeScreen(
+                        onOpenPlaylists = { navController.navigate(Routes.LIBRARY_PLAYLISTS) },
+                        onOpenArtists = { navController.navigate(Routes.LIBRARY_ARTISTS) },
+                        onOpenAlbums = { navController.navigate(Routes.LIBRARY_ALBUMS) },
+                        onOpenSongs = { navController.navigate(Routes.LIBRARY_SONGS) },
+                        onOpenSettings = { navController.navigate(Routes.SETTINGS) }
+                    )
+                }
+                composable(Routes.LIBRARY_SONGS) {
+                    LibrarySongsScreen(
                         viewModel = libraryViewModel,
-                        onSongClick = playSong,
-                        onSyncClick = { navController.navigate(Routes.SYNC) },
-                        onSettingsClick = { navController.navigate(Routes.SETTINGS) },
-                        onAlbumClick = { album -> navController.navigate(Routes.album(album)) },
-                        onArtistClick = { artist -> navController.navigate(Routes.artist(artist)) },
-                        onPlaylistClick = { id, name -> navController.navigate(Routes.playlist(id, name)) },
-                        onSmartPlaylistClick = { kind -> navController.navigate(Routes.smartPlaylist(kind)) },
-                        onYouTubeDownloadClick = { navController.navigate(Routes.YOUTUBE_DOWNLOAD) }
+                        onBack = libraryCallbacks.onBack,
+                        onPlay = libraryCallbacks.onPlay,
+                        onPlayCollection = libraryCallbacks.onPlayCollection,
+                        onPlayNext = libraryCallbacks.onPlayNext,
+                        onOpenArtist = libraryCallbacks.onOpenArtist,
+                        onOpenAlbum = libraryCallbacks.onOpenAlbum
+                    )
+                }
+                composable(Routes.LIBRARY_ALBUMS) {
+                    LibraryAlbumsScreen(libraryViewModel, libraryCallbacks.onBack, libraryCallbacks.onOpenAlbum)
+                }
+                composable(Routes.LIBRARY_ARTISTS) {
+                    LibraryArtistsScreen(libraryViewModel, libraryCallbacks.onBack, libraryCallbacks.onOpenArtist)
+                }
+                composable(Routes.LIBRARY_PLAYLISTS) {
+                    LibraryPlaylistsScreen(
+                        viewModel = libraryViewModel,
+                        onBack = libraryCallbacks.onBack,
+                        onOpenPlaylist = { id, name -> navController.navigate(Routes.playlist(id, name)) },
+                        onOpenSmartPlaylist = { kind -> navController.navigate(Routes.smartPlaylist(kind)) }
                     )
                 }
                 composable(Routes.YOUTUBE_DOWNLOAD) {
@@ -198,21 +253,25 @@ fun TgMusicNavGraph(navController: NavHostController = rememberNavController()) 
                 }
                 composable(Routes.ALBUM) { backStackEntry ->
                     val album = backStackEntry.arguments?.getString("album")?.let { Uri.decode(it) } ?: ""
-                    AlbumDetailScreen(album, onBack = { navController.popBackStack() }, onSongClick = playSong)
+                    AlbumDetailScreen(album, libraryViewModel, libraryCallbacks)
                 }
                 composable(Routes.ARTIST) { backStackEntry ->
                     val artist = backStackEntry.arguments?.getString("artist")?.let { Uri.decode(it) } ?: ""
-                    ArtistDetailScreen(artist, onBack = { navController.popBackStack() }, onSongClick = playSong)
+                    ArtistDetailScreen(artist, libraryViewModel, libraryCallbacks)
+                }
+                composable(Routes.ARTIST_SONGS) { backStackEntry ->
+                    val artist = backStackEntry.arguments?.getString("artist")?.let { Uri.decode(it) } ?: ""
+                    ArtistSongsScreen(artist, libraryViewModel, libraryCallbacks)
                 }
                 composable(Routes.PLAYLIST) { backStackEntry ->
                     val id = backStackEntry.arguments?.getString("id")?.toLongOrNull() ?: 0L
                     val name = backStackEntry.arguments?.getString("name")?.let { Uri.decode(it) } ?: "Playlist"
-                    PlaylistDetailScreen(id, name, onBack = { navController.popBackStack() }, onSongClick = playSong)
+                    PlaylistDetailScreen(id, name, libraryViewModel, libraryCallbacks)
                 }
                 composable(Routes.SMART_PLAYLIST) { backStackEntry ->
                     val kind = backStackEntry.arguments?.getString("kind")
                         ?.let { runCatching { SmartPlaylistKind.valueOf(it) }.getOrNull() } ?: SmartPlaylistKind.LIKED
-                    SmartPlaylistDetailScreen(kind, onBack = { navController.popBackStack() }, onSongClick = playSong)
+                    SmartPlaylistDetailScreen(kind, libraryViewModel, libraryCallbacks)
                 }
             }
             }
@@ -220,9 +279,12 @@ fun TgMusicNavGraph(navController: NavHostController = rememberNavController()) 
 
         if (showBottomBar) {
             AppBottomNavBar(
-                currentRoute = currentRoute,
+                currentRoute = if (inLibrary) Routes.LIBRARY else currentRoute,
                 onNavigate = { route ->
-                    if (currentRoute != route) {
+                    if (route == Routes.LIBRARY && inLibrary) {
+                        // Library tapped while already inside it: back to the main Library page.
+                        navController.popBackStack(Routes.LIBRARY, inclusive = false)
+                    } else if (currentRoute != route) {
                         navController.navigate(route) {
                             popUpTo(Routes.LIBRARY) { saveState = true }
                             launchSingleTop = true
@@ -259,19 +321,26 @@ private fun AppBottomNavBar(
         )
     }
 
-    Surface(
+    // Docked, container-less bar (Flamingo style): the buttons sit on a fade to black so the
+    // page scrolls away underneath instead of being cut off by a solid edge.
+    Box(
         modifier = modifier
             .fillMaxWidth()
-            .padding(horizontal = 14.dp, vertical = 8.dp)
-            .height(66.dp),
-        shape = RoundedCornerShape(26.dp),
-        color = Color(0xF0121417),
-        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.10f)),
-        shadowElevation = 12.dp
+            .height(NavBarFadeHeight)
+            .background(
+                Brush.verticalGradient(
+                    0f to Color.Transparent,
+                    0.3f to Color.Black.copy(alpha = 0.6f),
+                    0.55f to Color.Black.copy(alpha = 0.92f),
+                    1f to Color.Black
+                )
+            ),
+        contentAlignment = Alignment.BottomCenter
     ) {
         Row(
             modifier = Modifier
-                .fillMaxSize()
+                .fillMaxWidth()
+                .height(NavBarHeight)
                 .padding(horizontal = 8.dp),
             horizontalArrangement = Arrangement.SpaceAround,
             verticalAlignment = Alignment.CenterVertically
@@ -296,7 +365,7 @@ private fun AppBottomNavBar(
                                 .padding(bottom = 2.dp)
                                 .size(4.dp)
                                 .clip(CircleShape)
-                                .background(AccentGreen)
+                                .background(AppAccent)
                         )
                     }
                     Column(
@@ -306,13 +375,13 @@ private fun AppBottomNavBar(
                         Icon(
                             imageVector = item.icon,
                             contentDescription = item.label,
-                            tint = if (isSelected) AccentGreen else Color(0xFF7B8390),
-                            modifier = Modifier.size(22.dp)
+                            tint = if (isSelected) AppAccent else Color(0xFF7B8390),
+                            modifier = Modifier.size(26.dp)
                         )
                         Text(
                             text = item.label,
-                            color = if (isSelected) AccentGreen else Color(0xFF7B8390),
-                            fontSize = 11.sp,
+                            color = if (isSelected) AppAccent else Color(0xFF7B8390),
+                            fontSize = 12.sp,
                             fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
                         )
                     }
@@ -321,6 +390,9 @@ private fun AppBottomNavBar(
         }
     }
 }
+
+private val NavBarHeight = 64.dp
+private val NavBarFadeHeight = 96.dp
 
 private data class NavigationItem(
     val route: String,

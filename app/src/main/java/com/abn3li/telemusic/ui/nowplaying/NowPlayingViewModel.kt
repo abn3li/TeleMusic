@@ -293,6 +293,14 @@ class NowPlayingViewModel(
         }
     }
 
+    /** A collection's Play / Shuffle button: Play goes in order from the top with shuffle off;
+     * Shuffle turns shuffle on and starts at a random song. */
+    fun playCollection(ids: List<Long>, shuffle: Boolean) {
+        if (ids.isEmpty()) return
+        if (queue.isShuffleEnabled != shuffle) queue.toggleShuffle()
+        playFromQueue(ids, if (shuffle) ids.indices.random() else 0)
+    }
+
     /** Sets a new queue and immediately starts playing the chosen song. */
     fun playFromQueue(ids: List<Long>, startIndex: Int) {
         queue.setQueue(ids, startIndex)

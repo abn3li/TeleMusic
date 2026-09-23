@@ -1,5 +1,8 @@
 package com.abn3li.telemusic.ui.nowplaying
 
+import com.abn3li.telemusic.ui.library.AppAlert
+import com.abn3li.telemusic.ui.library.AlertAction
+import com.abn3li.telemusic.ui.library.AlertTextField
 import android.content.Context
 import android.net.Uri
 import android.os.SystemClock
@@ -10,7 +13,6 @@ import androidx.compose.animation.Crossfade
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.CubicBezierEasing
-import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
@@ -410,48 +412,22 @@ private fun NowPlayingContent(
             var customTitle by remember { mutableStateOf(state.song.title) }
             var customArtist by remember { mutableStateOf(state.song.artist) }
 
-            AlertDialog(
-                onDismissRequest = { showManualLyricsDialog = false },
-                title = { Text("Search Lyrics Manually") },
-                text = {
-                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                        Text(
-                            "Type the exact song title and artist name to search lyrics across LRCLIB and lyrics.ovh:",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        OutlinedTextField(
-                            value = customTitle,
-                            onValueChange = { customTitle = it },
-                            label = { Text("Song Title") },
-                            singleLine = true,
-                            modifier = Modifier.fillMaxWidth()
-                        )
-                        OutlinedTextField(
-                            value = customArtist,
-                            onValueChange = { customArtist = it },
-                            label = { Text("Artist Name") },
-                            singleLine = true,
-                            modifier = Modifier.fillMaxWidth()
-                        )
+            AppAlert(
+                title = "Search Lyrics",
+                message = "Type the exact song title and artist to search LRCLIB and lyrics.ovh.",
+                onDismiss = { showManualLyricsDialog = false },
+                actions = listOf(
+                    AlertAction("Cancel") { showManualLyricsDialog = false },
+                    AlertAction("Search", bold = true, enabled = customTitle.isNotBlank()) {
+                        showManualLyricsDialog = false
+                        viewModel.fetchLyricsCustom(customTitle, customArtist)
                     }
-                },
-                confirmButton = {
-                    Button(
-                        onClick = {
-                            showManualLyricsDialog = false
-                            viewModel.fetchLyricsCustom(customTitle, customArtist)
-                        }
-                    ) {
-                        Text("Search Lyrics")
-                    }
-                },
-                dismissButton = {
-                    TextButton(onClick = { showManualLyricsDialog = false }) {
-                        Text("Cancel")
-                    }
-                }
-            )
+                )
+            ) {
+                AlertTextField(customTitle, { customTitle = it }, "Song title")
+                Spacer(Modifier.height(8.dp))
+                AlertTextField(customArtist, { customArtist = it }, "Artist")
+            }
         }
 
         state.song?.takeIf { showSongInfoDialog }?.let { song ->
@@ -777,65 +753,7 @@ private fun CircleActionButton(
     }
 }
 
-/**
- * The lyrics-toggle/queue icon buttons in the player dock's footer row (this file, LyricsView.kt,
- * QueueView.kt) used to be bare IconButtons with a static tint - the only feedback tapping them
- * gave was the platform ripple, and toggled state (lyrics on/off) just snapped instantly. This
- * gives them the same kind of press-scale + fading active pill + tint crossfade that reference
- * players like Metrolist/InnerTune give their dock controls: a spring-based press-down scale for
- * tactile feedback, a soft white disc that fades in behind the icon while [active], and the icon
- * tint itself crossfading instead of hard-cutting between its on/off alpha. `internal` (not
- * `private`) so LyricsView.kt/QueueView.kt can call it too.
- */
-@Composable
-internal fun DockToggleGlyph(
-    icon: ImageVector,
-    contentDescription: String,
-    onClick: () -> Unit,
-    active: Boolean = false,
-    modifier: Modifier = Modifier
-) {
-    val interactionSource = remember { MutableInteractionSource() }
-    val isPressed by interactionSource.collectIsPressedAsState()
-    val pressScale by animateFloatAsState(
-        targetValue = if (isPressed) 0.82f else 1f,
-        animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessHigh),
-        label = "dockGlyphPress"
-    )
-    val backgroundAlpha by animateFloatAsState(
-        targetValue = if (active) 0.22f else 0f,
-        animationSpec = tween(durationMillis = 220, easing = FastOutSlowInEasing),
-        label = "dockGlyphBackground"
-    )
-    val tint by animateColorAsState(
-        targetValue = if (active) Color.White else Color.White.copy(alpha = 0.65f),
-        animationSpec = tween(durationMillis = 220),
-        label = "dockGlyphTint"
-    )
-    Box(
-        modifier = modifier
-            .graphicsLayer { scaleX = pressScale; scaleY = pressScale }
-            .size(40.dp)
-            .clip(CircleShape)
-            .background(Color.White.copy(alpha = backgroundAlpha))
-            .clickable(
-                interactionSource = interactionSource,
-                indication = null,
-                onClick = onClick
-            ),
-        contentAlignment = Alignment.Center
-    ) {
-        Icon(icon, contentDescription = contentDescription, tint = tint, modifier = Modifier.size(22.dp))
-    }
-}
-
-/**
- * Same spring press-scale DockToggleGlyph/PlayerToggleGlyph/PlayerTransportGlyph all use, factored
- * out so LyricsView.kt/QueueView.kt's own plain `Icon(...).clickable(...)` transport rows (which
- * only ever had a hard on/off `.alpha()` for enabled/disabled and nothing at all for the tap
- * itself) can get the same tactile feedback without duplicating the boilerplate. `internal` so
- * those files can call it.
- */
+/** Spring press-down scale shared by the player's buttons. */
 @Composable
 internal fun rememberPressScale(interactionSource: InteractionSource): Float {
     val isPressed by interactionSource.collectIsPressedAsState()

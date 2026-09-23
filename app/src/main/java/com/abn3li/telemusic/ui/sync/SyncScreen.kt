@@ -1,61 +1,93 @@
 package com.abn3li.telemusic.ui.sync
 
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.expandVertically
-import androidx.compose.animation.shrinkVertically
+import com.abn3li.telemusic.ui.library.AlertColor
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.width
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.material.icons.rounded.Check
+import androidx.compose.material.icons.rounded.Search
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.ui.window.DialogProperties
+import androidx.compose.ui.window.Dialog
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowBack
-import androidx.compose.material.icons.filled.ArrowDropDown
-import androidx.compose.material.icons.filled.Bookmark
-import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.Groups
-import androidx.compose.material.icons.filled.Lock
-import androidx.compose.material.icons.filled.Person
-import androidx.compose.material.icons.filled.Public
-import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material.icons.filled.Search
-import androidx.compose.material.icons.filled.SmartToy
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.material.icons.rounded.Bookmark
+import androidx.compose.material.icons.rounded.Groups
+import androidx.compose.material.icons.rounded.Lock
+import androidx.compose.material.icons.rounded.Person
+import androidx.compose.material.icons.rounded.Public
+import androidx.compose.material.icons.rounded.SmartToy
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.abn3li.telemusic.TgMusicApp
 import com.abn3li.telemusic.data.telegram.TelegramAuthState
+import com.abn3li.telemusic.data.telegram.TelegramConnectionState
 import com.abn3li.telemusic.data.telegram.TelegramChatCategory
 import com.abn3li.telemusic.data.telegram.TelegramChatInfo
-import com.abn3li.telemusic.ui.library.AdaptiveScreenBackground
-import com.abn3li.telemusic.ui.library.adaptivePanelFill
-import com.abn3li.telemusic.ui.nowplaying.LocalMiniPlayerInset
+import com.abn3li.telemusic.ui.library.AppAccent
+import com.abn3li.telemusic.ui.library.ChevronIcon
+import com.abn3li.telemusic.ui.library.DestructiveRed
+import com.abn3li.telemusic.ui.library.FilterPill
+import com.abn3li.telemusic.ui.library.GroupActionRow
+import com.abn3li.telemusic.ui.library.GroupCard
+import com.abn3li.telemusic.ui.library.GroupCardColor
+import com.abn3li.telemusic.ui.library.GroupDivider
+import com.abn3li.telemusic.ui.library.GroupFooter
+import com.abn3li.telemusic.ui.library.GroupHeader
+import com.abn3li.telemusic.ui.library.GroupLabelColor
+import com.abn3li.telemusic.ui.library.GroupRow
+import com.abn3li.telemusic.ui.library.GroupTextField
+import com.abn3li.telemusic.ui.library.GroupValue
+import com.abn3li.telemusic.ui.library.LargeTitleList
+import com.abn3li.telemusic.ui.library.LibrarySearchField
 
-// Same local dark palette the Library/Settings redesign uses (see LibraryScreen's own doc on
-// why this is hardcoded per-screen rather than routed through MaterialTheme) - kept consistent
-// here so the channel picker doesn't look like a different, unstyled screen bolted onto the
-// rest of the app. BgColor/CardColor used to be hardcoded here too, which meant this screen
-// stayed flat black even with "Ambient blur" selected in Settings - AdaptiveScreenBackground/
-// adaptivePanelFill() (imported above) are what Library/detail screens use for that toggle, and
-// now this screen goes through the same ones instead of its own disconnected copy.
-private val TextSecondary = Color(0xFFA9A9A6)
-private val TextMuted = Color(0xFF8B8B88)
-private val AccentGreen = Color(0xFF1D9E75)
-private val OnAccentGreen = Color(0xFF04342C)
-private val DividerColor = Color(0xFF232326)
-
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SyncScreen(onBack: () -> Unit) {
     val context = LocalContext.current
@@ -64,77 +96,111 @@ fun SyncScreen(onBack: () -> Unit) {
     val state by viewModel.uiState.collectAsState()
     val syncing by viewModel.isSyncing.collectAsState()
     val progress by viewModel.syncProgress.collectAsState()
+    val ready = state.authState == TelegramAuthState.Ready
+    val connection by app.tdlibManager.connectionState.collectAsState()
 
-    AdaptiveScreenBackground {
-    Scaffold(
-        containerColor = Color.Transparent,
-        topBar = {
-            Column {
-                TopAppBar(
-                    title = { Text("Telegram Sync", fontWeight = FontWeight.Bold, color = Color.White) },
-                    navigationIcon = {
-                        IconButton(onClick = onBack) {
-                            Icon(Icons.Default.ArrowBack, contentDescription = "Back", tint = Color.White)
+    val haptics = LocalHapticFeedback.current
+    val swipeThresholdPx = with(LocalDensity.current) { 72.dp.toPx() }
+    val currentFilter by rememberUpdatedState(state.filter)
+    val swipeModifier = if (ready) {
+        Modifier.pointerInput(Unit) {
+            var dragTotal = 0f
+            detectHorizontalDragGestures(
+                onDragStart = { dragTotal = 0f },
+                onDragEnd = {
+                    val filters = ChatCategoryFilter.entries
+                    val index = filters.indexOf(currentFilter)
+                    val target = when {
+                        dragTotal <= -swipeThresholdPx -> index + 1
+                        dragTotal >= swipeThresholdPx -> index - 1
+                        else -> index
+                    }
+                    if (target != index && target in filters.indices) {
+                        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                        viewModel.setFilter(filters[target])
+                    }
+                },
+                onHorizontalDrag = { change, amount ->
+                    change.consume()
+                    dragTotal += amount
+                }
+            )
+        }
+    } else Modifier
+
+    Box(Modifier.fillMaxSize().then(swipeModifier)) {
+    LargeTitleList(
+        title = "Sync",
+        onBack = onBack,
+        stickyContent = if (ready) {
+            { LibrarySearchField(state.searchQuery, "Search Chats", viewModel::setSearchQuery) }
+        } else null
+    ) {
+        if (ready && connection != TelegramConnectionState.CONNECTED) {
+            item("connection") {
+                GroupHeader("Telegram")
+                GroupCard {
+                    Row(
+                        Modifier.fillMaxWidth().heightIn(min = 46.dp).padding(horizontal = 15.dp, vertical = 11.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        if (connection != TelegramConnectionState.DISCONNECTED) {
+                            CircularProgressIndicator(color = AppAccent, strokeWidth = 2.dp, modifier = Modifier.size(18.dp))
+                            Spacer(Modifier.size(12.dp))
                         }
-                    },
-                    colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent)
-                )
-                if (syncing) {
-                    LinearProgressIndicator(
-                        modifier = Modifier.fillMaxWidth(),
-                        color = AccentGreen,
-                        trackColor = DividerColor
-                    )
+                        Text(
+                            when (connection) {
+                                TelegramConnectionState.CONNECTING_TO_PROXY -> "Connecting to proxy…"
+                                TelegramConnectionState.WAITING_FOR_NETWORK -> "Waiting for network…"
+                                TelegramConnectionState.UPDATING -> "Updating…"
+                                TelegramConnectionState.DISCONNECTED -> "Disconnected"
+                                else -> "Connecting…"
+                            },
+                            color = if (connection == TelegramConnectionState.DISCONNECTED) DestructiveRed else Color.White,
+                            fontSize = 15.sp
+                        )
+                    }
                 }
             }
         }
-    ) { padding ->
-        Column(
-            modifier = Modifier
-                .padding(padding)
-                .fillMaxSize()
-                .padding(horizontal = 20.dp, vertical = 16.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
-        ) {
-            when (val auth = state.authState) {
-                TelegramAuthState.WaitingForPhoneNumber -> PhoneStep(viewModel)
-                is TelegramAuthState.WaitingForCode -> CodeStep(viewModel, auth.deliveryDescription)
-                TelegramAuthState.WaitingForPassword -> PasswordStep(viewModel)
-                TelegramAuthState.Ready -> ChannelPickerStep(
-                    state = state,
-                    syncing = syncing,
-                    onRetry = { viewModel.loadChats() },
-                    onPick = { chatId -> viewModel.syncChannel(context, chatId) },
-                    onFilterChange = { viewModel.setFilter(it) },
-                    onSearchChange = { viewModel.setSearchQuery(it) }
-                )
-                is TelegramAuthState.Error -> Text("Error: ${auth.message}", color = MaterialTheme.colorScheme.error)
-                else -> Text("Connecting to Telegram...", color = TextSecondary)
-            }
-
-            AnimatedVisibility(visible = progress.isNotBlank()) {
-                Surface(
-                    shape = RoundedCornerShape(16.dp),
-                    color = adaptivePanelFill(),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
+        if (progress.isNotBlank()) {
+            item("progress") {
+                GroupHeader(if (syncing) "Syncing" else "Last Sync")
+                GroupCard {
                     Row(
-                        modifier = Modifier.padding(14.dp),
+                        Modifier.fillMaxWidth().heightIn(min = 46.dp).padding(horizontal = 15.dp, vertical = 11.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         if (syncing) {
-                            CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.5.dp, color = AccentGreen)
-                            Spacer(Modifier.width(12.dp))
+                            CircularProgressIndicator(color = AppAccent, strokeWidth = 2.dp, modifier = Modifier.size(18.dp))
+                            Spacer(Modifier.size(12.dp))
                         }
-                        Text(
-                            progress,
-                            style = MaterialTheme.typography.bodyMedium,
-                            fontWeight = FontWeight.Medium,
-                            color = Color.White,
-                            maxLines = 2,
-                            overflow = TextOverflow.Ellipsis
-                        )
+                        Text(progress, color = Color.White, fontSize = 15.sp, maxLines = 3, overflow = TextOverflow.Ellipsis)
                     }
+                }
+            }
+        }
+        when (val auth = state.authState) {
+            TelegramAuthState.WaitingForPhoneNumber -> item("phone") { PhoneStep(viewModel) }
+            is TelegramAuthState.WaitingForCode -> item("code") { CodeStep(viewModel, auth.deliveryDescription) }
+            TelegramAuthState.WaitingForPassword -> item("password") { PasswordStep(viewModel) }
+            TelegramAuthState.Ready -> chatPicker(
+                state = state,
+                syncing = syncing,
+                onRetry = viewModel::loadChats,
+                onPick = { chatId -> viewModel.syncChannel(context, chatId) },
+                onFilterChange = viewModel::setFilter
+            )
+            is TelegramAuthState.Error -> item("error") { GroupFooter("Error: ${auth.message}", color = DestructiveRed) }
+            else -> item("connecting") {
+                Row(
+                    Modifier.fillMaxWidth().padding(top = 40.dp),
+                    horizontalArrangement = Arrangement.Center,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    CircularProgressIndicator(color = AppAccent, strokeWidth = 2.dp, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.size(10.dp))
+                    Text("Connecting to Telegram…", color = GroupLabelColor, fontSize = 15.sp)
                 }
             }
         }
@@ -148,349 +214,278 @@ private fun PhoneStep(viewModel: SyncViewModel) {
     var selectedCountry by remember { mutableStateOf(defaultCountry(context)) }
     var nationalNumber by remember { mutableStateOf("") }
     var showCountryPicker by remember { mutableStateOf(false) }
-    // Coarse flag, not tied to any per-frame animation - just disables the button and swaps
-    // its label for a spinner the instant it's tapped, so a second tap before Telegram's
-    // response comes back can't fire a second submitPhoneNumber() and send two codes. This
-    // composable unmounts once authState moves off WaitingForPhoneNumber (success or error),
-    // so there's no separate "reset" case to handle.
+    // Blocks a second tap sending a second code before Telegram answers; this step unmounts
+    // once the auth state moves on.
     var isSubmitting by remember { mutableStateOf(false) }
 
-    Text("Enter your phone number", color = Color.White)
-
-    // Country selector lives INSIDE the text field's own leadingIcon slot instead of as a
-    // separate button next to it - a Button and an OutlinedTextField never line up cleanly as
-    // two independent siblings (different default heights, different corner shapes, the
-    // field's floating label shifting its effective content box), no matter how much manual
-    // height/shape tweaking is applied to force them to match. One field, one set of paddings,
-    // nothing to misalign.
-    OutlinedTextField(
-        value = nationalNumber,
-        onValueChange = { nationalNumber = it.filter { c -> c.isDigit() || c == ' ' } },
-        label = { Text("Phone number") },
-        placeholder = { Text("555 123 4567") },
-        enabled = !isSubmitting,
-        singleLine = true,
-        leadingIcon = {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier
-                    .clickable(enabled = !isSubmitting) { showCountryPicker = true }
-                    .padding(start = 12.dp, end = 4.dp)
-            ) {
-                Text(
-                    "${selectedCountry.flagEmoji} ${selectedCountry.dialCode}",
-                    style = MaterialTheme.typography.bodyLarge
-                )
-                Icon(Icons.Default.ArrowDropDown, contentDescription = "Change country")
-            }
-        },
-        modifier = Modifier.fillMaxWidth()
-    )
-
-    Button(
-        onClick = {
+    GroupHeader("Phone Number")
+    GroupCard {
+        GroupRow(
+            title = "Country",
+            enabled = !isSubmitting,
+            onClick = { showCountryPicker = true },
+            trailing = { GroupValue("${selectedCountry.flagEmoji} ${selectedCountry.name}") }
+        )
+        GroupDivider()
+        GroupTextField(
+            value = nationalNumber,
+            onValueChange = { nationalNumber = it.filter { c -> c.isDigit() || c == ' ' } },
+            placeholder = "555 123 4567",
+            keyboardType = KeyboardType.Phone,
+            enabled = !isSubmitting,
+            leading = { Text(selectedCountry.dialCode, color = Color.White, fontSize = 16.5.sp) }
+        )
+        GroupDivider()
+        GroupActionRow("Continue", enabled = nationalNumber.any { it.isDigit() }, loading = isSubmitting) {
             isSubmitting = true
             viewModel.submitPhoneNumber("${selectedCountry.dialCode}${nationalNumber.filter { it.isDigit() }}")
-        },
-        enabled = !isSubmitting && nationalNumber.any { it.isDigit() }
-    ) {
-        if (isSubmitting) {
-            CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp, color = LocalContentColor.current)
-            Spacer(Modifier.width(8.dp))
         }
-        Text("Continue")
     }
+    GroupFooter("Telegram will send a login code to this number.")
 
     if (showCountryPicker) {
         CountryPickerDialog(
+            selected = selectedCountry,
             onDismiss = { showCountryPicker = false },
             onSelect = { selectedCountry = it; showCountryPicker = false }
         )
     }
 }
 
+/** Full-height country list, styled like an iOS picker page: Cancel + title bar, search, rows. */
 @Composable
-private fun CountryPickerDialog(onDismiss: () -> Unit, onSelect: (Country) -> Unit) {
+private fun CountryPickerDialog(selected: Country, onDismiss: () -> Unit, onSelect: (Country) -> Unit) {
     var query by remember { mutableStateOf("") }
     val filtered = remember(query) {
         if (query.isBlank()) COUNTRIES
-        else COUNTRIES.filter {
-            it.name.contains(query, ignoreCase = true) || it.dialCode.contains(query)
-        }
+        else COUNTRIES.filter { it.name.contains(query, ignoreCase = true) || it.dialCode.contains(query.trim()) }
     }
-
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Select country") },
-        text = {
-            Column {
-                OutlinedTextField(
-                    value = query,
-                    onValueChange = { query = it },
-                    label = { Text("Search") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
+    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .fillMaxHeight(0.82f)
+                .padding(horizontal = 14.dp)
+                .clip(RoundedCornerShape(14.dp))
+                .background(AlertColor)
+        ) {
+            Box(Modifier.fillMaxWidth().height(52.dp)) {
+                Text(
+                    "Cancel",
+                    color = AppAccent,
+                    fontSize = 17.sp,
+                    modifier = Modifier
+                        .align(Alignment.CenterStart)
+                        .clickable(onClick = onDismiss)
+                        .padding(horizontal = 16.dp, vertical = 8.dp)
                 )
-                Spacer(Modifier.height(8.dp))
-                LazyColumn(modifier = Modifier.heightIn(max = 400.dp)) {
-                    items(filtered, key = { it.isoCode }) { country ->
-                        ListItem(
-                            headlineContent = { Text(country.name) },
-                            leadingContent = { Text(country.flagEmoji) },
-                            trailingContent = { Text(country.dialCode) },
-                            modifier = Modifier.clickable { onSelect(country) }
-                        )
-                    }
+                Text("Country", color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.align(Alignment.Center))
+            }
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 14.dp)
+                    .padding(bottom = 10.dp)
+                    .height(38.dp)
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(Color(0xFF1A1A1C))
+                    .padding(horizontal = 9.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(Icons.Rounded.Search, contentDescription = null, tint = Color.White.copy(alpha = 0.5f), modifier = Modifier.size(20.dp))
+                Spacer(Modifier.width(6.dp))
+                Box(Modifier.weight(1f)) {
+                    if (query.isEmpty()) Text("Search", color = Color.White.copy(alpha = 0.45f), fontSize = 16.sp)
+                    BasicTextField(
+                        value = query,
+                        onValueChange = { query = it },
+                        singleLine = true,
+                        textStyle = TextStyle(color = Color.White, fontSize = 16.sp),
+                        cursorBrush = SolidColor(AppAccent),
+                        modifier = Modifier.fillMaxWidth()
+                    )
                 }
             }
-        },
-        confirmButton = {
-            TextButton(onClick = onDismiss) { Text("Cancel") }
+            Box(Modifier.fillMaxWidth().height(0.5.dp).background(Color.White.copy(alpha = 0.14f)))
+            LazyColumn(Modifier.fillMaxWidth().weight(1f)) {
+                itemsIndexed(filtered, key = { _, country -> country.isoCode }) { index, country ->
+                    if (index > 0) GroupDivider(start = 52.dp)
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .clickable { onSelect(country) }
+                            .padding(horizontal = 16.dp, vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(country.flagEmoji, fontSize = 20.sp, modifier = Modifier.width(36.dp))
+                        Text(country.name, color = Color.White, fontSize = 16.5.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                        Text(country.dialCode, color = GroupLabelColor, fontSize = 15.sp)
+                        Box(Modifier.width(30.dp), contentAlignment = Alignment.CenterEnd) {
+                            if (country.isoCode == selected.isoCode) {
+                                Icon(Icons.Rounded.Check, contentDescription = "Selected", tint = AppAccent, modifier = Modifier.size(19.dp))
+                            }
+                        }
+                    }
+                }
+                if (filtered.isEmpty()) {
+                    item("none") { GroupFooter("No countries match your search.") }
+                }
+            }
         }
-    )
+    }
 }
 
 @Composable
 private fun CodeStep(viewModel: SyncViewModel, deliveryDescription: String) {
     var code by remember { mutableStateOf("") }
-    Text("Enter the code Telegram sent you", color = Color.White)
-    Card(colors = CardDefaults.cardColors(containerColor = adaptivePanelFill())) {
-        Text(deliveryDescription, modifier = Modifier.padding(12.dp), style = MaterialTheme.typography.bodySmall, color = TextSecondary)
+    GroupHeader("Login Code")
+    GroupCard {
+        GroupTextField(value = code, onValueChange = { code = it }, placeholder = "12345", keyboardType = KeyboardType.Number)
+        GroupDivider()
+        GroupActionRow("Verify", enabled = code.isNotBlank()) { viewModel.submitCode(code) }
     }
-    OutlinedTextField(value = code, onValueChange = { code = it }, label = { Text("12345") })
-    Button(onClick = { viewModel.submitCode(code) }) { Text("Verify") }
+    GroupFooter(deliveryDescription)
 }
 
 @Composable
 private fun PasswordStep(viewModel: SyncViewModel) {
     var password by remember { mutableStateOf("") }
-    Text("Two-factor password", color = Color.White)
-    OutlinedTextField(value = password, onValueChange = { password = it }, label = { Text("Password") })
-    Button(onClick = { viewModel.submitPassword(password) }) { Text("Unlock") }
+    GroupHeader("Two-Step Verification")
+    GroupCard {
+        GroupTextField(value = password, onValueChange = { password = it }, placeholder = "Password", password = true)
+        GroupDivider()
+        GroupActionRow("Unlock", enabled = password.isNotBlank()) { viewModel.submitPassword(password) }
+    }
+    GroupFooter("Your account has a cloud password. Enter it to continue.")
 }
 
-@Composable
-private fun ChannelPickerStep(
+private fun LazyListScope.chatPicker(
     state: SyncUiState,
     syncing: Boolean,
     onRetry: () -> Unit,
     onPick: (Long) -> Unit,
-    onFilterChange: (ChatCategoryFilter) -> Unit,
-    onSearchChange: (String) -> Unit
+    onFilterChange: (ChatCategoryFilter) -> Unit
 ) {
-    var isSearchActive by remember { mutableStateOf(false) }
-
-    Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
+    item("filters") {
+        val pillsState = rememberLazyListState()
+        LaunchedEffect(state.filter) { pillsState.animateScrollToItem(state.filter.ordinal) }
+        LazyRow(
+            state = pillsState,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            contentPadding = PaddingValues(horizontal = 16.5.dp),
+            modifier = Modifier.padding(top = 16.dp, bottom = 2.dp)
         ) {
-            Text("Pick a chat to sync", color = Color.White, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Medium)
-            IconButton(
-                onClick = {
-                    isSearchActive = !isSearchActive
-                    if (!isSearchActive) onSearchChange("")
-                },
-                modifier = Modifier.size(24.dp)
-            ) {
-                Icon(
-                    if (isSearchActive) Icons.Default.Close else Icons.Default.Search,
-                    contentDescription = if (isSearchActive) "Close search" else "Search chats",
-                    tint = if (isSearchActive) AccentGreen else TextSecondary
-                )
-            }
-        }
-
-        AnimatedVisibility(visible = isSearchActive, enter = expandVertically(), exit = shrinkVertically()) {
-            OutlinedTextField(
-                value = state.searchQuery,
-                onValueChange = onSearchChange,
-                placeholder = { Text("Search chats...") },
-                leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = AccentGreen) },
-                singleLine = true,
-                shape = RoundedCornerShape(20.dp),
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedContainerColor = adaptivePanelFill(),
-                    unfocusedContainerColor = adaptivePanelFill(),
-                    focusedBorderColor = Color.Transparent,
-                    unfocusedBorderColor = Color.Transparent,
-                    focusedTextColor = Color.White,
-                    unfocusedTextColor = Color.White
-                ),
-                modifier = Modifier.fillMaxWidth()
-            )
-        }
-
-        LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             items(ChatCategoryFilter.entries) { filter ->
-                ChannelFilterChip(
-                    label = filter.label,
-                    selected = state.filter == filter,
-                    onClick = { onFilterChange(filter) }
-                )
+                FilterPill(filter.label, selected = state.filter == filter, onClick = { onFilterChange(filter) })
             }
         }
-
-        when {
-            state.isLoadingChats -> Box(Modifier.fillMaxWidth().padding(top = 24.dp), contentAlignment = Alignment.Center) {
-                CircularProgressIndicator(color = AccentGreen)
+    }
+    when {
+        state.isLoadingChats -> item("loading") {
+            Box(Modifier.fillMaxWidth().padding(top = 40.dp), contentAlignment = Alignment.Center) {
+                CircularProgressIndicator(color = AppAccent)
             }
-            state.loadChatsError != null -> {
-                // Previously a failed fetch (e.g. a transient error right after a fresh login,
-                // when TDLib's local chat list often isn't populated yet) looked identical to a
-                // genuinely empty account - same "No chats found" text, no way to tell which
-                // one it was or retry without leaving the screen entirely.
-                Text(
-                    "Couldn't load your chats: ${state.loadChatsError}",
-                    color = MaterialTheme.colorScheme.error
-                )
-                FilledTonalButton(onClick = onRetry, colors = ButtonDefaults.filledTonalButtonColors(containerColor = adaptivePanelFill(), contentColor = AccentGreen)) {
-                    Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Spacer(Modifier.width(6.dp))
-                    Text("Retry")
+        }
+        state.loadChatsError != null -> item("load_error") {
+            GroupHeader("Chats")
+            GroupCard { GroupActionRow("Try Again", onClick = onRetry) }
+            GroupFooter("Couldn't load your chats: ${state.loadChatsError}", color = DestructiveRed)
+        }
+        else -> {
+            val filteredChats = state.chats.filter { chat ->
+                val matchesFilter = when (state.filter) {
+                    ChatCategoryFilter.ALL -> true
+                    ChatCategoryFilter.CHANNELS -> chat.category == TelegramChatCategory.CHANNEL
+                    ChatCategoryFilter.GROUPS -> chat.category == TelegramChatCategory.GROUP
+                    ChatCategoryFilter.CHATS -> chat.category == TelegramChatCategory.CHAT
+                    ChatCategoryFilter.BOTS -> chat.category == TelegramChatCategory.BOT
                 }
+                matchesFilter && (state.searchQuery.isBlank() || chat.title.contains(state.searchQuery, ignoreCase = true))
             }
-            else -> {
-                val filteredChats = remember(state.chats, state.filter, state.searchQuery) {
-                    state.chats.filter { chat ->
-                        val matchesFilter = when (state.filter) {
-                            ChatCategoryFilter.ALL -> true
-                            ChatCategoryFilter.CHANNELS -> chat.category == TelegramChatCategory.CHANNEL
-                            ChatCategoryFilter.GROUPS -> chat.category == TelegramChatCategory.GROUP
-                            ChatCategoryFilter.CHATS -> chat.category == TelegramChatCategory.CHAT
-                            ChatCategoryFilter.BOTS -> chat.category == TelegramChatCategory.BOT
-                        }
-                        val matchesQuery = state.searchQuery.isBlank() ||
-                            chat.title.contains(state.searchQuery, ignoreCase = true)
-                        matchesFilter && matchesQuery
-                    }
-                }
-                val savedMessages = state.savedMessagesChat?.takeIf {
-                    // Saved Messages sits outside the category filter entirely (it's not really
-                    // a Channel/Group/Chat/Bot, just your own account) - only the search query
-                    // (if any) can hide it, same as before.
-                    state.searchQuery.isBlank() || it.title.contains(state.searchQuery, ignoreCase = true) ||
-                        "saved messages".contains(state.searchQuery.trim(), ignoreCase = true)
-                }
-
-                if (filteredChats.isEmpty() && savedMessages == null) {
-                    Text(
+            // Saved Messages sits outside the category filter - only the search can hide it.
+            val savedMessages = state.savedMessagesChat?.takeIf {
+                state.searchQuery.isBlank() || it.title.contains(state.searchQuery, ignoreCase = true) ||
+                    "saved messages".contains(state.searchQuery.trim(), ignoreCase = true)
+            }
+            if (filteredChats.isEmpty() && savedMessages == null) {
+                item("empty") {
+                    GroupFooter(
                         if (state.chats.isEmpty()) "No chats found. Create a private channel in Telegram and upload some songs to it first."
-                        else "Nothing matches your search.",
-                        color = TextMuted
+                        else "Nothing matches your search."
                     )
-                } else {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .clip(RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp))
-                            .background(adaptivePanelFill())
-                    ) {
-                        LazyColumn(contentPadding = PaddingValues(bottom = LocalMiniPlayerInset.current)) {
-                            if (savedMessages != null) {
-                                item(key = "saved_messages") {
-                                    ChannelRow(
-                                        title = savedMessages.title,
-                                        subtitle = "Your own saved audio files",
-                                        icon = Icons.Default.Bookmark,
-                                        iconTint = Color(0xFF85B7EB),
-                                        iconBg = Color(0xFF042C53),
-                                        enabled = !syncing,
-                                        onClick = { onPick(savedMessages.id) }
-                                    )
-                                    HorizontalDivider(color = DividerColor, thickness = 0.5.dp)
-                                }
-                            }
-                            itemsIndexed(filteredChats, key = { _, chat -> chat.id }) { index, chat ->
-                                val style = chatRowStyle(chat)
-                                ChannelRow(
-                                    title = chat.title,
-                                    subtitle = style.subtitle,
-                                    icon = style.icon,
-                                    iconTint = style.iconTint,
-                                    iconBg = style.iconBg,
-                                    enabled = !syncing,
-                                    onClick = { onPick(chat.id) }
-                                )
-                                if (index < filteredChats.lastIndex) {
-                                    HorizontalDivider(color = DividerColor, thickness = 0.5.dp)
-                                }
+                }
+            } else {
+                item("chats_header") { GroupHeader("Pick a Chat to Sync") }
+                if (savedMessages != null) {
+                    item("saved_messages") {
+                        ChatCard(isFirst = true, isLast = filteredChats.isEmpty()) {
+                            ChatRow(savedMessages.title, "Your own saved audio files", Icons.Rounded.Bookmark, Color(0xFF0A84FF), !syncing) {
+                                onPick(savedMessages.id)
                             }
                         }
                     }
                 }
+                itemsIndexed(filteredChats, key = { _, chat -> chat.id }) { index, chat ->
+                    val style = chatRowStyle(chat)
+                    ChatCard(isFirst = index == 0 && savedMessages == null, isLast = index == filteredChats.lastIndex) {
+                        if (index > 0 || savedMessages != null) GroupDivider(start = 62.dp)
+                        ChatRow(chat.title, style.subtitle, style.icon, style.tint, !syncing) { onPick(chat.id) }
+                    }
+                }
+                item("chats_footer") { GroupFooter("Songs in the chat you pick are added to your library.") }
             }
         }
     }
 }
 
-/** Icon/color/subtitle for a chat row, keyed off its real [TelegramChatInfo.category] - Public/
- * Private is still shown for a channel specifically (the only category that distinction applies
- * to), everything else gets its own fixed look. */
-private data class ChatRowStyle(
-    val icon: androidx.compose.ui.graphics.vector.ImageVector,
-    val iconTint: Color,
-    val iconBg: Color,
-    val subtitle: String
-)
+/** One slice of the chat list's card - only the first and last slices get rounded corners, so
+ * the lazily-composed rows still read as one card. */
+@Composable
+private fun ChatCard(isFirst: Boolean, isLast: Boolean, content: @Composable () -> Unit) {
+    val shape = RoundedCornerShape(
+        topStart = if (isFirst) 10.dp else 0.dp,
+        topEnd = if (isFirst) 10.dp else 0.dp,
+        bottomStart = if (isLast) 10.dp else 0.dp,
+        bottomEnd = if (isLast) 10.dp else 0.dp
+    )
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.5.dp)
+            .clip(shape)
+            .background(GroupCardColor)
+    ) { content() }
+}
+
+@Composable
+private fun ChatRow(title: String, subtitle: String, icon: ImageVector, tint: Color, enabled: Boolean, onClick: () -> Unit) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clickable(enabled = enabled, onClick = onClick)
+            .padding(horizontal = 15.dp, vertical = 9.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(Modifier.size(34.dp).clip(CircleShape).background(tint), contentAlignment = Alignment.Center) {
+            Icon(icon, contentDescription = null, tint = Color.White, modifier = Modifier.size(19.dp))
+        }
+        Column(Modifier.weight(1f).padding(start = 13.dp)) {
+            Text(title, color = Color.White, fontSize = 16.5.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(subtitle, color = Color.White.copy(alpha = 0.5f), fontSize = 13.sp)
+        }
+        ChevronIcon()
+    }
+}
+
+private data class ChatRowStyle(val icon: ImageVector, val tint: Color, val subtitle: String)
 
 private fun chatRowStyle(chat: TelegramChatInfo): ChatRowStyle = when (chat.category) {
     TelegramChatCategory.CHANNEL -> if (chat.isPublic) {
-        ChatRowStyle(Icons.Default.Public, Color(0xFF97C459), Color(0xFF173404), "Public channel")
+        ChatRowStyle(Icons.Rounded.Public, Color(0xFF30D158), "Public channel")
     } else {
-        ChatRowStyle(Icons.Default.Lock, Color(0xFFF0997B), Color(0xFF4A1B0C), "Private channel")
+        ChatRowStyle(Icons.Rounded.Lock, Color(0xFFFF9F0A), "Private channel")
     }
-    TelegramChatCategory.GROUP -> ChatRowStyle(Icons.Default.Groups, Color(0xFF85B7EB), Color(0xFF042C53), "Group")
-    TelegramChatCategory.BOT -> ChatRowStyle(Icons.Default.SmartToy, Color(0xFFD9A441), Color(0xFF4A3A0C), "Bot")
-    TelegramChatCategory.CHAT -> ChatRowStyle(Icons.Default.Person, Color(0xFFC79BE0), Color(0xFF33204A), "Chat")
-}
-
-@Composable
-private fun ChannelFilterChip(label: String, selected: Boolean, onClick: () -> Unit) {
-    Surface(
-        onClick = onClick,
-        shape = RoundedCornerShape(100),
-        color = if (selected) AccentGreen else adaptivePanelFill()
-    ) {
-        Text(
-            text = label,
-            color = if (selected) OnAccentGreen else TextSecondary,
-            fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
-            style = MaterialTheme.typography.labelMedium,
-            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
-        )
-    }
-}
-
-@Composable
-private fun ChannelRow(
-    title: String,
-    subtitle: String,
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
-    iconTint: Color,
-    iconBg: Color,
-    enabled: Boolean,
-    onClick: () -> Unit
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(enabled = enabled, onClick = onClick)
-            .padding(horizontal = 16.dp, vertical = 12.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Box(
-            modifier = Modifier.size(44.dp).clip(CircleShape).background(iconBg),
-            contentAlignment = Alignment.Center
-        ) {
-            Icon(icon, contentDescription = null, tint = iconTint, modifier = Modifier.size(20.dp))
-        }
-        Spacer(Modifier.width(14.dp))
-        Column(modifier = Modifier.weight(1f)) {
-            Text(title, color = Color.White, fontSize = MaterialTheme.typography.bodyLarge.fontSize, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Spacer(Modifier.height(2.dp))
-            Text(subtitle, color = TextMuted, style = MaterialTheme.typography.bodySmall)
-        }
-    }
+    TelegramChatCategory.GROUP -> ChatRowStyle(Icons.Rounded.Groups, Color(0xFF0A84FF), "Group")
+    TelegramChatCategory.BOT -> ChatRowStyle(Icons.Rounded.SmartToy, Color(0xFFFFD60A), "Bot")
+    TelegramChatCategory.CHAT -> ChatRowStyle(Icons.Rounded.Person, Color(0xFFBF5AF2), "Chat")
 }

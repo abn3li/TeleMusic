@@ -9,14 +9,8 @@ import com.abn3li.telemusic.data.local.PlaylistSummary
 import com.abn3li.telemusic.data.local.SongEntity
 import com.abn3li.telemusic.repository.MusicRepository
 import com.abn3li.telemusic.repository.SortField
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
-
-enum class LibraryTab(val label: String) {
-    PLAYLISTS("Playlists"), TRACKS("Tracks"), ALBUMS("Albums"), ARTISTS("Artists")
-}
 
 // The three built-in playlists shown above the user's own ones on the Playlists (home) tab -
 // each is just a different filter over the same songs table, not a real row in the playlists
@@ -25,7 +19,7 @@ enum class SmartPlaylistKind(val label: String) {
     LIKED("Liked Songs"), TELEGRAM("Telegram Songs"), DOWNLOADED("Downloaded Songs")
 }
 
-// The Tracks tab's exclusion filter, gathered from every "Hide from tracks" toggle across the
+// The Songs page's exclusion filter, gathered from every "Hide from tracks" toggle across the
 // app (each real playlist's own, plus the three smart playlists' - see MusicRepository's own
 // doc) into one bundle so the LazyColumn only recomputes once per actual change, not once per
 // underlying flow.
@@ -37,8 +31,6 @@ private data class TrackVisibilityFilter(
 )
 
 class LibraryViewModel(private val repository: MusicRepository) : ViewModel() {
-    private val _tab = MutableStateFlow(LibraryTab.PLAYLISTS)
-    val tab: StateFlow<LibraryTab> = _tab
     private val _sortField = MutableStateFlow(SortField.TITLE)
     val sortField: StateFlow<SortField> = _sortField
     private val _ascending = MutableStateFlow(true)
@@ -47,6 +39,7 @@ class LibraryViewModel(private val repository: MusicRepository) : ViewModel() {
     // Tracks which song IDs currently have an explicit download in progress, for the
     // download-button's own progress spinner.
     private val _downloadingIds = MutableStateFlow<Set<Long>>(emptySet())
+    val downloadingIds: StateFlow<Set<Long>> = _downloadingIds
 
     private val sortParams = combine(_sortField, _ascending) { f, a -> f to a }
 
@@ -73,20 +66,13 @@ class LibraryViewModel(private val repository: MusicRepository) : ViewModel() {
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
-    // Pre-computed @Immutable SongUiModels offloaded to background Dispatchers.Default threads for 120fps UI rendering
-    val tracksUiModels: StateFlow<List<SongUiModel>> = combine(tracks, _downloadingIds) { songList, dlIds ->
-        withContext(Dispatchers.Default) {
-            songList.map { song -> song.toUiModel(dlIds.contains(song.telegramMessageId)) }
-        }
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
-
     val albums: StateFlow<List<AlbumSummary>> = repository.observeAlbums().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
     val artists: StateFlow<List<ArtistSummary>> = repository.observeArtists().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
     val playlists: StateFlow<List<PlaylistEntity>> = repository.observePlaylists().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
     val playlistSummaries: StateFlow<List<PlaylistSummary>> = repository.observePlaylistSummaries().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
-    fun selectTab(t: LibraryTab) { _tab.value = t }
     fun selectSortField(f: SortField) { _sortField.value = f }
+    fun setAscending(ascending: Boolean) { _ascending.value = ascending }
     fun toggleFavorite(song: SongEntity) = viewModelScope.launch { repository.setFavorite(song, !song.isFavorite) }
     fun addSongToPlaylist(playlistId: Long, song: SongEntity) = viewModelScope.launch { repository.addSongToPlaylist(playlistId, song) }
     fun createPlaylistAndAddSong(name: String, song: SongEntity) = viewModelScope.launch {

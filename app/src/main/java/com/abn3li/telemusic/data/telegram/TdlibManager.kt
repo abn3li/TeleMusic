@@ -512,6 +512,13 @@ class TdlibManager(private val context: Context) {
         }
     }
 
+    /** Real on-disk paths (canonical) of the files TDLib is downloading for playback right now -
+     * the partial files a cache wipe must leave alone so the playing song keeps streaming. */
+    suspend fun activeDownloadPaths(): Set<String> = downloadsStarted.mapNotNullTo(HashSet()) { fileId ->
+        val file = runCatching { sendSuspend(TdApi.GetFile(fileId)) as? TdApi.File }.getOrNull()
+        file?.local?.path?.takeIf { it.isNotBlank() }?.let { runCatching { java.io.File(it).canonicalPath }.getOrNull() }
+    }
+
     /** Non-suspending - safe to call from a playback/loading thread. */
     fun getCachedFileProgress(fileId: Int): TdApi.File? = fileProgress[fileId]
 

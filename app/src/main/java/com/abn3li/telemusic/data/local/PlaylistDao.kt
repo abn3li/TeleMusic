@@ -52,7 +52,7 @@ interface PlaylistDao {
     )
     fun observeSongsInPlaylist(playlistId: Long): Flow<List<SongEntity>>
 
-    // Backs the Tracks tab's exclusion filter - every song id belonging to a playlist that's
+    // Backs the Songs page's exclusion filter - every song id belonging to a playlist that's
     // had its own "Hide from tracks" button turned on, not every playlisted song in general.
     @Query(
         """

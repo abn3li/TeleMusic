@@ -1,27 +1,39 @@
 package com.abn3li.telemusic.ui.credentials
 
-import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.foundation.verticalScroll
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowDropDown
-import androidx.compose.material.icons.filled.ContentPaste
-import androidx.compose.material.icons.filled.Dns
-import androidx.compose.material.icons.filled.VpnKey
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
-import androidx.compose.ui.Alignment
+import androidx.compose.material.icons.rounded.ContentPaste
+import androidx.compose.material3.Icon
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import com.abn3li.telemusic.TgMusicApp
 import com.abn3li.telemusic.data.settings.AppSettingsStore
 import com.abn3li.telemusic.data.settings.DnsResolver
+import com.abn3li.telemusic.ui.library.AppAccent
+import com.abn3li.telemusic.ui.library.DestructiveRed
+import com.abn3li.telemusic.ui.library.GroupActionRow
+import com.abn3li.telemusic.ui.library.GroupCard
+import com.abn3li.telemusic.ui.library.GroupDivider
+import com.abn3li.telemusic.ui.library.GroupFooter
+import com.abn3li.telemusic.ui.library.GroupHeader
+import com.abn3li.telemusic.ui.library.GroupOption
+import com.abn3li.telemusic.ui.library.GroupRow
+import com.abn3li.telemusic.ui.library.GroupSwitch
+import com.abn3li.telemusic.ui.library.GroupTextField
+import com.abn3li.telemusic.ui.library.GroupValue
+import com.abn3li.telemusic.ui.library.LargeTitleList
 import kotlinx.coroutines.launch
 
 @Composable
@@ -35,13 +47,10 @@ fun CredentialsScreen(onSaved: () -> Unit) {
     var apiHash by remember { mutableStateOf("") }
     var error by remember { mutableStateOf<String?>(null) }
 
-    // DNS Resolver State
     var selectedDns by remember { mutableStateOf(app.settingsStore.dnsResolver) }
     var customDnsInput by remember { mutableStateOf(app.settingsStore.customDnsIps) }
-    var dnsMenuExpanded by remember { mutableStateOf(false) }
+    var dnsOptionsOpen by remember { mutableStateOf(false) }
 
-    // Proxy Setup for restricted regions
-    var showProxySection by remember { mutableStateOf(false) }
     val currentProxy = remember { app.settingsStore.proxySettings }
     var proxyEnabled by remember { mutableStateOf(currentProxy.enabled) }
     var proxyServer by remember { mutableStateOf(currentProxy.server) }
@@ -50,168 +59,74 @@ fun CredentialsScreen(onSaved: () -> Unit) {
     var proxyPasteInput by remember { mutableStateOf("") }
     var proxyMessage by remember { mutableStateOf<String?>(null) }
 
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .verticalScroll(rememberScrollState())
-            .padding(24.dp),
-        verticalArrangement = Arrangement.Center
-    ) {
-        Text("Connect your Telegram account", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
-        Spacer(Modifier.height(8.dp))
-        Text(
-            "Get your own api_id and api_hash for free at my.telegram.org -> API Development Tools. " +
-                "These identify this app, not your account - your login still needs your phone number and a code next. Stored encrypted on this device only.",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
-        Spacer(Modifier.height(20.dp))
-
-        OutlinedTextField(
-            value = apiId,
-            onValueChange = { apiId = it.filter { c -> c.isDigit() } },
-            label = { Text("api_id") },
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-            singleLine = true,
-            modifier = Modifier.fillMaxWidth()
-        )
-        Spacer(Modifier.height(12.dp))
-        OutlinedTextField(
-            value = apiHash,
-            onValueChange = { apiHash = it.trim() },
-            label = { Text("api_hash") },
-            singleLine = true,
-            modifier = Modifier.fillMaxWidth()
-        )
-
-        Spacer(Modifier.height(16.dp))
-
-        // DNS Resolver Option
-        Card(
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
-            shape = RoundedCornerShape(16.dp),
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Column(Modifier.padding(14.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Icon(Icons.Default.Dns, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
-                    Text("DNS Resolver (Bypass DNS Blocks)", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
-                }
-
-                Spacer(Modifier.height(8.dp))
-
-                Box {
-                    OutlinedCard(
-                        onClick = { dnsMenuExpanded = true },
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(12.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Column(modifier = Modifier.weight(1f)) {
-                                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                    Text(selectedDns.displayName, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
-                                    Surface(
-                                        shape = RoundedCornerShape(4.dp),
-                                        color = MaterialTheme.colorScheme.primaryContainer
-                                    ) {
-                                        Text(
-                                            selectedDns.source,
-                                            style = MaterialTheme.typography.labelSmall,
-                                            color = MaterialTheme.colorScheme.onPrimaryContainer,
-                                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
-                                        )
-                                    }
-                                }
-                                Text(selectedDns.description, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            }
-                            Icon(Icons.Default.ArrowDropDown, contentDescription = "Select DNS")
-                        }
-                    }
-
-                    DropdownMenu(
-                        expanded = dnsMenuExpanded,
-                        onDismissRequest = { dnsMenuExpanded = false }
-                    ) {
-                        DnsResolver.entries.forEach { resolver ->
-                            DropdownMenuItem(
-                                text = {
-                                    Column {
-                                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                            Text(resolver.displayName, fontWeight = FontWeight.Bold)
-                                            Surface(
-                                                shape = RoundedCornerShape(4.dp),
-                                                color = MaterialTheme.colorScheme.surfaceVariant
-                                            ) {
-                                                Text(
-                                                    resolver.source,
-                                                    style = MaterialTheme.typography.labelSmall,
-                                                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
-                                                )
-                                            }
-                                        }
-                                        Text(resolver.description, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                    }
-                                },
-                                onClick = {
-                                    selectedDns = resolver
-                                    dnsMenuExpanded = false
-                                }
-                            )
-                        }
-                    }
-                }
+    LargeTitleList(title = "Welcome") {
+        item("api") {
+            GroupHeader("Telegram API")
+            GroupCard {
+                GroupTextField(
+                    value = apiId,
+                    onValueChange = { apiId = it.filter { c -> c.isDigit() } },
+                    placeholder = "12345678",
+                    label = "API ID",
+                    keyboardType = KeyboardType.Number
+                )
+                GroupDivider()
+                GroupTextField(value = apiHash, onValueChange = { apiHash = it.trim() }, placeholder = "0123456789abcdef", label = "API Hash")
             }
+            GroupFooter(
+                "Get your own API ID and hash for free at my.telegram.org → API Development Tools. They identify this app, " +
+                    "not your account - you'll still log in with your phone number next. Stored encrypted on this device only."
+            )
         }
 
-        Spacer(Modifier.height(12.dp))
-
-        // Expandable Anti-Censorship Proxy Option
-        Card(
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
-            shape = RoundedCornerShape(16.dp),
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Column(Modifier.padding(14.dp)) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Icon(Icons.Default.VpnKey, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
-                        Text("MTProto Proxy (Optional)", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
-                    }
-                    TextButton(onClick = { showProxySection = !showProxySection }) {
-                        Text(if (showProxySection) "Hide" else "Configure")
+        item("dns") {
+            GroupHeader("DNS")
+            GroupCard {
+                GroupRow(
+                    title = "Resolver",
+                    onClick = { dnsOptionsOpen = !dnsOptionsOpen },
+                    trailing = { GroupValue(selectedDns.displayName.substringBefore(" (")) }
+                )
+                AnimatedVisibility(dnsOptionsOpen) {
+                    Column {
+                        DnsResolver.entries.forEach { resolver ->
+                            GroupDivider()
+                            GroupOption(
+                                label = resolver.displayName,
+                                detail = "${resolver.source} · ${resolver.description}",
+                                selected = selectedDns == resolver,
+                                startPadding = 15
+                            ) {
+                                selectedDns = resolver
+                                dnsOptionsOpen = false
+                            }
+                        }
                     }
                 }
+                if (selectedDns == DnsResolver.CUSTOM) {
+                    GroupDivider()
+                    GroupTextField(value = customDnsInput, onValueChange = { customDnsInput = it }, placeholder = "1.1.1.1,8.8.8.8", label = "Servers")
+                }
+            }
+            GroupFooter("Helps if your network blocks Telegram's addresses.")
+        }
 
-                if (showProxySection) {
-                    Spacer(Modifier.height(8.dp))
-                    Row(
-                        Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text("Enable Proxy", style = MaterialTheme.typography.bodySmall)
-                        Switch(checked = proxyEnabled, onCheckedChange = { proxyEnabled = it })
-                    }
-
-                    if (proxyEnabled) {
-                        Spacer(Modifier.height(8.dp))
-                        OutlinedTextField(
-                            value = proxyPasteInput,
-                            onValueChange = { proxyPasteInput = it },
-                            label = { Text("Paste Proxy Link (tg://proxy?...)") },
-                            singleLine = true,
-                            modifier = Modifier.fillMaxWidth(),
-                            trailingIcon = {
-                                IconButton(onClick = {
+        item("proxy") {
+            GroupHeader("MTProto Proxy")
+            GroupCard {
+                GroupRow(title = "Use Proxy", trailing = { GroupSwitch(proxyEnabled, { proxyEnabled = it }) })
+                if (proxyEnabled) {
+                    GroupDivider()
+                    GroupTextField(
+                        value = proxyPasteInput,
+                        onValueChange = { proxyPasteInput = it },
+                        placeholder = "Paste a t.me/proxy link",
+                        trailing = {
+                            Icon(
+                                Icons.Rounded.ContentPaste,
+                                contentDescription = "Fill from link or clipboard",
+                                tint = AppAccent,
+                                modifier = Modifier.size(22.dp).clickable {
                                     val clipText = clipboardManager.getText()?.text
                                     val textToParse = if (!clipText.isNullOrBlank()) clipText else proxyPasteInput
                                     val parsed = AppSettingsStore.parseTelegramProxyUrl(textToParse)
@@ -219,87 +134,62 @@ fun CredentialsScreen(onSaved: () -> Unit) {
                                         proxyServer = parsed.server
                                         proxyPortText = parsed.port.toString()
                                         proxySecret = parsed.secret
-                                        proxyMessage = "Auto-filled from proxy link!"
+                                        proxyMessage = "Filled in from the proxy link."
                                     } else {
-                                        proxyMessage = "Invalid proxy link format"
+                                        proxyMessage = "That isn't a valid Telegram proxy link."
                                     }
-                                }) {
-                                    Icon(Icons.Default.ContentPaste, contentDescription = "Auto-fill")
                                 }
-                            }
-                        )
-
-                        Spacer(Modifier.height(8.dp))
-                        OutlinedTextField(
-                            value = proxyServer,
-                            onValueChange = { proxyServer = it },
-                            label = { Text("Server IP/Host") },
-                            singleLine = true,
-                            modifier = Modifier.fillMaxWidth()
-                        )
-
-                        Spacer(Modifier.height(8.dp))
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            OutlinedTextField(
-                                value = proxyPortText,
-                                onValueChange = { proxyPortText = it.filter { c -> c.isDigit() } },
-                                label = { Text("Port") },
-                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                                singleLine = true,
-                                modifier = Modifier.weight(1f)
-                            )
-                            OutlinedTextField(
-                                value = proxySecret,
-                                onValueChange = { proxySecret = it },
-                                label = { Text("Secret") },
-                                singleLine = true,
-                                modifier = Modifier.weight(2f)
                             )
                         }
-                    }
+                    )
+                    GroupDivider()
+                    GroupTextField(value = proxyServer, onValueChange = { proxyServer = it }, placeholder = "Hostname or IP", label = "Server")
+                    GroupDivider()
+                    GroupTextField(
+                        value = proxyPortText,
+                        onValueChange = { proxyPortText = it.filter { c -> c.isDigit() } },
+                        placeholder = "443",
+                        label = "Port",
+                        keyboardType = KeyboardType.Number
+                    )
+                    GroupDivider()
+                    GroupTextField(value = proxySecret, onValueChange = { proxySecret = it }, placeholder = "Hex secret", label = "Secret")
+                }
+            }
+            GroupFooter(proxyMessage ?: "Optional - only needed if Telegram is blocked where you are.")
+        }
 
-                    proxyMessage?.let {
-                        Spacer(Modifier.height(4.dp))
-                        Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
+        item("continue") {
+            GroupHeader("")
+            GroupCard {
+                GroupActionRow("Continue") {
+                    val id = apiId.toIntOrNull()
+                    if (id == null || id == 0) {
+                        error = "Enter a valid API ID (numbers only)."
+                        return@GroupActionRow
+                    }
+                    if (apiHash.isBlank()) {
+                        error = "Enter your API hash."
+                        return@GroupActionRow
+                    }
+                    app.settingsStore.dnsResolver = selectedDns
+                    app.settingsStore.customDnsIps = customDnsInput
+                    val port = proxyPortText.toIntOrNull() ?: 443
+                    app.settingsStore.updateProxy(proxyEnabled, proxyServer, port, proxySecret)
+                    app.credentialsStore.save(id, apiHash)
+                    scope.launch {
+                        app.tdlibManager.start(
+                            apiId = id,
+                            apiHash = apiHash,
+                            initialProxy = app.settingsStore.proxySettings,
+                            dnsResolver = selectedDns,
+                            customDnsIps = customDnsInput
+                        )
+                        onSaved()
                     }
                 }
             }
-        }
-
-        error?.let {
-            Spacer(Modifier.height(8.dp))
-            Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
-        }
-
-        Spacer(Modifier.height(24.dp))
-
-        Button(
-            onClick = {
-                val id = apiId.toIntOrNull()
-                if (id == null || id == 0) { error = "Enter a valid api_id (numbers only)"; return@Button }
-                if (apiHash.isBlank()) { error = "Enter your api_hash"; return@Button }
-
-                app.settingsStore.dnsResolver = selectedDns
-                app.settingsStore.customDnsIps = customDnsInput
-
-                val port = proxyPortText.toIntOrNull() ?: 443
-                app.settingsStore.updateProxy(proxyEnabled, proxyServer, port, proxySecret)
-
-                app.credentialsStore.save(id, apiHash)
-                scope.launch {
-                    app.tdlibManager.start(
-                        apiId = id,
-                        apiHash = apiHash,
-                        initialProxy = app.settingsStore.proxySettings,
-                        dnsResolver = selectedDns,
-                        customDnsIps = customDnsInput
-                    )
-                    onSaved()
-                }
-            },
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Text("Continue")
+            error?.let { GroupFooter(it, color = DestructiveRed) }
         }
     }
 }

@@ -82,7 +82,7 @@ import coil.compose.AsyncImage
 import com.abn3li.telemusic.data.local.SongEntity
 import com.abn3li.telemusic.data.local.displayArtwork
 import com.abn3li.telemusic.playback.RepeatMode
-import com.abn3li.telemusic.ui.library.AccentGreen
+import com.abn3li.telemusic.ui.library.AppAccent
 import kotlinx.coroutines.launch
 import kotlin.math.abs
 
@@ -411,7 +411,7 @@ private fun QueueRow(
             }
         } else if (offset > 0f) {
             Box(
-                Modifier.align(Alignment.CenterStart).width(revealWidth).fillMaxHeight().background(AccentGreen),
+                Modifier.align(Alignment.CenterStart).width(revealWidth).fillMaxHeight().background(AppAccent),
                 contentAlignment = Alignment.Center
             ) {
                 Icon(

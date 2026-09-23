@@ -12,22 +12,6 @@ data class PlayerEffects(
     val animatedBackground: Boolean = true
 )
 
-/** The Library/detail/Settings screens' own visual style - see the Settings screen's
- * "Appearance" row. CLASSIC is the original flat dark-card look; AMBIENT_BLUR is the blurred
- * ambient-glow/frosted-glass one. */
-enum class AppearanceStyle { CLASSIC, AMBIENT_BLUR }
-
-/** Which 5-color blob palette AmbientBlurBackground draws when AppearanceStyle.AMBIENT_BLUR is
- * selected - see the Settings screen's "Ambient colors" row and AmbientBackground.kt's own
- * blobColorsFor(). Purely a display label + selection key; the actual Color values live in the
- * UI layer (AmbientBackground.kt), not here. */
-enum class AmbientColorSet(val label: String) {
-    SUNSET("Sunset"),
-    OCEAN("Ocean"),
-    FOREST("Forest"),
-    BERRY("Berry")
-}
-
 enum class DnsResolver(
     val displayName: String,
     val source: String,
@@ -157,20 +141,6 @@ class AppSettingsStore(context: Context) {
         get() = prefs.getBoolean(KEY_HIDE_DOWNLOADED, false)
         set(value) = prefs.edit().putBoolean(KEY_HIDE_DOWNLOADED, value).apply()
 
-    var appearanceStyle: AppearanceStyle
-        get() {
-            val name = prefs.getString(KEY_APPEARANCE_STYLE, AppearanceStyle.CLASSIC.name) ?: AppearanceStyle.CLASSIC.name
-            return runCatching { AppearanceStyle.valueOf(name) }.getOrDefault(AppearanceStyle.CLASSIC)
-        }
-        set(value) = prefs.edit().putString(KEY_APPEARANCE_STYLE, value.name).apply()
-
-    var ambientColorSet: AmbientColorSet
-        get() {
-            val name = prefs.getString(KEY_AMBIENT_COLOR_SET, AmbientColorSet.SUNSET.name) ?: AmbientColorSet.SUNSET.name
-            return runCatching { AmbientColorSet.valueOf(name) }.getOrDefault(AmbientColorSet.SUNSET)
-        }
-        set(value) = prefs.edit().putString(KEY_AMBIENT_COLOR_SET, value.name).apply()
-
     // A flow rather than plain getters: the player is mounted once at the nav root and has to
     // react the moment one of these is flipped in Settings.
     private val _playerEffects = MutableStateFlow(
@@ -209,8 +179,6 @@ class AppSettingsStore(context: Context) {
         private const val KEY_HIDE_LIKED = "hide_liked_from_tracks"
         private const val KEY_HIDE_TELEGRAM = "hide_telegram_from_tracks"
         private const val KEY_HIDE_DOWNLOADED = "hide_downloaded_from_tracks"
-        private const val KEY_APPEARANCE_STYLE = "appearance_style"
-        private const val KEY_AMBIENT_COLOR_SET = "ambient_color_set"
         const val UNLIMITED = -1L
         const val DEFAULT_CACHE_LIMIT = 2L * 1024 * 1024 * 1024 // 2GB
 

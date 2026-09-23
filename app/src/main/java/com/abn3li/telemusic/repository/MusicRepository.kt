@@ -71,7 +71,7 @@ class MusicRepository(
     // Live mirrors of the three smart playlists' own "Hide from tracks" flags (see
     // AppSettingsStore's own doc - they're settings, not DB rows, so they need their own
     // reactive holder here) - this repository is a single app-wide instance, so a toggle made
-    // from a Smart Playlist detail screen is immediately visible to the Tracks tab's own
+    // from a Smart Playlist detail screen is immediately visible to the Songs page's own
     // LibraryViewModel instance without either one needing to know about the other directly.
     private val _hideLiked = MutableStateFlow(settingsStore.hideLikedFromTracks)
     private val _hideTelegram = MutableStateFlow(settingsStore.hideTelegramFromTracks)
@@ -84,25 +84,6 @@ class MusicRepository(
     fun setHideLikedFromTracks(hidden: Boolean) { settingsStore.hideLikedFromTracks = hidden; _hideLiked.value = hidden }
     fun setHideTelegramFromTracks(hidden: Boolean) { settingsStore.hideTelegramFromTracks = hidden; _hideTelegram.value = hidden }
     fun setHideDownloadedFromTracks(hidden: Boolean) { settingsStore.hideDownloadedFromTracks = hidden; _hideDownloaded.value = hidden }
-
-    // Same reactive-mirror-of-a-setting pattern as the hide-from-tracks flags above - the
-    // Settings screen's "Appearance" row writes here, and every screen reading
-    // rememberAppearanceStyle() (Library, detail screens, Settings itself) picks it up live.
-    private val _appearanceStyle = MutableStateFlow(settingsStore.appearanceStyle)
-    fun observeAppearanceStyle(): StateFlow<com.abn3li.telemusic.data.settings.AppearanceStyle> = _appearanceStyle
-    fun setAppearanceStyle(style: com.abn3li.telemusic.data.settings.AppearanceStyle) {
-        settingsStore.appearanceStyle = style
-        _appearanceStyle.value = style
-    }
-
-    // Same pattern - which blob palette AmbientBlurBackground draws (see AmbientBackground.kt's
-    // blobColorsFor()) when AMBIENT_BLUR is the selected appearance.
-    private val _ambientColorSet = MutableStateFlow(settingsStore.ambientColorSet)
-    fun observeAmbientColorSet(): StateFlow<com.abn3li.telemusic.data.settings.AmbientColorSet> = _ambientColorSet
-    fun setAmbientColorSet(set: com.abn3li.telemusic.data.settings.AmbientColorSet) {
-        settingsStore.ambientColorSet = set
-        _ambientColorSet.value = set
-    }
 
     /** Best-effort copy of [source] into the user's chosen shared-storage download folder, if
      * they've picked one (AppSettingsStore.downloadFolderUri) - a no-op (returns null) otherwise,
@@ -739,20 +720,55 @@ class MusicRepository(
      * enforceCacheLimit() has no way to know about until each one finishes. */
     suspend fun cancelStreamingDownload(fileId: Int) = tdlibManager.cancelDownload(fileId)
 
-    /** Deletes all auto-cached streaming audio files from disk and resets localFilePath in DB. */
-    suspend fun clearStreamingCache(): Int {
-        val autoCached = songDao.getAutoCachedSongsOldestFirst()
+    /** What a cache wipe removed: fully cached songs, and half-streamed leftover files. */
+    data class CacheClearResult(val cachedSongs: Int, val partialFiles: Int, val freedBytes: Long)
+
+    /**
+     * Deletes every auto-cached song file (explicit downloads and local imports are never
+     * touched) AND every partially streamed file TDLib left behind, so the cache really ends
+     * up empty. [keepSongId] - the song playing right now - keeps its file, as does whatever
+     * TDLib is still streaming, so playback isn't cut off mid-song.
+     */
+    suspend fun clearStreamingCache(keepSongId: Long? = null): CacheClearResult {
         var count = 0
-        for (song in autoCached) {
-            val path = song.localFilePath
-            if (path != null) {
-                val file = File(path)
-                if (file.exists()) file.delete()
-                songDao.update(song.copy(localFilePath = null))
-                count++
+        var freed = 0L
+        for (song in songDao.getAutoCachedSongsOldestFirst()) {
+            if (song.telegramMessageId == keepSongId) continue
+            val path = song.localFilePath ?: continue
+            val file = File(path)
+            if (file.exists()) {
+                freed += file.length()
+                file.delete()
+            }
+            songDao.update(song.copy(localFilePath = null))
+            count++
+        }
+        val (partial, partialBytes) = purgePartialAudioFiles()
+        return CacheClearResult(count, partial, freed + partialBytes)
+    }
+
+    /**
+     * Removes files in TDLib's music folder that no song points at - songs streamed only part
+     * way, then skipped. Keeps anything a song row references and anything being streamed right
+     * now. Returns (files deleted, bytes freed).
+     */
+    private suspend fun purgePartialAudioFiles(): Pair<Int, Long> {
+        val files = File(appContext.filesDir, "tdlib/music").listFiles() ?: return 0 to 0L
+        val keep = songDao.getAllReferencedLocalFilePaths()
+            .mapNotNullTo(HashSet()) { runCatching { File(it).canonicalPath }.getOrNull() }
+        keep += tdlibManager.activeDownloadPaths()
+        var deleted = 0
+        var freed = 0L
+        for (file in files) {
+            val canonical = runCatching { file.canonicalPath }.getOrNull() ?: continue
+            if (canonical in keep) continue
+            val size = file.length()
+            if (file.delete()) {
+                deleted++
+                freed += size
             }
         }
-        return count
+        return deleted to freed
     }
 
     /** Deletes EVERY song - Telegram-synced, YouTube-downloaded, and local imports alike - plus
@@ -771,6 +787,9 @@ class MusicRepository(
             playlistDao.delete(pl.id)
         }
         settingsStore.lastSyncedChatId = 0L
+        // Every row is gone, so any file still in TDLib's music folder is a half-streamed
+        // leftover - wipe those too for a truly fresh start.
+        purgePartialAudioFiles()
     }
 
     suspend fun stampLastPlayed(song: SongEntity) = songDao.stampLastPlayed(song.telegramMessageId, System.currentTimeMillis())
