@@ -252,10 +252,9 @@ private fun LibraryTitleBar(
     actions: (@Composable RowScope.() -> Unit)?,
     modifier: Modifier = Modifier
 ) {
-    Box(modifier.fillMaxWidth().height(LibraryBarHeight)) {
-        AnimatedVisibility(showSmallTitle, enter = fadeIn(tween(120)), exit = fadeOut(tween(120))) {
-            Spacer(Modifier.fillMaxSize().background(Color.Black))
-        }
+    // Always opaque: the page is black anyway, and fading this in only once the large title had
+    // scrolled away let rows flash through the bar for a few frames on a fast fling.
+    Box(modifier.fillMaxWidth().height(LibraryBarHeight).background(Color.Black)) {
         if (onBack != null) {
             Icon(
                 Icons.AutoMirrored.Rounded.ArrowBackIos,
@@ -417,12 +416,16 @@ internal fun PlayShuffleButtons(
 @Composable
 private fun TopActionButton(icon: ImageVector, label: String, enabled: Boolean, onClick: () -> Unit, modifier: Modifier) {
     val haptics = LocalHapticFeedback.current
+    val shape = RoundedCornerShape(10.dp)
+    // The card is painted straight onto the row (no clip/alpha layers) and "disabled" dims only the
+    // label: with layers, the card's background sometimes wasn't redrawn when the songs arrived a
+    // moment after the page opened, leaving just the pink label until the list was scrolled.
+    val tint = if (enabled) AppAccent else AppAccent.copy(alpha = 0.45f)
     Row(
         modifier
             .height(44.dp)
-            .clip(RoundedCornerShape(10.dp))
-            .background(LibraryFieldColor)
-            .alpha(if (enabled) 1f else 0.45f)
+            .background(LibraryFieldColor, shape)
+            .clip(shape)
             .clickable(enabled = enabled) {
                 haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                 onClick()
@@ -430,9 +433,9 @@ private fun TopActionButton(icon: ImageVector, label: String, enabled: Boolean, 
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.Center
     ) {
-        Icon(icon, contentDescription = null, tint = AppAccent, modifier = Modifier.size(22.dp))
+        Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(22.dp))
         Spacer(Modifier.width(5.dp))
-        Text(label, color = AppAccent, fontSize = 17.sp, fontWeight = FontWeight.Medium)
+        Text(label, color = tint, fontSize = 17.sp, fontWeight = FontWeight.Medium)
     }
 }
 
