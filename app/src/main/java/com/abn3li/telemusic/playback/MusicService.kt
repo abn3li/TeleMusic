@@ -4,7 +4,6 @@ import android.app.PendingIntent
 import android.content.Intent
 import android.util.Log
 import androidx.annotation.OptIn
-import androidx.core.net.toUri
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
@@ -29,7 +28,6 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import java.io.File
 
 class MusicService : MediaLibraryService() {
     // MediaLibrarySession (not a plain MediaSession) is what makes this service browsable by

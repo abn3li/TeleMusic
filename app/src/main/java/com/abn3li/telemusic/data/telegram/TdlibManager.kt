@@ -133,19 +133,6 @@ class TdlibManager(private val context: Context) {
         client?.send(TdApi.SetOption("online", TdApi.OptionValueBoolean(true))) { }
     }
 
-    /**
-     * Forces TDLib to reconnect to Telegram servers immediately and re-apply proxy & DNS settings if enabled.
-     */
-    fun reconnect(latestProxy: ProxySettings? = null, dnsResolver: DnsResolver? = null, customDns: String = "") {
-        val proxy = latestProxy ?: initialProxySettings
-        val dns = dnsResolver ?: initialDnsResolver
-        val cDns = if (dnsResolver != null) customDns else initialCustomDnsIps
-
-        applyDns(dns, cDns)
-        applyProxySettings(proxy)
-        client?.send(TdApi.SetOption("online", TdApi.OptionValueBoolean(true))) { }
-    }
-
     private fun handleUpdate(update: TdApi.Object) {
         when (update) {
             is TdApi.UpdateAuthorizationState -> handleAuthState(update.authorizationState)

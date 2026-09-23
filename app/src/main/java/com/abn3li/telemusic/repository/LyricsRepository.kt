@@ -1,5 +1,6 @@
 package com.abn3li.telemusic.repository
 
+import okhttp3.HttpUrl.Companion.toHttpUrl
 import android.net.Uri
 import android.util.Base64
 import android.util.Log
@@ -10,7 +11,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.withContext
-import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.Request
 import kotlin.math.abs
 import kotlin.math.min

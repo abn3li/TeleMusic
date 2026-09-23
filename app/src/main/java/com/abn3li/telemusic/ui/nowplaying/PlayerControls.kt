@@ -81,7 +81,6 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
-import com.abn3li.telemusic.data.local.SongEntity
 import kotlin.math.roundToInt
 
 enum class PlayerPage { ARTWORK, LYRICS, QUEUE }
@@ -149,13 +148,12 @@ internal fun FlatSlider(
 }
 
 /**
- * Scrubber + elapsed/remaining times + the codec badge. Collects playbackProgress itself so only
+ * Scrubber + elapsed/remaining times. Collects playbackProgress itself so only
  * this block recomposes on the 300ms position tick, not the whole player.
  */
 @Composable
 internal fun PlayerScrubber(
     viewModel: NowPlayingViewModel,
-    song: SongEntity?,
     active: Boolean,
     onInteraction: () -> Unit,
     modifier: Modifier = Modifier
@@ -183,14 +181,6 @@ internal fun PlayerScrubber(
             },
             onInteraction = onInteraction
         )
-        val context = LocalContext.current
-        val badgeText = remember(song?.telegramMessageId, song?.localFilePath) {
-            if (song == null) "" else {
-                val (format, bitrate) = detectAudioFormat(context, song.localFilePath, song.durationSeconds)
-                val shortFormat = format.substringBefore(" ").substringBefore("(").trim()
-                if (bitrate.isBlank()) shortFormat else "$shortFormat · $bitrate"
-            }
-        }
         Row(Modifier.fillMaxWidth().padding(horizontal = 2.dp), verticalAlignment = Alignment.CenterVertically) {
             Text(
                 formatMs(shownPositionMs),
@@ -199,16 +189,6 @@ internal fun PlayerScrubber(
                 fontWeight = FontWeight.Medium,
                 letterSpacing = 0.3.sp,
                 modifier = Modifier.weight(1f)
-            )
-            Text(
-                badgeText,
-                color = Color.White.copy(alpha = 0.45f),
-                fontSize = 10.sp,
-                fontWeight = FontWeight.SemiBold,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                textAlign = TextAlign.Center,
-                modifier = Modifier.weight(1.4f)
             )
             Text(
                 "-${formatMs((durationMs - shownPositionMs).coerceAtLeast(0))}",

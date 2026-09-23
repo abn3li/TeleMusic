@@ -111,7 +111,6 @@ dependencies {
     implementation("androidx.navigation:navigation-compose:2.7.7")
     implementation("io.coil-kt:coil-compose:2.6.0")
 
-    implementation("androidx.palette:palette-ktx:1.0.0")
 
     implementation("androidx.security:security-crypto:1.1.0-alpha06")
 
@@ -129,7 +128,6 @@ dependencies {
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("com.squareup.okhttp3:logging-interceptor:4.12.0")
 
-    implementation("androidx.work:work-runtime-ktx:2.9.1")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
 
     // Prebuilt TDLib for Android - no NDK build needed. Check

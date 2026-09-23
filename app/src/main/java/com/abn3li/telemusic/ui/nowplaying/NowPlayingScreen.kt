@@ -368,7 +368,7 @@ private fun NowPlayingContent(
                             .padding(horizontal = 26.dp)
                             .padding(top = 6.dp, bottom = 12.dp)
                     ) {
-                        PlayerScrubber(viewModel = viewModel, song = state.song, active = playerVisible, onInteraction = onInteraction)
+                        PlayerScrubber(viewModel = viewModel, active = playerVisible, onInteraction = onInteraction)
                         TransportRow(
                             state = state,
                             onPrevious = { onInteraction(); viewModel.previousSong() },
