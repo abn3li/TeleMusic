@@ -30,6 +30,18 @@ private data class TrackVisibilityFilter(
     val hideDownloaded: Boolean
 )
 
+/** One tile in the Library page's Pinned grid - a real playlist or a smart one. */
+data class PinnedPlaylist(
+    val key: String,
+    val title: String,
+    val artworkUrl: String?,
+    val playlistId: Long?,
+    val smartKind: SmartPlaylistKind?
+)
+
+fun playlistPinKey(id: Long) = "p:$id"
+fun smartPinKey(kind: SmartPlaylistKind) = "s:${kind.name}"
+
 class LibraryViewModel(private val repository: MusicRepository) : ViewModel() {
     private val _sortField = MutableStateFlow(SortField.TITLE)
     val sortField: StateFlow<SortField> = _sortField
@@ -78,6 +90,30 @@ class LibraryViewModel(private val repository: MusicRepository) : ViewModel() {
         _showAlphabetIndex.value = show
     }
 
+    private val _pinnedKeys = MutableStateFlow(repository.pinnedPlaylists)
+    val pinnedKeys: StateFlow<List<String>> = _pinnedKeys
+
+    /** Pins resolved against the current playlists: pin order kept, pins of deleted playlists dropped. */
+    val pinnedPlaylists: StateFlow<List<PinnedPlaylist>> = combine(_pinnedKeys, repository.observePlaylistSummaries()) { keys, summaries ->
+        val byId = summaries.associateBy { it.id }
+        keys.mapNotNull { key ->
+            when {
+                key.startsWith("p:") -> key.removePrefix("p:").toLongOrNull()?.let(byId::get)
+                    ?.let { PinnedPlaylist(key, it.name, it.albumArtUrl, it.id, null) }
+                key.startsWith("s:") -> SmartPlaylistKind.entries.firstOrNull { it.name == key.removePrefix("s:") }
+                    ?.let { PinnedPlaylist(key, it.label, null, null, it) }
+                else -> null
+            }
+        }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    fun togglePin(key: String) {
+        val current = _pinnedKeys.value
+        val updated = if (key in current) current - key else current + key
+        repository.pinnedPlaylists = updated
+        _pinnedKeys.value = updated
+    }
+
     fun selectSortField(f: SortField) { _sortField.value = f }
     fun setAscending(ascending: Boolean) { _ascending.value = ascending }
     fun toggleFavorite(song: SongEntity) = viewModelScope.launch { repository.setFavorite(song, !song.isFavorite) }
@@ -86,7 +122,10 @@ class LibraryViewModel(private val repository: MusicRepository) : ViewModel() {
         val id = repository.createPlaylist(name); repository.addSongToPlaylist(id, song)
     }
     fun createPlaylist(name: String) = viewModelScope.launch { repository.createPlaylist(name) }
-    fun deletePlaylist(playlistId: Long) = viewModelScope.launch { repository.deletePlaylist(playlistId) }
+    fun deletePlaylist(playlistId: Long) = viewModelScope.launch {
+        if (playlistPinKey(playlistId) in _pinnedKeys.value) togglePin(playlistPinKey(playlistId))
+        repository.deletePlaylist(playlistId)
+    }
 
     /** The real, explicit download button - only this sets isExplicitDownload = true. */
     fun downloadSong(song: SongEntity) = viewModelScope.launch {

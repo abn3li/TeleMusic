@@ -792,6 +792,10 @@ class MusicRepository(
         purgePartialAudioFiles()
     }
 
+    var pinnedPlaylists: List<String>
+        get() = settingsStore.pinnedPlaylists
+        set(value) { settingsStore.pinnedPlaylists = value }
+
     var showSongIndex: Boolean
         get() = settingsStore.showSongIndex
         set(value) { settingsStore.showSongIndex = value }

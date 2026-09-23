@@ -192,11 +192,14 @@ fun TgMusicNavGraph(navController: NavHostController = rememberNavController()) 
                 }
                 composable(Routes.LIBRARY) {
                     LibraryHomeScreen(
+                        viewModel = libraryViewModel,
                         onOpenPlaylists = { navController.navigate(Routes.LIBRARY_PLAYLISTS) },
                         onOpenArtists = { navController.navigate(Routes.LIBRARY_ARTISTS) },
                         onOpenAlbums = { navController.navigate(Routes.LIBRARY_ALBUMS) },
                         onOpenSongs = { navController.navigate(Routes.LIBRARY_SONGS) },
-                        onOpenSettings = { navController.navigate(Routes.SETTINGS) }
+                        onOpenSettings = { navController.navigate(Routes.SETTINGS) },
+                        onOpenPlaylist = { id, name -> navController.navigate(Routes.playlist(id, name)) },
+                        onOpenSmartPlaylist = { kind -> navController.navigate(Routes.smartPlaylist(kind)) }
                     )
                 }
                 composable(Routes.LIBRARY_SONGS) {

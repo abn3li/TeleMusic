@@ -1,5 +1,14 @@
 package com.abn3li.telemusic.ui.library
 
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.material.icons.rounded.PushPin
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.snapshotFlow
@@ -105,12 +114,17 @@ private fun debounced(text: String): String {
 
 @Composable
 fun LibraryHomeScreen(
+    viewModel: LibraryViewModel,
     onOpenPlaylists: () -> Unit,
     onOpenArtists: () -> Unit,
     onOpenAlbums: () -> Unit,
     onOpenSongs: () -> Unit,
-    onOpenSettings: () -> Unit
+    onOpenSettings: () -> Unit,
+    onOpenPlaylist: (Long, String) -> Unit,
+    onOpenSmartPlaylist: (SmartPlaylistKind) -> Unit
 ) {
+    val pinned by viewModel.pinnedPlaylists.collectAsState()
+    val pinnedRows = remember(pinned) { pinned.chunked(2) }
     LargeTitleList(
         title = "Library",
         titleTrailing = {
@@ -135,6 +149,85 @@ fun LibraryHomeScreen(
                 LibraryLinkRow(Icons.Rounded.MusicNote, "Songs", onOpenSongs)
                 LibraryDivider(start = 60.dp)
             }
+        }
+        if (pinnedRows.isNotEmpty()) {
+            item("pinned_header") {
+                Text(
+                    "Pinned",
+                    color = Color.White,
+                    fontSize = 22.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(start = 20.dp, end = 20.dp, top = 26.dp, bottom = 12.dp)
+                )
+            }
+            items(pinnedRows, key = { row -> row.first().key }) { row ->
+                Row(
+                    Modifier.fillMaxWidth().padding(horizontal = 18.dp).padding(bottom = 18.dp),
+                    horizontalArrangement = Arrangement.spacedBy(18.dp)
+                ) {
+                    row.forEachIndexed { column, item ->
+                        PinnedTile(
+                            item = item,
+                            onLeft = column == 0,
+                            onOpen = {
+                                if (item.smartKind != null) onOpenSmartPlaylist(item.smartKind)
+                                else item.playlistId?.let { onOpenPlaylist(it, item.title) }
+                            },
+                            onUnpin = { viewModel.togglePin(item.key) },
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+                    if (row.size == 1) Spacer(Modifier.weight(1f))
+                }
+            }
+        }
+    }
+}
+
+/** One cover in the Library page's Pinned grid; long-press offers Unpin. */
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun PinnedTile(item: PinnedPlaylist, onLeft: Boolean, onOpen: () -> Unit, onUnpin: () -> Unit, modifier: Modifier = Modifier) {
+    val haptics = LocalHapticFeedback.current
+    var menuOpen by remember { mutableStateOf(false) }
+    var tileHeightPx by remember { mutableIntStateOf(0) }
+    val gapPx = with(LocalDensity.current) { 6.dp.roundToPx() }
+    Box(modifier.onSizeChanged { tileHeightPx = it.height }) {
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .combinedClickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null,
+                    onClick = onOpen,
+                    onLongClick = {
+                        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                        menuOpen = true
+                    }
+                )
+        ) {
+            if (item.smartKind != null) {
+                Box(
+                    Modifier.fillMaxWidth().aspectRatio(1f).clip(RoundedCornerShape(7.dp)).background(LibraryTileColor),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(item.smartKind.icon(), contentDescription = null, tint = AppAccent, modifier = Modifier.fillMaxSize(0.42f))
+                }
+            } else {
+                CoverTile(item.artworkUrl, Modifier.fillMaxWidth().aspectRatio(1f), corner = 7, placeholder = Icons.AutoMirrored.Rounded.QueueMusic)
+            }
+            Spacer(Modifier.height(5.dp))
+            Text(item.title, color = Color.White.copy(alpha = 0.9f), fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text("Playlist", color = Color.White.copy(alpha = 0.6f), fontSize = 13.sp, lineHeight = 17.sp, maxLines = 1)
+        }
+        // Opens just under the tile, growing toward the screen's middle so it never runs off an edge.
+        LibraryFloatingMenu(
+            expanded = menuOpen,
+            onDismiss = { menuOpen = false },
+            alignStart = onLeft,
+            offsetYPx = tileHeightPx + gapPx
+        ) {
+            LibraryMenuItem("Unpin", Icons.Rounded.PushPin) { menuOpen = false; onUnpin() }
         }
     }
 }

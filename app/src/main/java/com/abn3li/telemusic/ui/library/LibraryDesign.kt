@@ -447,6 +447,10 @@ private fun TopActionButton(icon: ImageVector, label: String, enabled: Boolean, 
 internal fun LibraryFloatingMenu(
     expanded: Boolean,
     onDismiss: () -> Unit,
+    // Grow from the anchor's left edge instead of its right (for anchors on the left of the screen),
+    // and an optional vertical offset in px (defaults to just under a title-bar button).
+    alignStart: Boolean = false,
+    offsetYPx: Int? = null,
     content: @Composable ColumnScope.() -> Unit
 ) {
     var keep by remember { mutableStateOf(false) }
@@ -463,9 +467,10 @@ internal fun LibraryFloatingMenu(
         }
     }
     if (!keep) return
-    val offsetY = with(LocalDensity.current) { 40.dp.roundToPx() }
+    val offsetY = offsetYPx ?: with(LocalDensity.current) { 40.dp.roundToPx() }
+    val origin = TransformOrigin(if (alignStart) 0.05f else 0.95f, 0f)
     Popup(
-        alignment = Alignment.TopEnd,
+        alignment = if (alignStart) Alignment.TopStart else Alignment.TopEnd,
         offset = IntOffset(0, offsetY),
         onDismissRequest = onDismiss,
         properties = PopupProperties(focusable = true)
@@ -473,8 +478,8 @@ internal fun LibraryFloatingMenu(
         val spec = spring<Float>(dampingRatio = 0.7f, stiffness = 340f)
         AnimatedVisibility(
             visible = show,
-            enter = fadeIn(spec) + scaleIn(spec, initialScale = 0.618f, transformOrigin = TransformOrigin(0.95f, 0f)),
-            exit = fadeOut(spec) + scaleOut(spec, targetScale = 0.618f, transformOrigin = TransformOrigin(0.95f, 0f))
+            enter = fadeIn(spec) + scaleIn(spec, initialScale = 0.618f, transformOrigin = origin),
+            exit = fadeOut(spec) + scaleOut(spec, targetScale = 0.618f, transformOrigin = origin)
         ) {
             Column(
                 Modifier

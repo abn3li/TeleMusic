@@ -137,6 +137,12 @@ class AppSettingsStore(context: Context) {
         get() = prefs.getBoolean(KEY_HIDE_TELEGRAM, false)
         set(value) = prefs.edit().putBoolean(KEY_HIDE_TELEGRAM, value).apply()
 
+    /** Playlists pinned to the Library page, in pin order: "p:<id>" for a playlist, "s:<KIND>"
+     * for a smart playlist (Liked/Telegram/Downloaded). */
+    var pinnedPlaylists: List<String>
+        get() = prefs.getString(KEY_PINNED_PLAYLISTS, "").orEmpty().split(',').filter { it.isNotBlank() }
+        set(value) = prefs.edit().putString(KEY_PINNED_PLAYLISTS, value.joinToString(",")).apply()
+
     /** Songs page's A–Z index strip, toggled from its ••• menu. Off by default. */
     var showSongIndex: Boolean
         get() = prefs.getBoolean(KEY_SHOW_SONG_INDEX, false)
@@ -185,6 +191,7 @@ class AppSettingsStore(context: Context) {
         private const val KEY_HIDE_TELEGRAM = "hide_telegram_from_tracks"
         private const val KEY_HIDE_DOWNLOADED = "hide_downloaded_from_tracks"
         private const val KEY_SHOW_SONG_INDEX = "show_song_index"
+        private const val KEY_PINNED_PLAYLISTS = "pinned_playlists"
         const val UNLIMITED = -1L
         const val DEFAULT_CACHE_LIMIT = 2L * 1024 * 1024 * 1024 // 2GB
 

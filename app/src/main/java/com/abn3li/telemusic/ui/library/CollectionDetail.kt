@@ -1,5 +1,7 @@
 package com.abn3li.telemusic.ui.library
 
+import androidx.compose.material.icons.outlined.PushPin
+import androidx.compose.material.icons.rounded.PushPin
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -232,6 +234,8 @@ fun PlaylistDetailScreen(playlistId: Long, playlistName: String, viewModel: Libr
         .collectAsState(initial = false)
     var confirmDelete by remember { mutableStateOf(false) }
     val list = songs.orEmpty()
+    val pinnedKeys by viewModel.pinnedKeys.collectAsState()
+    val pinned = playlistPinKey(playlistId) in pinnedKeys
 
     PlaylistLikePage(
         title = playlistName,
@@ -246,6 +250,8 @@ fun PlaylistDetailScreen(playlistId: Long, playlistName: String, viewModel: Libr
                 if (hidden) "Show in Songs" else "Hide from Songs",
                 if (hidden) Icons.Rounded.Visibility else Icons.Rounded.VisibilityOff
             ) { scope.launch { repository.setPlaylistHiddenFromTracks(playlistId, !hidden) }; close() }
+            LibraryMenuDivider()
+            PinMenuItem(pinned) { viewModel.togglePin(playlistPinKey(playlistId)); close() }
             LibraryMenuGroupGap()
             LibraryMenuItem("Delete Playlist", Icons.Rounded.Delete, destructive = true) { confirmDelete = true; close() }
         }
@@ -269,6 +275,15 @@ fun PlaylistDetailScreen(playlistId: Long, playlistName: String, viewModel: Libr
 }
 
 @Composable
+private fun PinMenuItem(pinned: Boolean, onClick: () -> Unit) {
+    LibraryMenuItem(
+        if (pinned) "Unpin from Library" else "Pin to Library",
+        if (pinned) Icons.Rounded.PushPin else Icons.Outlined.PushPin,
+        onClick = onClick
+    )
+}
+
+@Composable
 fun SmartPlaylistDetailScreen(kind: SmartPlaylistKind, viewModel: LibraryViewModel, callbacks: LibraryCallbacks) {
     val repository = (LocalContext.current.applicationContext as TgMusicApp).musicRepository
     val scope = rememberCoroutineScope()
@@ -287,6 +302,8 @@ fun SmartPlaylistDetailScreen(kind: SmartPlaylistKind, viewModel: LibraryViewMod
         }
     }.collectAsState()
     val list = songs.orEmpty()
+    val pinnedKeys by viewModel.pinnedKeys.collectAsState()
+    val pinned = smartPinKey(kind) in pinnedKeys
 
     PlaylistLikePage(
         title = kind.label,
@@ -310,6 +327,8 @@ fun SmartPlaylistDetailScreen(kind: SmartPlaylistKind, viewModel: LibraryViewMod
                 }
                 close()
             }
+            LibraryMenuDivider()
+            PinMenuItem(pinned) { viewModel.togglePin(smartPinKey(kind)); close() }
         }
     )
 }
