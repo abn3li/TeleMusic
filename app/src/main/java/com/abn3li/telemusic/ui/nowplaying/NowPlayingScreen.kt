@@ -456,7 +456,9 @@ private fun PlayerPageArea(
     onOpenOverflow: () -> Unit,
     onOpenManualSearch: () -> Unit,
     modifier: Modifier = Modifier
-) = BoxWithConstraints(modifier) {
+    // On the artwork page, a drag anywhere (not just on the cover/title) closes the player, like
+    // Apple Music. Lyrics and queue keep only the header, since their lists scroll.
+) = BoxWithConstraints(modifier.then(if (page == PlayerPage.ARTWORK) dismissDrag else Modifier)) {
     val context = LocalContext.current
     val haptics = LocalHapticFeedback.current
     val song = state.song

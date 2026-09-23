@@ -75,7 +75,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.LayoutCoordinates
-import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.onPlaced
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.platform.LocalContext
@@ -162,7 +162,7 @@ internal fun LibrarySongRow(
             .fillMaxWidth()
             .clipToBounds()
             .onSizeChanged { rowWidth = it.width }
-            .onGloballyPositioned { coordinates[0] = it }
+            .onPlaced { coordinates[0] = it }
     ) {
         if (swipe.value > 0f) {
             val progress = if (rowWidth > 0) swipe.value / rowWidth else 0f

@@ -1,0 +1,16 @@
+# Compile the app's own code and the UI stack ahead of time. A sideloaded APK otherwise runs
+# everything through the JIT until Android's idle maintenance compiles it, which made the first
+# frame of every screen and the first scroll of each list stutter (measured: YouTube scroll
+# 99th percentile 65ms JIT vs 14ms compiled).
+HSPLcom/abn3li/telemusic/**->**(**)**
+Lcom/abn3li/telemusic/**;
+HSPLandroidx/compose/**->**(**)**
+Landroidx/compose/**;
+HSPLandroidx/navigation/**->**(**)**
+Landroidx/navigation/**;
+HSPLandroidx/lifecycle/**->**(**)**
+Landroidx/lifecycle/**;
+HSPLcoil/**->**(**)**
+Lcoil/**;
+HSPLkotlinx/coroutines/**->**(**)**
+Lkotlinx/coroutines/**;

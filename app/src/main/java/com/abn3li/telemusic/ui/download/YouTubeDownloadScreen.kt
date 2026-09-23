@@ -128,7 +128,7 @@ fun YouTubeDownloadScreen(
             )
             state.isSearching -> item("searching") { CenteredSpinner() }
             state.results.isEmpty() -> item("no_results") { CenteredMessage(state.errorMessage ?: "No songs found") }
-            else -> itemsIndexed(state.results, key = { _, r -> r.videoId }) { index, result ->
+            else -> itemsIndexed(state.results, key = { _, r -> r.videoId }, contentType = { _, _ -> "track" }) { index, result ->
                 TrackResultRow(
                     title = result.title,
                     artist = result.artist,
@@ -216,7 +216,7 @@ private fun LazyListScope.discovery(
                 }
             }
             // Keyed by title + index: YouTube's feed can contain two shelves with the same title.
-            itemsIndexed(sections, key = { index, section -> "${section.title}_$index" }) { _, section ->
+            itemsIndexed(sections, key = { index, section -> "${section.title}_$index" }, contentType = { _, _ -> "shelf" }) { _, section ->
                 ShelfHeader(section.title)
                 LazyRow(horizontalArrangement = Arrangement.spacedBy(14.dp), contentPadding = PaddingValues(horizontal = 18.dp)) {
                     items(section.items, key = { it.browseId }) { card ->

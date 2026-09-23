@@ -425,7 +425,7 @@ private fun LazyListScope.chatPicker(
                         }
                     }
                 }
-                itemsIndexed(filteredChats, key = { _, chat -> chat.id }) { index, chat ->
+                itemsIndexed(filteredChats, key = { _, chat -> chat.id }, contentType = { _, _ -> "chat" }) { index, chat ->
                     val style = chatRowStyle(chat)
                     ChatCard(isFirst = index == 0 && savedMessages == null, isLast = index == filteredChats.lastIndex) {
                         if (index > 0 || savedMessages != null) GroupDivider(start = 62.dp)
