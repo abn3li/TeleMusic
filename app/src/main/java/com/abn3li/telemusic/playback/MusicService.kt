@@ -1,5 +1,6 @@
 package com.abn3li.telemusic.playback
 
+import kotlinx.coroutines.Job
 import android.app.PendingIntent
 import android.content.Intent
 import android.util.Log
@@ -75,8 +76,8 @@ class MusicService : MediaLibraryService() {
             player = player,
             queueHasNext = { app.playbackQueue.hasNext() },
             queueHasPrevious = { app.playbackQueue.hasPrevious() },
-            onSeekToNext = { serviceScope.launch { playAdjacentSong(app.playbackQueue.next()) } },
-            onSeekToPrevious = { serviceScope.launch { playAdjacentSong(app.playbackQueue.previous()) } }
+            onSeekToNext = { skipTo(app.playbackQueue.next()) },
+            onSeekToPrevious = { skipTo(app.playbackQueue.previous()) }
         )
 
         val sessionActivity = PendingIntent.getActivity(
@@ -95,11 +96,41 @@ class MusicService : MediaLibraryService() {
             .build()
     }
 
-    private suspend fun playAdjacentSong(songId: Long?) {
+    // Notification / headset / lock screen / Android Auto skips. One at a time: a newer skip
+    // cancels the previous one's resolve, so two quick taps can't finish out of order and leave
+    // the player on a different song than the queue.
+    private var skipJob: Job? = null
+    // Background "did this stream finish?" poll for the song a skip started - same auto-cache
+    // bookkeeping NowPlayingViewModel does for in-app plays, replaced on every skip.
+    private var cacheJob: Job? = null
+
+    private fun skipTo(songId: Long?) {
         if (songId == null) return
+        skipJob?.cancel()
+        skipJob = serviceScope.launch { playAdjacentSong(songId) }
+    }
+
+    private suspend fun playAdjacentSong(songId: Long) {
         val app = application as TgMusicApp
-        val song = withContext(Dispatchers.IO) { app.musicRepository.getSongById(songId) } ?: return
-        val uri = withContext(Dispatchers.IO) { app.musicRepository.resolvePlaybackUri(song) } ?: return
+        val repository = app.musicRepository
+
+        // Stop the old song and its background download right away, like the in-app path:
+        // otherwise every skipped-past stream kept downloading to completion, untracked.
+        val outgoingId = player.currentMediaItem?.mediaId?.toLongOrNull()
+        player.stop()
+        cacheJob?.cancel()
+        if (outgoingId != null && outgoingId != songId) {
+            val outgoing = withContext(Dispatchers.IO) { repository.getSongById(outgoingId) }
+            if (outgoing != null && !outgoing.isLocalImport && outgoing.youtubeVideoId == null &&
+                !outgoing.isExplicitDownload && outgoing.localFilePath == null && outgoing.telegramFileId != 0
+            ) {
+                serviceScope.launch(Dispatchers.IO) { repository.cancelStreamingDownload(outgoing.telegramFileId) }
+            }
+        }
+
+        val song = withContext(Dispatchers.IO) { repository.getSongById(songId) } ?: return
+        val uri = withContext(Dispatchers.IO) { repository.resolvePlaybackUri(song) } ?: return
+        if (app.playbackQueue.currentSongId() != songId) return
 
         val item = MediaItem.Builder()
             .setUri(uri)
@@ -116,7 +147,10 @@ class MusicService : MediaLibraryService() {
         player.prepare()
         player.play()
 
-        withContext(Dispatchers.IO) { app.musicRepository.stampLastPlayed(song) }
+        withContext(Dispatchers.IO) { repository.stampLastPlayed(song) }
+        if (!song.isLocalImport && song.youtubeVideoId == null && song.localFilePath == null) {
+            cacheJob = serviceScope.launch(Dispatchers.IO) { repository.markStreamedFileCached(song) }
+        }
     }
 
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaLibrarySession? = mediaSession

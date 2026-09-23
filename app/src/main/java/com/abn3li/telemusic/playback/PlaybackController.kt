@@ -20,9 +20,7 @@ class PlaybackController(context: Context) {
     private var controller: MediaController? = null
     private val appContext = context.applicationContext
     // Listeners registered before connect()'s async future has resolved - flushed onto the
-    // real controller the moment it's ready, rather than silently dropped. Registration only
-    // ever happens once per listener in practice (NowPlayingViewModel.init), so a plain list
-    // with no removal path is enough.
+    // real controller the moment it's ready, rather than silently dropped.
     private val pendingListeners = mutableListOf<Player.Listener>()
 
     // Bounded so a genuinely broken file can't retry forever - reset the moment playback
@@ -87,6 +85,11 @@ class PlaybackController(context: Context) {
      */
     fun addListener(listener: Player.Listener) {
         controller?.addListener(listener) ?: pendingListeners.add(listener)
+    }
+
+    fun removeListener(listener: Player.Listener) {
+        pendingListeners.remove(listener)
+        controller?.removeListener(listener)
     }
 
     fun playUri(uri: Uri, songId: Long, title: String, artist: String, artworkUrl: String?) {

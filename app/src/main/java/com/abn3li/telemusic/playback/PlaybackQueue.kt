@@ -174,9 +174,11 @@ class PlaybackQueue {
         return repeatMode
     }
 
-    fun next(): Long? {
+    /** [auto] is the end-of-song advance: only that one repeats the song under Repeat One. A
+     * Next the user asked for always moves on (wrapping around, like Repeat All). */
+    fun next(auto: Boolean = false): Long? {
         if (base.isEmpty()) return null
-        if (repeatMode == RepeatMode.ONE) return currentSongId()
+        if (auto && repeatMode == RepeatMode.ONE) return currentSongId()
         if (nextInQueue.isNotEmpty()) return advanceIntoNextInQueue()
         baseIndex = if (baseIndex + 1 < base.size) baseIndex + 1 else 0
         return base[baseIndex]
@@ -184,7 +186,6 @@ class PlaybackQueue {
 
     fun previous(): Long? {
         if (base.isEmpty()) return null
-        if (repeatMode == RepeatMode.ONE) return currentSongId()
         baseIndex = if (baseIndex - 1 >= 0) baseIndex - 1 else base.size - 1
         return base[baseIndex]
     }

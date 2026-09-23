@@ -489,7 +489,17 @@ class TdlibManager(private val context: Context) {
                 fileProgress[fileId] = file
                 file
             } else {
-                val file = sendSuspend(TdApi.GetFile(fileId)) as TdApi.File
+                var file = sendSuspend(TdApi.GetFile(fileId)) as TdApi.File
+                // Already requested this session, but TDLib is no longer fetching it: the
+                // download stalled/was cancelled, or its finished file was deleted since (cache
+                // limit, Clear Cache). Ask again - a GetFile alone would wait on bytes forever.
+                // A download that's still active is left alone (re-requesting it is what used to
+                // restart streams from byte 0).
+                val local = file.local
+                val fileGone = local.isDownloadingCompleted && (local.path.isNullOrBlank() || !java.io.File(local.path).exists())
+                if (fileGone || (!local.isDownloadingCompleted && !local.isDownloadingActive)) {
+                    file = sendSuspend(TdApi.DownloadFile(fileId, 32, 0, 0, false)) as TdApi.File
+                }
                 fileProgress[fileId] = file
                 file
             }
@@ -504,6 +514,13 @@ class TdlibManager(private val context: Context) {
     suspend fun activeDownloadPaths(): Set<String> = downloadsStarted.mapNotNullTo(HashSet()) { fileId ->
         val file = runCatching { sendSuspend(TdApi.GetFile(fileId)) as? TdApi.File }.getOrNull()
         file?.local?.path?.takeIf { it.isNotBlank() }?.let { runCatching { java.io.File(it).canonicalPath }.getOrNull() }
+    }
+
+    /** Called when this app deletes a finished cache file itself, so a later replay requests a
+     * fresh download instead of trusting what this session saw before. */
+    fun forgetDownload(fileId: Int) {
+        downloadsStarted.remove(fileId)
+        fileProgress.remove(fileId)
     }
 
     /** Non-suspending - safe to call from a playback/loading thread. */

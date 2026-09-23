@@ -741,6 +741,7 @@ class MusicRepository(
                 file.delete()
             }
             songDao.update(song.copy(localFilePath = null))
+            tdlibManager.forgetDownload(song.telegramFileId)
             count++
         }
         val (partial, partialBytes) = purgePartialAudioFiles()
@@ -907,6 +908,7 @@ class MusicRepository(
             val size = file.length()
             if (file.exists()) file.delete()
             songDao.update(song.copy(localFilePath = null))
+            tdlibManager.forgetDownload(song.telegramFileId)
             totalSize -= size
         }
     }

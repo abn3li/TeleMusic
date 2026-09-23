@@ -198,20 +198,11 @@ class NowPlayingViewModel(
         .map { list -> list.associateBy { it.telegramMessageId } }
         .stateIn(viewModelScope, SharingStarted.Eagerly, emptyMap())
 
-    init {
-        // A single persistent ticker for the life of this ViewModel (now app-session-scoped,
-        // constructed once at the nav root instead of per-screen) - just keeps
-        // position/duration/isPlaying/queue-flags in sync; song changes are always driven
-        // explicitly below, never detected passively here.
-        startPositionTicker()
-
-        // The system media notification's own next/previous buttons are handled entirely
-        // inside MusicService (via QueueAwareForwardingPlayer), independent of whether this
-        // ViewModel/the app's UI even exists - it advances the shared PlaybackQueue singleton
-        // and swaps the player's media item directly. Without this, using those buttons left
-        // this ViewModel's own displayed song/lyrics silently stale, still showing whatever was
-        // on screen before the notification was used.
-        playbackController.addListener(object : Player.Listener {
+    // A property (not an anonymous object in init) so onCleared() can unregister it:
+    // PlaybackController outlives this ViewModel, and a leftover listener from a cleared instance
+    // still reacted to a song ending - advancing the shared queue and stopping playback from a
+    // scope that could no longer start the next song.
+    private val playerListener = object : Player.Listener {
             override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
                 val songId = mediaItem?.mediaId?.toLongOrNull() ?: return
                 // Already showing this song - either nothing changed, or this transition is the
@@ -235,11 +226,26 @@ class NowPlayingViewModel(
                     // Avoid double-advancing: only advance if a new song isn't already loading
                     // and the queue hasn't already been advanced for this ended track.
                     if (_uiState.value.loadingSongId == null && (currentPlayingId == null || queueCurrentId == currentPlayingId)) {
-                        nextSong()
+                        autoAdvance()
                     }
                 }
             }
-        })
+    }
+
+    init {
+        // A single persistent ticker for the life of this ViewModel (now app-session-scoped,
+        // constructed once at the nav root instead of per-screen) - just keeps
+        // position/duration/isPlaying/queue-flags in sync; song changes are always driven
+        // explicitly below, never detected passively here.
+        startPositionTicker()
+
+        // The system media notification's own next/previous buttons are handled entirely
+        // inside MusicService (via QueueAwareForwardingPlayer), independent of whether this
+        // ViewModel/the app's UI even exists - it advances the shared PlaybackQueue singleton
+        // and swaps the player's media item directly. Without this, using those buttons left
+        // this ViewModel's own displayed song/lyrics silently stale, still showing whatever was
+        // on screen before the notification was used.
+        playbackController.addListener(playerListener)
 
         // This ViewModel instance may be brand new while a song is already playing on the
         // shared MediaSession - e.g. the process was killed after being cleared from recents
@@ -393,6 +399,13 @@ class NowPlayingViewModel(
         lyricsJob?.cancel()
         lyricsJob = null
         if (_uiState.value.isFetchingLyrics) _uiState.value = _uiState.value.copy(isFetchingLyrics = false)
+    }
+
+    /** The end-of-song advance: under Repeat One this replays the same song. */
+    private fun autoAdvance() {
+        val id = queue.next(auto = true) ?: return
+        loadCurrentQueuePosition(songIdOverride = id)
+        refreshQueue()
     }
 
     fun nextSong() {
@@ -690,6 +703,7 @@ class NowPlayingViewModel(
     }
 
     override fun onCleared() {
+        playbackController.removeListener(playerListener)
         tickerJob?.cancel()
         loadJob?.cancel()
         super.onCleared()

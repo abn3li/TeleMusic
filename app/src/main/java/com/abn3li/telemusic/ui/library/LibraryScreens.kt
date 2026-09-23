@@ -275,18 +275,21 @@ internal fun SongListPage(
     }
     // Latest song position the strip asked for. Collected through snapshotFlow, so a fast slide
     // that crosses several letters within one frame costs one jump (to the newest), not several.
-    var jumpTarget by remember { mutableIntStateOf(-1) }
+    // A fresh JumpRequest per tap (compared by identity), so tapping the same letter again after
+    // scrolling away still jumps - a plain Int state wouldn't change and snapshotFlow wouldn't emit.
+    var jumpRequest by remember { mutableStateOf<JumpRequest?>(null) }
     LaunchedEffect(listState) {
-        snapshotFlow { jumpTarget }.collect { target ->
+        snapshotFlow { jumpRequest }.collect { request ->
             // Items before the songs: large title, sticky search space, Play/Shuffle. The negative
             // offset leaves the song just below the sticky search bar in a single layout pass.
-            if (target >= 0) listState.scrollToItem(SONG_LIST_HEADER_ITEMS + target, -stickyPx.toInt())
+            if (request != null) listState.scrollToItem(SONG_LIST_HEADER_ITEMS + request.index, -stickyPx.toInt())
         }
     }
     fun jumpTo(letter: String) {
         // A letter with no songs lands on the next one that has some (then the previous), like iOS.
         val at = barLetters.indexOf(letter)
-        jumpTarget = (barLetters.drop(at) + barLetters.take(at).reversed()).firstNotNullOfOrNull { firstIndexOf[it] } ?: return
+        val index = (barLetters.drop(at) + barLetters.take(at).reversed()).firstNotNullOfOrNull { firstIndexOf[it] } ?: return
+        jumpRequest = JumpRequest(index)
     }
 
     LargeTitleList(
@@ -341,6 +344,8 @@ internal fun SongListPage(
 }
 
 private const val SONG_LIST_HEADER_ITEMS = 3
+
+private class JumpRequest(val index: Int)
 
 @Composable
 fun LibrarySongsScreen(
