@@ -18,9 +18,9 @@
 </p>
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/abn3li/TeleMusic/master/assets/screenshot-library.png" alt="Library screen" width="30%">
-  <img src="https://raw.githubusercontent.com/abn3li/TeleMusic/master/assets/screenshot-lyrics.png" alt="Lyrics screen" width="30%">
-  <img src="https://raw.githubusercontent.com/abn3li/TeleMusic/master/assets/screenshot-library-2.png" alt="Library screen (status bar)" width="30%">
+  <img src="https://raw.githubusercontent.com/abn3li/TeleMusic/master/assets/screenshot-library.jpg" alt="Library" width="30%">
+  <img src="https://raw.githubusercontent.com/abn3li/TeleMusic/master/assets/screenshot-now-playing.jpg" alt="Now Playing" width="30%">
+  <img src="https://raw.githubusercontent.com/abn3li/TeleMusic/master/assets/screenshot-lyrics.jpg" alt="Lyrics" width="30%">
 </p>
 
 ---
