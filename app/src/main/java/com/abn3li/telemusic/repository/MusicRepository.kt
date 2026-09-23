@@ -792,6 +792,10 @@ class MusicRepository(
         purgePartialAudioFiles()
     }
 
+    var showSongIndex: Boolean
+        get() = settingsStore.showSongIndex
+        set(value) { settingsStore.showSongIndex = value }
+
     suspend fun stampLastPlayed(song: SongEntity) = songDao.stampLastPlayed(song.telegramMessageId, System.currentTimeMillis())
 
     suspend fun getFreshFileIdForSong(song: SongEntity): Int {

@@ -12,6 +12,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
@@ -100,6 +101,7 @@ internal fun LargeTitleList(
     titleTrailing: (@Composable () -> Unit)? = null,
     barActions: (@Composable RowScope.() -> Unit)? = null,
     stickyContent: (@Composable () -> Unit)? = null,
+    overlay: (@Composable BoxScope.() -> Unit)? = null,
     content: LazyListScope.() -> Unit
 ) {
     var barHeightPx by remember { mutableIntStateOf(0) }
@@ -142,6 +144,7 @@ internal fun LargeTitleList(
                     .background(Color.Black)
             ) { stickyContent() }
         }
+        overlay?.invoke(this)
         LibraryTitleBar(
             title = title,
             onBack = onBack,

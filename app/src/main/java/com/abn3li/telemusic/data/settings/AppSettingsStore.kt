@@ -137,6 +137,11 @@ class AppSettingsStore(context: Context) {
         get() = prefs.getBoolean(KEY_HIDE_TELEGRAM, false)
         set(value) = prefs.edit().putBoolean(KEY_HIDE_TELEGRAM, value).apply()
 
+    /** Songs page's A–Z index strip, toggled from its ••• menu. Off by default. */
+    var showSongIndex: Boolean
+        get() = prefs.getBoolean(KEY_SHOW_SONG_INDEX, false)
+        set(value) = prefs.edit().putBoolean(KEY_SHOW_SONG_INDEX, value).apply()
+
     var hideDownloadedFromTracks: Boolean
         get() = prefs.getBoolean(KEY_HIDE_DOWNLOADED, false)
         set(value) = prefs.edit().putBoolean(KEY_HIDE_DOWNLOADED, value).apply()
@@ -179,6 +184,7 @@ class AppSettingsStore(context: Context) {
         private const val KEY_HIDE_LIKED = "hide_liked_from_tracks"
         private const val KEY_HIDE_TELEGRAM = "hide_telegram_from_tracks"
         private const val KEY_HIDE_DOWNLOADED = "hide_downloaded_from_tracks"
+        private const val KEY_SHOW_SONG_INDEX = "show_song_index"
         const val UNLIMITED = -1L
         const val DEFAULT_CACHE_LIMIT = 2L * 1024 * 1024 * 1024 // 2GB
 

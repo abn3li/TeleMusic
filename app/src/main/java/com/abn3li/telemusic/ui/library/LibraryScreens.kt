@@ -1,5 +1,12 @@
 package com.abn3li.telemusic.ui.library
 
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.snapshotFlow
+import com.abn3li.telemusic.ui.nowplaying.LocalMiniPlayerInset
+import androidx.compose.material.icons.rounded.Check
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -144,7 +151,11 @@ internal fun SongListPage(
     onBack: () -> Unit,
     onPlay: (List<Long>, Int) -> Unit,
     onPlayCollection: (List<Long>, Boolean) -> Unit,
-    menu: (@Composable (close: () -> Unit) -> Unit)? = null
+    menu: (@Composable (close: () -> Unit) -> Unit)? = null,
+    // Set to show the A–Z strip: which text of a song it indexes (title/artist/album), and
+    // whether the list runs Z→A.
+    indexKey: ((SongEntity) -> String)? = null,
+    indexDescending: Boolean = false
 ) {
     var searchText by rememberSaveable { mutableStateOf("") }
     val query = debounced(searchText)
@@ -156,10 +167,50 @@ internal fun SongListPage(
     }
     val shownIds = remember(shown) { shown.map { it.telegramMessageId } }
     var menuOpen by remember { mutableStateOf(false) }
+    val listState = rememberLazyListState()
+    val stickyPx = with(LocalDensity.current) { SearchStickyHeight.toPx() }
+
+    // Letter -> position of the first song under it. One pass over the list, only redone when the
+    // list or sort changes - never while scrolling.
+    val indexActive = indexKey != null && query.isBlank() && shown.isNotEmpty()
+    val barLetters = remember(indexDescending) { if (indexDescending) IndexLetters.dropLast(1).reversed() + "#" else IndexLetters }
+    val firstIndexOf = remember(shown, indexKey) {
+        if (indexKey == null) emptyMap()
+        else HashMap<String, Int>().apply {
+            shown.forEachIndexed { i, song -> putIfAbsent(indexLetterOf(indexKey(song)), i) }
+        }
+    }
+    // Latest song position the strip asked for. Collected through snapshotFlow, so a fast slide
+    // that crosses several letters within one frame costs one jump (to the newest), not several.
+    var jumpTarget by remember { mutableIntStateOf(-1) }
+    LaunchedEffect(listState) {
+        snapshotFlow { jumpTarget }.collect { target ->
+            // Items before the songs: large title, sticky search space, Play/Shuffle. The negative
+            // offset leaves the song just below the sticky search bar in a single layout pass.
+            if (target >= 0) listState.scrollToItem(SONG_LIST_HEADER_ITEMS + target, -stickyPx.toInt())
+        }
+    }
+    fun jumpTo(letter: String) {
+        // A letter with no songs lands on the next one that has some (then the previous), like iOS.
+        val at = barLetters.indexOf(letter)
+        jumpTarget = (barLetters.drop(at) + barLetters.take(at).reversed()).firstNotNullOfOrNull { firstIndexOf[it] } ?: return
+    }
 
     LargeTitleList(
         title = title,
         onBack = onBack,
+        listState = listState,
+        overlay = if (!indexActive) null else {
+            {
+                AlphabetIndexBar(
+                    letters = barLetters,
+                    onLetter = ::jumpTo,
+                    modifier = Modifier
+                        .align(Alignment.CenterEnd)
+                        .padding(top = LibraryBarHeight + SearchStickyHeight + 8.dp, bottom = LocalMiniPlayerInset.current + 8.dp)
+                )
+            }
+        },
         barActions = if (menu == null) null else {
             {
                 Box {
@@ -196,6 +247,8 @@ internal fun SongListPage(
     }
 }
 
+private const val SONG_LIST_HEADER_ITEMS = 3
+
 @Composable
 fun LibrarySongsScreen(
     viewModel: LibraryViewModel,
@@ -209,7 +262,15 @@ fun LibrarySongsScreen(
     val songs by viewModel.tracks.collectAsState()
     val sortField by viewModel.sortField.collectAsState()
     val ascending by viewModel.ascending.collectAsState()
+    val showIndex by viewModel.showAlphabetIndex.collectAsState()
     val actions = rememberLibrarySongActions(viewModel, onPlayNext, onOpenArtist, onOpenAlbum)
+    // The strip follows the current sort; "Recently Added" has no letters to index.
+    val indexKey: ((SongEntity) -> String)? = if (!showIndex) null else when (sortField) {
+        SortField.TITLE -> { song -> song.title }
+        SortField.ARTIST -> { song -> song.artist }
+        SortField.ALBUM -> { song -> song.album.orEmpty() }
+        SortField.DATE_ADDED -> null
+    }
 
     SongListPage(
         title = "Songs",
@@ -218,6 +279,8 @@ fun LibrarySongsScreen(
         onBack = onBack,
         onPlay = onPlay,
         onPlayCollection = onPlayCollection,
+        indexKey = indexKey,
+        indexDescending = !ascending,
         menu = { close ->
             SortMenuItem("Title", Icons.Rounded.SortByAlpha, sortField == SortField.TITLE) { viewModel.selectSortField(SortField.TITLE); close() }
             LibraryMenuDivider()
@@ -230,6 +293,12 @@ fun LibrarySongsScreen(
             SortMenuItem("Ascending", Icons.Rounded.ArrowUpward, ascending) { viewModel.setAscending(true); close() }
             LibraryMenuDivider()
             SortMenuItem("Descending", Icons.Rounded.ArrowDownward, !ascending) { viewModel.setAscending(false); close() }
+            LibraryMenuGroupGap()
+            LibraryMenuItem(
+                label = "Alphabet Index",
+                icon = if (showIndex) Icons.Rounded.Check else null,
+                selected = showIndex
+            ) { viewModel.setShowAlphabetIndex(!showIndex); close() }
         }
     )
 }

@@ -71,6 +71,13 @@ class LibraryViewModel(private val repository: MusicRepository) : ViewModel() {
     val playlists: StateFlow<List<PlaylistEntity>> = repository.observePlaylists().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
     val playlistSummaries: StateFlow<List<PlaylistSummary>> = repository.observePlaylistSummaries().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
+    private val _showAlphabetIndex = MutableStateFlow(repository.showSongIndex)
+    val showAlphabetIndex: StateFlow<Boolean> = _showAlphabetIndex
+    fun setShowAlphabetIndex(show: Boolean) {
+        repository.showSongIndex = show
+        _showAlphabetIndex.value = show
+    }
+
     fun selectSortField(f: SortField) { _sortField.value = f }
     fun setAscending(ascending: Boolean) { _ascending.value = ascending }
     fun toggleFavorite(song: SongEntity) = viewModelScope.launch { repository.setFavorite(song, !song.isFavorite) }
