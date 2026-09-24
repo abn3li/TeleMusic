@@ -1,5 +1,6 @@
 package com.abn3li.telemusic.ui.download
 
+import com.abn3li.telemusic.repository.SpotifyImportState
 import androidx.compose.ui.text.input.KeyboardType
 import com.abn3li.telemusic.ui.library.AppAlert
 import com.abn3li.telemusic.ui.library.AlertAction
@@ -92,11 +93,20 @@ fun YouTubeDownloadScreen(
     // Back while showing results returns to Discovery first rather than leaving the screen.
     BackHandler(enabled = state.query.isNotBlank()) { viewModel.onQueryChange("") }
 
+    val spotifyState by app.spotifyImporter.state.collectAsState()
     if (showImportDialog) {
         ImportPlaylistDialog(
             errorMessage = state.importPlaylistError,
-            onDismiss = { showImportDialog = false; viewModel.clearImportPlaylistError() },
-            onImport = { url -> viewModel.importPlaylist(url) { success -> if (success) showImportDialog = false } }
+            spotifyState = spotifyState,
+            onDismiss = {
+                showImportDialog = false
+                viewModel.clearImportPlaylistError()
+                app.spotifyImporter.acknowledge()
+            },
+            onImport = { url ->
+                if (app.spotifyImporter.isSpotifyLink(url)) app.spotifyImporter.start(url)
+                else viewModel.importPlaylist(url) { success -> if (success) showImportDialog = false }
+            }
         )
     }
 
@@ -356,19 +366,42 @@ internal fun CenteredMessage(text: String) {
 
 
 /** Paste a YouTube playlist link to pin it in Discovery. */
+/** Paste a YouTube playlist link to pin it in Discovery, or a Spotify playlist/album link to
+ * import it into the Library as YouTube Music songs (progress shown here while it runs; closing
+ * the dialog doesn't stop it). */
 @Composable
-private fun ImportPlaylistDialog(errorMessage: String?, onDismiss: () -> Unit, onImport: (String) -> Unit) {
+private fun ImportPlaylistDialog(
+    errorMessage: String?,
+    spotifyState: SpotifyImportState,
+    onDismiss: () -> Unit,
+    onImport: (String) -> Unit
+) {
     var url by remember { mutableStateOf("") }
-    AppAlert(
-        title = "Import Playlist",
-        message = "Paste a YouTube or YouTube Music playlist link. It stays in Discovery until you remove it.",
-        onDismiss = onDismiss,
-        actions = listOf(
-            AlertAction("Cancel", onClick = onDismiss),
-            AlertAction("Import", bold = true, enabled = url.isNotBlank()) { onImport(url.trim()) }
+    when (spotifyState) {
+        is SpotifyImportState.Running -> AppAlert(
+            title = "Importing from Spotify",
+            message = "Matching \"${spotifyState.name}\" with YouTube Music: ${spotifyState.done} of ${spotifyState.total}. You can close this - it keeps going.",
+            onDismiss = onDismiss,
+            actions = listOf(AlertAction("Hide", bold = true, onClick = onDismiss))
         )
-    ) {
-        AlertTextField(url, { url = it }, "music.youtube.com/playlist?list=…", keyboardType = KeyboardType.Uri, isError = errorMessage != null)
-        errorMessage?.let { AlertNote(it, color = DestructiveRed) }
+        is SpotifyImportState.Finished -> AppAlert(
+            title = "Imported",
+            message = "Added ${spotifyState.matched} of ${spotifyState.total} songs to \"${spotifyState.name}\" in Library > Playlists." +
+                if (spotifyState.matched < spotifyState.total) " The rest couldn't be found on YouTube Music." else "",
+            onDismiss = onDismiss,
+            actions = listOf(AlertAction("Done", bold = true, onClick = onDismiss))
+        )
+        else -> AppAlert(
+            title = "Import Playlist",
+            message = "Paste a YouTube Music playlist link to add it to Discovery, or a Spotify playlist or album link to import its songs into your Library.",
+            onDismiss = onDismiss,
+            actions = listOf(
+                AlertAction("Cancel", onClick = onDismiss),
+                AlertAction("Import", bold = true, enabled = url.isNotBlank()) { onImport(url.trim()) }
+            )
+        ) {
+            AlertTextField(url, { url = it }, "YouTube Music or Spotify link", keyboardType = KeyboardType.Uri, isError = errorMessage != null || spotifyState is SpotifyImportState.Failed)
+            (errorMessage ?: (spotifyState as? SpotifyImportState.Failed)?.message)?.let { AlertNote(it, color = DestructiveRed) }
+        }
     }
 }

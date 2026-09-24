@@ -1,5 +1,7 @@
 package com.abn3li.telemusic.ui.navigation
 
+import com.abn3li.telemusic.ui.library.HomeScreen
+import androidx.compose.material.icons.filled.Home
 import com.abn3li.telemusic.ui.library.AlertAction
 import com.abn3li.telemusic.ui.library.AppAlert
 import android.content.Intent
@@ -24,7 +26,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.LibraryMusic
-import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Subscriptions
 import androidx.compose.material.icons.filled.Sync
 import androidx.compose.material3.Icon
@@ -87,6 +88,7 @@ private val LibraryRoutes = setOf(
 
 object Routes {
     const val CREDENTIALS = "credentials"
+    const val HOME = "home"
     const val LIBRARY = "library"
     const val LIBRARY_SONGS = "library/songs"
     const val LIBRARY_ALBUMS = "library/albums"
@@ -119,7 +121,7 @@ object Routes {
 @Composable
 fun TgMusicNavGraph(navController: NavHostController = rememberNavController()) {
     val app = LocalContext.current.applicationContext as TgMusicApp
-    val startDestination = if (app.credentialsStore.hasCredentials()) Routes.LIBRARY else Routes.CREDENTIALS
+    val startDestination = if (app.credentialsStore.hasCredentials()) Routes.HOME else Routes.CREDENTIALS
 
     // viewModel() (not remember{}) so this survives a config change (rotation) via the Activity's
     // own ViewModelStore - TgMusicNavGraph is composed directly in MainActivity's setContent, so
@@ -160,14 +162,14 @@ fun TgMusicNavGraph(navController: NavHostController = rememberNavController()) 
     // whether the user is signed in, so skip past it.
     LaunchedEffect(Unit) {
         if (navController.currentDestination?.route == Routes.CREDENTIALS && app.credentialsStore.hasCredentials()) {
-            navController.navigate(Routes.LIBRARY) { popUpTo(0) { inclusive = true } }
+            navController.navigate(Routes.HOME) { popUpTo(0) { inclusive = true } }
         }
     }
 
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = navBackStackEntry?.destination?.route
     val inLibrary = currentRoute in LibraryRoutes
-    val showBottomBar = inLibrary || currentRoute in listOf(Routes.YOUTUBE_DOWNLOAD, Routes.SYNC, Routes.SETTINGS)
+    val showBottomBar = inLibrary || currentRoute in listOf(Routes.HOME, Routes.YOUTUBE_DOWNLOAD, Routes.SYNC, Routes.SETTINGS)
 
     val miniPlayerBottomMargin = if (showBottomBar) NavBarHeight + 4.dp else 12.dp
     val miniPlayerInset = if (playerState.song != null) {
@@ -191,20 +193,27 @@ fun TgMusicNavGraph(navController: NavHostController = rememberNavController()) 
             ) {
                 composable(Routes.CREDENTIALS) {
                     CredentialsScreen(onSaved = {
-                        navController.navigate(Routes.LIBRARY) { popUpTo(Routes.CREDENTIALS) { inclusive = true } }
+                        navController.navigate(Routes.HOME) { popUpTo(Routes.CREDENTIALS) { inclusive = true } }
                         navController.navigate(Routes.SYNC)
                     })
                 }
+                composable(Routes.HOME) {
+                    HomeScreen(
+                        viewModel = libraryViewModel,
+                        callbacks = libraryCallbacks,
+                        onOpenSettings = { navController.navigate(Routes.SETTINGS) },
+                        onOpenPlaylist = { id, name -> navController.navigate(Routes.playlist(id, name)) },
+                        onOpenSmartPlaylist = { kind -> navController.navigate(Routes.smartPlaylist(kind)) },
+                        onOpenYouTubeCollection = { c -> navController.navigate(Routes.youtubeBrowse(c.browseId, c.title, c.params)) }
+                    )
+                }
                 composable(Routes.LIBRARY) {
                     LibraryHomeScreen(
-                        viewModel = libraryViewModel,
                         onOpenPlaylists = { navController.navigate(Routes.LIBRARY_PLAYLISTS) },
                         onOpenArtists = { navController.navigate(Routes.LIBRARY_ARTISTS) },
                         onOpenAlbums = { navController.navigate(Routes.LIBRARY_ALBUMS) },
                         onOpenSongs = { navController.navigate(Routes.LIBRARY_SONGS) },
-                        onOpenSettings = { navController.navigate(Routes.SETTINGS) },
-                        onOpenPlaylist = { id, name -> navController.navigate(Routes.playlist(id, name)) },
-                        onOpenSmartPlaylist = { kind -> navController.navigate(Routes.smartPlaylist(kind)) }
+                        onOpenSettings = { navController.navigate(Routes.SETTINGS) }
                     )
                 }
                 composable(Routes.LIBRARY_SONGS) {
@@ -289,12 +298,26 @@ fun TgMusicNavGraph(navController: NavHostController = rememberNavController()) 
             AppBottomNavBar(
                 currentRoute = if (inLibrary) Routes.LIBRARY else currentRoute,
                 onNavigate = { route ->
-                    if (route == Routes.LIBRARY && inLibrary) {
-                        // Library tapped while already inside it: back to the main Library page.
-                        navController.popBackStack(Routes.LIBRARY, inclusive = false)
-                    } else if (currentRoute != route) {
-                        navController.navigate(route) {
-                            popUpTo(Routes.LIBRARY) { saveState = true }
+                    when {
+                        // Home tapped: back to the Home page (a playlist/artist opened from Home
+                        // sits on top of it).
+                        route == Routes.HOME -> {
+                            if (!navController.popBackStack(Routes.HOME, inclusive = false)) {
+                                navController.navigate(Routes.HOME) { launchSingleTop = true }
+                            }
+                        }
+                        // Library tapped while inside a Library page: back to the main Library
+                        // page - or open it, when the page came from Home and Library isn't open.
+                        route == Routes.LIBRARY && inLibrary -> {
+                            if (!navController.popBackStack(Routes.LIBRARY, inclusive = false)) {
+                                navController.navigate(Routes.LIBRARY) {
+                                    popUpTo(Routes.HOME)
+                                    launchSingleTop = true
+                                }
+                            }
+                        }
+                        currentRoute != route -> navController.navigate(route) {
+                            popUpTo(Routes.HOME) { saveState = true }
                             launchSingleTop = true
                             restoreState = true
                         }
@@ -324,10 +347,10 @@ private fun AppBottomNavBar(
 ) {
     val items = remember {
         listOf(
+            NavigationItem(Routes.HOME, "Home", Icons.Default.Home),
             NavigationItem(Routes.LIBRARY, "Library", Icons.Default.LibraryMusic),
             NavigationItem(Routes.YOUTUBE_DOWNLOAD, "YouTube", Icons.Default.Subscriptions),
-            NavigationItem(Routes.SYNC, "Sync", Icons.Default.Sync),
-            NavigationItem(Routes.SETTINGS, "Settings", Icons.Default.Settings)
+            NavigationItem(Routes.SYNC, "Sync", Icons.Default.Sync)
         )
     }
 

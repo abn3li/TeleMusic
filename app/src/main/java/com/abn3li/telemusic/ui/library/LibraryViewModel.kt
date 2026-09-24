@@ -32,6 +32,16 @@ private data class TrackVisibilityFilter(
     val hideDownloaded: Boolean
 )
 
+/** Everything the Home tab shows from the library, worked out in one pass whenever the library
+ * changes (see [LibraryViewModel.home]). */
+data class HomeData(
+    val recentlyPlayed: List<SongEntity> = emptyList(),
+    val recentlyAdded: List<SongEntity> = emptyList(),
+    val dailyMix: List<SongEntity> = emptyList(),
+    val rediscover: List<SongEntity> = emptyList(),
+    val allIds: List<Long> = emptyList()
+)
+
 /** One tile in the Library page's Pinned grid - a real playlist or a smart one. */
 data class PinnedPlaylist(
     val key: String,
@@ -43,6 +53,8 @@ data class PinnedPlaylist(
 
 fun playlistPinKey(id: Long) = "p:$id"
 fun smartPinKey(kind: SmartPlaylistKind) = "s:${kind.name}"
+
+private const val DAY_MS = 24L * 60 * 60 * 1000
 
 class LibraryViewModel(private val repository: MusicRepository) : ViewModel() {
     private val _sortField = MutableStateFlow(SortField.TITLE)
@@ -79,6 +91,31 @@ class LibraryViewModel(private val repository: MusicRepository) : ViewModel() {
             }
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    /**
+     * The Home tab's library sections. Recomputed only when the library itself changes (a song
+     * added, played, liked...), off the main thread; nothing polls. The two mixes are shuffled with
+     * a per-day seed, so they stay the same all day and change the next.
+     */
+    val home: StateFlow<HomeData> = repository.observeLibrary(SortField.TITLE, true)
+        .map { songs ->
+            val day = System.currentTimeMillis() / DAY_MS
+            val played = songs.filter { it.lastPlayedAtMillis > 0 }.sortedByDescending { it.lastPlayedAtMillis }
+            val monthAgo = System.currentTimeMillis() - 30 * DAY_MS
+            val daily = (played.take(40) + songs.filter { it.isFavorite }).distinctBy { it.telegramMessageId }
+                .shuffled(java.util.Random(day)).take(50)
+            val rediscover = songs.filter { it.lastPlayedAtMillis in 1 until monthAgo || (it.lastPlayedAtMillis == 0L && it.isFavorite) }
+                .shuffled(java.util.Random(day + 1)).take(50)
+            HomeData(
+                recentlyPlayed = played.take(15),
+                recentlyAdded = songs.sortedByDescending { it.addedAtMillis }.take(15),
+                dailyMix = daily,
+                rediscover = rediscover,
+                allIds = songs.map { it.telegramMessageId }
+            )
+        }
+        .flowOn(kotlinx.coroutines.Dispatchers.Default)
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), HomeData())
 
     val albums: StateFlow<List<AlbumSummary>> = repository.observeAlbums().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
     val artists: StateFlow<List<ArtistSummary>> = repository.observeArtists().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())

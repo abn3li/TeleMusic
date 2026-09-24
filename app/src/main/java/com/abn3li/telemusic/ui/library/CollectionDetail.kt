@@ -306,7 +306,7 @@ fun PlaylistDetailScreen(playlistId: Long, playlistName: String, viewModel: Libr
 @Composable
 private fun PinMenuItem(pinned: Boolean, onClick: () -> Unit) {
     LibraryMenuItem(
-        if (pinned) "Unpin from Library" else "Pin to Library",
+        if (pinned) "Unpin from Home" else "Pin to Home",
         if (pinned) Icons.Rounded.PushPin else Icons.Outlined.PushPin,
         onClick = onClick
     )

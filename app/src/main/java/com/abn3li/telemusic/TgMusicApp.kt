@@ -27,6 +27,7 @@ import kotlinx.coroutines.withContext
 class TgMusicApp : Application(), ImageLoaderFactory {
     lateinit var tdlibManager: TdlibManager; private set
     lateinit var musicRepository: MusicRepository; private set
+    lateinit var spotifyImporter: com.abn3li.telemusic.repository.SpotifyImporter; private set
     lateinit var downloadGate: com.abn3li.telemusic.data.settings.DownloadLocationGate; private set
     lateinit var credentialsStore: TelegramCredentialsStore; private set
     lateinit var settingsStore: AppSettingsStore; private set
@@ -59,6 +60,7 @@ class TgMusicApp : Application(), ImageLoaderFactory {
             ytDlpRepository = ytDlpRepository,
             context = this
         )
+        spotifyImporter = com.abn3li.telemusic.repository.SpotifyImporter(musicRepository, appScope)
         if (credentialsStore.hasCredentials()) {
             tdlibManager.start(
                 apiId = credentialsStore.getApiId(),

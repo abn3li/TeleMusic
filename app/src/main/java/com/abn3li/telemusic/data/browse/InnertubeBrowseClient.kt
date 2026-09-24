@@ -41,6 +41,14 @@ class InnertubeBrowseClient {
     /** The next page of a browse response that had a [BrowseParser.findContinuationToken] -
      * same `/browse` endpoint, just a continuation token instead of a browseId (this is
      * Innertube's own convention for paging any shelf, not something specific to this client). */
+    /** YouTube Music search restricted to the "Songs" shelf (real audio tracks, not videos) -
+     * one request; each result's title / artist / duration / thumbnail is right in the response. */
+    fun searchSongs(query: String): JSONObject =
+        post("search", JSONObject().apply {
+            put("query", query)
+            put("params", SONGS_FILTER)
+        })
+
     fun browseContinuation(continuation: String): JSONObject =
         post("browse", JSONObject().apply { put("continuation", continuation) })
 
@@ -83,6 +91,8 @@ class InnertubeBrowseClient {
         // for that genre, same as any other browse card (see BrowseParser.parseGenreChips).
         const val GENRES_BROWSE_ID = "FEmusic_moods_and_genres"
         private const val CLIENT_VERSION = "1.20240101.01.00"
+        // YouTube Music's own "Songs" search filter.
+        private const val SONGS_FILTER = "EgWKAQIIAWoKEAkQBRAKEAMQBA%3D%3D"
         private const val FALLBACK_API_KEY = "AIzaSyC9XL3ZjWddXya6X74dJoCTL-WEYFDNX30"
     }
 }

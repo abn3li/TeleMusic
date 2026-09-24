@@ -117,17 +117,12 @@ private fun debounced(text: String): String {
 
 @Composable
 fun LibraryHomeScreen(
-    viewModel: LibraryViewModel,
     onOpenPlaylists: () -> Unit,
     onOpenArtists: () -> Unit,
     onOpenAlbums: () -> Unit,
     onOpenSongs: () -> Unit,
-    onOpenSettings: () -> Unit,
-    onOpenPlaylist: (Long, String) -> Unit,
-    onOpenSmartPlaylist: (SmartPlaylistKind) -> Unit
+    onOpenSettings: () -> Unit
 ) {
-    val pinned by viewModel.pinnedPlaylists.collectAsState()
-    val pinnedRows = remember(pinned) { pinned.chunked(2) }
     LargeTitleList(
         title = "Library",
         titleTrailing = {
@@ -153,44 +148,13 @@ fun LibraryHomeScreen(
                 LibraryDivider(start = 60.dp)
             }
         }
-        if (pinnedRows.isNotEmpty()) {
-            item("pinned_header") {
-                Text(
-                    "Pinned",
-                    color = Color.White,
-                    fontSize = 22.sp,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier.padding(start = 20.dp, end = 20.dp, top = 26.dp, bottom = 12.dp)
-                )
-            }
-            items(pinnedRows, key = { row -> row.first().key }) { row ->
-                Row(
-                    Modifier.fillMaxWidth().padding(horizontal = 18.dp).padding(bottom = 18.dp),
-                    horizontalArrangement = Arrangement.spacedBy(18.dp)
-                ) {
-                    row.forEachIndexed { column, item ->
-                        PinnedTile(
-                            item = item,
-                            onLeft = column == 0,
-                            onOpen = {
-                                if (item.smartKind != null) onOpenSmartPlaylist(item.smartKind)
-                                else item.playlistId?.let { onOpenPlaylist(it, item.title) }
-                            },
-                            onUnpin = { viewModel.togglePin(item.key) },
-                            modifier = Modifier.weight(1f)
-                        )
-                    }
-                    if (row.size == 1) Spacer(Modifier.weight(1f))
-                }
-            }
-        }
     }
 }
 
-/** One cover in the Library page's Pinned grid; long-press offers Unpin. */
+/** One cover in Home's Pinned grid; long-press offers Unpin. */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun PinnedTile(item: PinnedPlaylist, onLeft: Boolean, onOpen: () -> Unit, onUnpin: () -> Unit, modifier: Modifier = Modifier) {
+internal fun PinnedTile(item: PinnedPlaylist, onLeft: Boolean, onOpen: () -> Unit, onUnpin: () -> Unit, modifier: Modifier = Modifier) {
     val haptics = LocalHapticFeedback.current
     var menuOpen by remember { mutableStateOf(false) }
     var tileHeightPx by remember { mutableIntStateOf(0) }
