@@ -47,12 +47,17 @@ import androidx.compose.ui.unit.sp
 /** A–Z then "#" for anything that doesn't start with a Latin letter. */
 internal val IndexLetters: List<String> = ('A'..'Z').map { it.toString() } + "#"
 
-/** The index letter a title/artist/album files under: its first letter or digit, "#" if that
- * isn't A–Z (digits, symbols, non-Latin scripts) - same grouping as Apple Music. */
+/** The index letter a title/artist/album files under: its first character if that's A–Z, else
+ * "#" (digits, symbols like "[" or "(", non-Latin scripts). Uses the very first character, not
+ * the first letter, so it groups exactly like the list's own sort - "[Official] Song" sorts among
+ * the symbols at the top, so it must not count as "O". */
 internal fun indexLetterOf(text: String): String {
-    val c = text.firstOrNull { it.isLetterOrDigit() }?.uppercaseChar() ?: return "#"
+    val c = text.trimStart().firstOrNull()?.uppercaseChar() ?: return "#"
     return if (c in 'A'..'Z') c.toString() else "#"
 }
+
+/** One strip tap. Compared by identity, so tapping the same letter twice still jumps twice. */
+internal class JumpRequest(val index: Int)
 
 private val BubbleSize = 62.dp
 private val BubbleGap = 14.dp

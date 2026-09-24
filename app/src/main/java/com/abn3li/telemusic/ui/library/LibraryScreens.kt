@@ -345,8 +345,6 @@ internal fun SongListPage(
 
 private const val SONG_LIST_HEADER_ITEMS = 3
 
-private class JumpRequest(val index: Int)
-
 @Composable
 fun LibrarySongsScreen(
     viewModel: LibraryViewModel,

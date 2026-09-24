@@ -1,5 +1,14 @@
 package com.abn3li.telemusic.ui.library
 
+import androidx.compose.material.icons.rounded.Check
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.snapshotFlow
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.material.icons.outlined.PushPin
 import androidx.compose.material.icons.rounded.PushPin
 import androidx.activity.compose.BackHandler
@@ -243,6 +252,7 @@ fun PlaylistDetailScreen(playlistId: Long, playlistName: String, viewModel: Libr
         placeholder = Icons.AutoMirrored.Rounded.QueueMusic,
         viewModel = viewModel,
         callbacks = callbacks,
+        titleOrderByDefault = false,
         menu = { close ->
             LibraryMenuItem("Play Next", Icons.Rounded.QueuePlayNext) { list.forEach { callbacks.onPlayNext(it.telegramMessageId) }; close() }
             LibraryMenuDivider()
@@ -311,6 +321,7 @@ fun SmartPlaylistDetailScreen(kind: SmartPlaylistKind, viewModel: LibraryViewMod
         placeholder = kind.icon(),
         viewModel = viewModel,
         callbacks = callbacks,
+        titleOrderByDefault = true,
         menu = { close ->
             LibraryMenuItem("Play Next", Icons.Rounded.QueuePlayNext) { list.forEach { callbacks.onPlayNext(it.telegramMessageId) }; close() }
             LibraryMenuDivider()
@@ -333,6 +344,12 @@ fun SmartPlaylistDetailScreen(kind: SmartPlaylistKind, viewModel: LibraryViewMod
     )
 }
 
+/**
+ * A playlist's page. [songs] arrive in the playlist's own order - newest-added first for a real
+ * playlist, by title for the smart ones ([titleOrderByDefault]). The ••• menu can switch between
+ * Title and Recently Added, and turn on the A–Z strip (shared with the Songs page), which shows
+ * only while sorted by title.
+ */
 @Composable
 private fun PlaylistLikePage(
     title: String,
@@ -340,9 +357,19 @@ private fun PlaylistLikePage(
     placeholder: ImageVector,
     viewModel: LibraryViewModel,
     callbacks: LibraryCallbacks,
+    titleOrderByDefault: Boolean,
     menu: @Composable ColumnScope.(close: () -> Unit) -> Unit
 ) {
-    val list = songs.orEmpty()
+    val source = songs.orEmpty()
+    var byTitle by rememberSaveable { mutableStateOf(titleOrderByDefault) }
+    val list = remember(source, byTitle) {
+        when {
+            byTitle == titleOrderByDefault -> source
+            byTitle -> source.sortedWith(compareBy(String.CASE_INSENSITIVE_ORDER) { it.title })
+            else -> source.sortedByDescending { it.addedAtMillis }
+        }
+    }
+    val showIndex by viewModel.showAlphabetIndex.collectAsState()
     val actions = rememberLibrarySongActions(viewModel, callbacks.onPlayNext, callbacks.onOpenArtist, callbacks.onOpenAlbum)
     CollectionDetailPage(
         title = title,
@@ -353,7 +380,20 @@ private fun PlaylistLikePage(
         songs = list,
         loaded = songs != null,
         callbacks = callbacks,
-        menu = menu
+        indexKey = if (showIndex && byTitle) { song -> song.title } else null,
+        menu = { close ->
+            menu(close)
+            LibraryMenuGroupGap()
+            LibraryMenuItem("Title", Icons.Rounded.SortByAlpha, selected = byTitle) { byTitle = true; close() }
+            LibraryMenuDivider()
+            LibraryMenuItem("Recently Added", Icons.Rounded.Schedule, selected = !byTitle) { byTitle = false; close() }
+            LibraryMenuGroupGap()
+            LibraryMenuItem(
+                label = "Alphabet Index",
+                icon = if (showIndex) Icons.Rounded.Check else null,
+                selected = showIndex
+            ) { viewModel.setShowAlphabetIndex(!showIndex); close() }
+        }
     ) { shown, _ ->
         val ids = shown.map { it.telegramMessageId }
         itemsIndexed(shown, key = { _, s -> s.telegramMessageId }, contentType = { _, _ -> "song" }) { index, song ->
@@ -419,6 +459,8 @@ private fun CollectionDetailPage(
     favorite: Boolean? = null,
     onFavorite: () -> Unit = {},
     menu: (@Composable ColumnScope.(close: () -> Unit) -> Unit)? = null,
+    // Set to show the A–Z strip (only for a title-sorted list): which text of a song it indexes.
+    indexKey: ((SongEntity) -> String)? = null,
     body: LazyListScope.(shown: List<SongEntity>, searching: Boolean) -> Unit
 ) {
     val listState = rememberLazyListState()
@@ -452,6 +494,23 @@ private fun CollectionDetailPage(
         scope.launch { listState.scrollToItem(0) }
     }
     if (searching) BackHandler { closeSearch() }
+
+    // A–Z strip: letter -> first song under it, rebuilt only when the list changes.
+    var barHeightPx by remember { mutableIntStateOf(0) }
+    val indexActive = indexKey != null && !searching && shown.isNotEmpty()
+    val firstIndexOf = remember(shown, indexKey) {
+        if (indexKey == null) emptyMap()
+        else HashMap<String, Int>().apply { shown.forEachIndexed { i, song -> putIfAbsent(indexLetterOf(indexKey(song)), i) } }
+    }
+    var jumpRequest by remember { mutableStateOf<JumpRequest?>(null) }
+    LaunchedEffect(listState) {
+        // Conflated like the Songs page: a fast slide costs one jump per frame. Item 0 is the
+        // hero; the negative offset parks the song just under the solid top bar.
+        snapshotFlow { jumpRequest }.collect { request ->
+            if (request != null) listState.scrollToItem(1 + request.index, -barHeightPx)
+        }
+    }
+    val showStrip by remember { derivedStateOf { collapse >= 1f } }
 
     Box(Modifier.fillMaxSize().background(Color.Black)) {
         LazyColumn(state = listState, modifier = Modifier.fillMaxSize()) {
@@ -546,13 +605,38 @@ private fun CollectionDetailPage(
             item("bottom_inset") { Spacer(Modifier.height(LocalMiniPlayerInset.current + 24.dp)) }
         }
 
+        // Fades in once the cover has scrolled away, so it never sits on top of the artwork.
+        if (indexActive) {
+            AnimatedVisibility(
+                visible = showStrip,
+                enter = fadeIn(tween(150)),
+                exit = fadeOut(tween(150)),
+                modifier = Modifier
+                    .align(Alignment.CenterEnd)
+                    .padding(
+                        top = with(LocalDensity.current) { barHeightPx.toDp() } + 8.dp,
+                        bottom = LocalMiniPlayerInset.current + 8.dp
+                    )
+            ) {
+                AlphabetIndexBar(
+                    letters = IndexLetters,
+                    onLetter = { letter ->
+                        val at = IndexLetters.indexOf(letter)
+                        val index = (IndexLetters.drop(at) + IndexLetters.take(at).reversed()).firstNotNullOfOrNull { firstIndexOf[it] }
+                        if (index != null) jumpRequest = JumpRequest(index)
+                    }
+                )
+            }
+        }
+
         DetailTopBar(
             title = title,
             collapse = { collapse },
             onBack = if (searching) { { closeSearch(); Unit } } else callbacks.onBack,
             favorite = favorite,
             onFavorite = onFavorite,
-            menu = menu
+            menu = menu,
+            modifier = Modifier.onSizeChanged { barHeightPx = it.height }
         )
     }
 }
@@ -586,13 +670,14 @@ private fun DetailTopBar(
     onBack: () -> Unit,
     favorite: Boolean?,
     onFavorite: () -> Unit,
-    menu: (@Composable ColumnScope.(close: () -> Unit) -> Unit)?
+    menu: (@Composable ColumnScope.(close: () -> Unit) -> Unit)?,
+    modifier: Modifier = Modifier
 ) {
     val progress = collapse()
     val surface = lerp(Color.Black.copy(alpha = 0.34f), Color.White.copy(alpha = 0.08f), progress)
     var menuOpen by remember { mutableStateOf(false) }
     Box(
-        Modifier
+        modifier
             .fillMaxWidth()
             .background(Color.Black.copy(alpha = progress * 0.96f))
             .padding(horizontal = 16.dp, vertical = 10.dp)
