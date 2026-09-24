@@ -2,6 +2,7 @@ package com.abn3li.telemusic.playback
 
 import android.net.Uri
 import android.util.Base64
+import android.util.Log
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import androidx.media3.session.LibraryResult
@@ -30,6 +31,7 @@ private const val ALL_TRACKS = "all_tracks"
 private const val PLAYLIST_PREFIX = "playlist:"
 private const val ALBUM_PREFIX = "album:"
 private const val ARTIST_PREFIX = "artist:"
+private const val MAX_REMEMBERED_SONG_LISTS = 4
 
 /**
  * Android Auto/Automotive's browse tree - mirrors the phone app's own Library tabs (Playlists,
@@ -51,6 +53,11 @@ class AutoLibraryCallback(
     private val playbackQueue: PlaybackQueue,
     private val serviceScope: CoroutineScope
 ) : MediaLibraryService.MediaLibrarySession.Callback {
+
+    // The song lists the car showed most recently, newest last. A song tapped in the car queues
+    // up the list it was tapped from, so Next/Previous work there like they do on the phone.
+    // Only touched on the main thread (every callback here runs in serviceScope).
+    private val recentSongLists = ArrayDeque<List<Long>>()
 
     override fun onGetLibraryRoot(
         session: MediaLibraryService.MediaLibrarySession,
@@ -129,17 +136,24 @@ class AutoLibraryCallback(
             }
             else -> emptyList()
         }
+        rememberSongList(children.filter { it.mediaMetadata.isPlayable == true }.mapNotNull { it.mediaId.toLongOrNull() })
         LibraryResult.ofItemList(ImmutableList.copyOf(children), params)
+    }
+
+    private fun rememberSongList(ids: List<Long>) {
+        if (ids.isEmpty()) return
+        recentSongLists.remove(ids)
+        recentSongLists.addLast(ids)
+        while (recentSongLists.size > MAX_REMEMBERED_SONG_LISTS) recentSongLists.removeFirst()
     }
 
     /**
      * The user tapped a playable leaf in the car's UI - [mediaItems] arrives as the bare browse
      * item (mediaId only, no real URI, built by [SongEntity.toMediaItem] above), which needs
      * resolving into something the player can actually open. Also sets the shared [PlaybackQueue]
-     * to just this one song (see this class's own doc for why a richer sibling queue isn't
-     * reconstructed here) so the rest of the app's queue-driven UI (MiniPlayer, Now Playing)
-     * stays consistent with what the car started playing, exactly like every other "play this one
-     * song" entry point already does.
+     * to the car list the song was tapped from (see [recentSongLists]), starting at that song, so
+     * Next/Previous in the car move through that list and the app's queue-driven UI (MiniPlayer,
+     * Now Playing) stays consistent with what the car is playing.
      *
      * Media3's framework routes EVERY controller's setMediaItem()/addMediaItems() call through
      * this same session-wide callback, not just Android Auto's - including PlaybackController
@@ -161,18 +175,32 @@ class AutoLibraryCallback(
         }
         val result = SettableFuture.create<List<MediaItem>>()
         serviceScope.launch {
-            val resolved = mediaItems.mapNotNull { item ->
-                if (item.localConfiguration != null) return@mapNotNull item.mediaId.toLongOrNull()?.let { it to item }
-                val songId = item.mediaId.toLongOrNull() ?: return@mapNotNull null
-                val song = repository.getSongById(songId) ?: return@mapNotNull null
-                val uri = repository.resolvePlaybackUri(song) ?: return@mapNotNull null
-                repository.stampLastPlayed(song)
-                song.telegramMessageId to buildPlayableItem(song, uri)
+            // The future must always complete - left unset, the car waits on it forever.
+            try {
+                val resolved = mediaItems.mapNotNull { item ->
+                    if (item.localConfiguration != null) return@mapNotNull item.mediaId.toLongOrNull()?.let { it to item }
+                    // One song that can't be resolved (Telegram not connected yet, no network)
+                    // is skipped rather than failing the whole request.
+                    runCatching {
+                        val songId = item.mediaId.toLongOrNull() ?: return@runCatching null
+                        val song = repository.getSongById(songId) ?: return@runCatching null
+                        val uri = repository.resolvePlaybackUri(song) ?: return@runCatching null
+                        repository.stampLastPlayed(song)
+                        song.telegramMessageId to buildPlayableItem(song, uri)
+                    }.getOrNull()
+                }
+                if (resolved.isNotEmpty()) {
+                    val ids = resolved.map { it.first }
+                    val tapped = ids.first()
+                    val sourceList = if (ids.size == 1) recentSongLists.lastOrNull { tapped in it } else null
+                    if (sourceList != null) playbackQueue.setQueue(sourceList, sourceList.indexOf(tapped))
+                    else playbackQueue.setQueue(ids, 0)
+                }
+                result.set(resolved.map { it.second })
+            } catch (e: Exception) {
+                Log.w("AutoLibraryCallback", "Couldn't resolve songs picked in the car", e)
+                result.setException(e)
             }
-            if (resolved.isNotEmpty()) {
-                playbackQueue.setQueue(resolved.map { it.first }, 0)
-            }
-            result.set(resolved.map { it.second })
         }
         return result
     }
@@ -230,9 +258,18 @@ class AutoLibraryCallback(
 
     private fun <V> immediateResult(value: V): ListenableFuture<V> = Futures.immediateFuture(value)
 
-    private fun <V> future(block: suspend () -> LibraryResult<V>): ListenableFuture<LibraryResult<V>> {
+    private fun <V : Any> future(block: suspend () -> LibraryResult<V>): ListenableFuture<LibraryResult<V>> {
         val result = SettableFuture.create<LibraryResult<V>>()
-        serviceScope.launch { result.set(block()) }
+        serviceScope.launch {
+            // Always completes: a browse request left unanswered spins in the car forever.
+            val value: LibraryResult<V> = try {
+                block()
+            } catch (e: Exception) {
+                Log.w("AutoLibraryCallback", "Car browse request failed", e)
+                LibraryResult.ofError(LibraryResult.RESULT_ERROR_UNKNOWN)
+            }
+            result.set(value)
+        }
         return result
     }
 }

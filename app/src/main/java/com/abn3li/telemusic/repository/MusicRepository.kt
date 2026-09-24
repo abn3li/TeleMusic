@@ -21,6 +21,7 @@ import com.abn3li.telemusic.data.download.YtDlpRepository
 import com.abn3li.telemusic.data.download.ytDlpStableSongId
 import com.abn3li.telemusic.data.settings.AppSettingsStore
 import com.abn3li.telemusic.data.telegram.TdlibManager
+import com.abn3li.telemusic.data.telegram.TelegramAudioMessage
 import com.abn3li.telemusic.playback.TdlibDataSource
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -199,25 +200,32 @@ class MusicRepository(
      * cached thumbnailPath. */
     suspend fun importDownloadedSong(result: com.abn3li.telemusic.data.download.YtDlpDownloadResult, songId: Long, videoId: String? = null) {
         val existing = songDao.getById(songId)
-        songDao.upsert(
-            SongEntity(
-                telegramMessageId = songId,
-                telegramFileId = 0,
-                title = result.title,
-                artist = result.artist,
-                durationSeconds = result.durationSeconds,
-                albumArtUrl = com.abn3li.telemusic.data.browse.googleArtworkAtSize(result.thumbnailUrl, com.abn3li.telemusic.data.browse.SAVED_ARTWORK_SIZE),
-                localFilePath = result.filePath,
-                isExplicitDownload = true,
-                metadataEnriched = true,
-                // Keeps a lightweight streamable row's own videoId (or the caller's, for a fresh
-                // download) so removeDownload() can revert this back to streaming later instead
-                // of deleting the row outright - see removeDownload's own doc.
-                youtubeVideoId = videoId ?: existing?.youtubeVideoId,
-                isFavorite = existing?.isFavorite ?: false,
-                addedAtMillis = existing?.addedAtMillis ?: System.currentTimeMillis()
-            )
+        val artwork = com.abn3li.telemusic.data.browse.googleArtworkAtSize(result.thumbnailUrl, com.abn3li.telemusic.data.browse.SAVED_ARTWORK_SIZE)
+        // A song already in the library (a streamable YouTube row) keeps everything it has -
+        // title, lyrics, play history, album, Like, artwork; only its file and download state
+        // change. Rebuilding the row from scratch wiped all of that.
+        val song = existing?.copy(
+            durationSeconds = result.durationSeconds.takeIf { it > 0 } ?: existing.durationSeconds,
+            albumArtUrl = existing.albumArtUrl?.takeIf { it.isNotBlank() } ?: artwork,
+            localFilePath = result.filePath,
+            isExplicitDownload = true,
+            metadataEnriched = true,
+            youtubeVideoId = videoId ?: existing.youtubeVideoId
+        ) ?: SongEntity(
+            telegramMessageId = songId,
+            telegramFileId = 0,
+            title = result.title,
+            artist = result.artist,
+            durationSeconds = result.durationSeconds,
+            albumArtUrl = artwork,
+            localFilePath = result.filePath,
+            isExplicitDownload = true,
+            metadataEnriched = true,
+            // Keeps the caller's videoId so removeDownload() can revert this back to streaming
+            // later instead of deleting the row outright - see removeDownload's own doc.
+            youtubeVideoId = videoId
         )
+        songDao.upsert(song)
         val extension = File(result.filePath).extension.ifBlank { "m4a" }
         val exportedUri = exportToDownloadFolderIfConfigured(File(result.filePath), sanitizedFileName(result.title, result.artist, extension))
         if (exportedUri != null) {
@@ -425,81 +433,91 @@ class MusicRepository(
         // the NEXT play of each song trusts that freshly-synced value instead of a stale "already
         // verified" flag from before this sync ran.
         verifiedFreshFileIdThisRun.clear()
-        var fromMessageId = 0L
-        do {
-            val batch = tdlibManager.fetchAudioMessages(chatId, fromMessageId)
-            if (batch.isEmpty()) break
-
-            for (msg in batch) {
-                val title = msg.title.ifBlank { "Unknown title" }.trim()
-                val artist = msg.performer.ifBlank { "Unknown artist" }.trim()
-
-                // 1. Check if song with exact messageId already exists in library
-                val existingById = songDao.getById(msg.messageId)
-                if (existingById != null) {
-                    if (existingById.telegramFileId != msg.fileId) {
-                        songDao.update(existingById.copy(telegramFileId = msg.fileId))
-                    }
-                    continue
-                }
-
-                // 2. Check if a song with matching Title & Artist is ALREADY in library
-                val existingByTitleArtist = if (title != "Unknown title" && artist != "Unknown artist") {
-                    songDao.findByTitleAndArtist(title, artist)
-                } else null
-
-                // 3. Check if a song with matching Title & Duration is ALREADY in library
-                val existingByTitleDuration = if (existingByTitleArtist == null && title != "Unknown title" && msg.durationSeconds > 0) {
-                    songDao.findByTitleAndDuration(title, msg.durationSeconds)
-                } else null
-
-                val existingDuplicate = existingByTitleArtist ?: existingByTitleDuration
-
-                if (existingDuplicate != null) {
-                    // Song already in library! Update file, message ID, AND resolvedChatId to new chat
-                    songDao.update(
-                        existingDuplicate.copy(
-                            telegramMessageId = msg.messageId,
-                            telegramFileId = msg.fileId,
-                            resolvedChatId = chatId
-                        )
-                    )
-                } else {
-                    // Truly a new song! Insert into library with resolvedChatId set
-                    songDao.upsert(
-                        SongEntity(
-                            telegramMessageId = msg.messageId,
-                            telegramFileId = msg.fileId,
-                            title = title,
-                            artist = artist,
-                            durationSeconds = msg.durationSeconds,
-                            resolvedChatId = chatId
-                        )
-                    )
-                }
+        // Audio messages first, then audio files sent as documents - each search pages on its
+        // own cursor (see TdlibManager.fetchAudioPage).
+        for (documents in listOf(false, true)) {
+            var fromMessageId = 0L
+            while (true) {
+                val page = tdlibManager.fetchAudioPage(chatId, fromMessageId, documents)
+                for (msg in page.songs) addSyncedSong(chatId, msg)
+                // 0 = no more pages. A cursor that didn't move would fetch the same page forever.
+                if (page.nextFromMessageId == 0L || page.nextFromMessageId == fromMessageId) break
+                fromMessageId = page.nextFromMessageId
             }
-            fromMessageId = batch.last().messageId
-        } while (batch.size >= 50)
+        }
 
         removeDuplicates()
     }
 
-    /** Cleans up any existing duplicate entries in the local database. */
-    suspend fun removeDuplicates() {
-        val all = songDao.observeAll().firstOrNull().orEmpty()
-        val grouped = all.groupBy { "${it.title.lowercase().trim()}|${it.artist.lowercase().trim()}" }
-        for ((_, songs) in grouped) {
-            if (songs.size > 1) {
-                val best = songs.maxByOrNull {
-                    (if (it.isExplicitDownload) 1000 else 0) +
-                        (if (it.localFilePath != null) 500 else 0) +
-                        (if (it.metadataEnriched) 100 else 0) +
-                        it.addedAtMillis
-                } ?: songs.first()
+    private suspend fun addSyncedSong(chatId: Long, msg: TelegramAudioMessage) {
+        val title = msg.title.ifBlank { "Unknown title" }.trim()
+        val artist = msg.performer.ifBlank { "Unknown artist" }.trim()
 
-                songs.filter { it.telegramMessageId != best.telegramMessageId }.forEach { duplicate ->
-                    songDao.delete(duplicate.telegramMessageId)
+        // 1. This message is already in the library: refresh its file id. Message ids are only
+        // unique inside one chat (and YouTube/local rows have ids of their own), so a row that
+        // isn't this chat's Telegram song is a different song sharing the id - left alone.
+        val existingById = songDao.getById(msg.messageId)
+        if (existingById != null) {
+            val sameMessage = existingById.telegramFileId != 0 &&
+                (existingById.resolvedChatId == null || existingById.resolvedChatId == chatId)
+            if (sameMessage && existingById.telegramFileId != msg.fileId) {
+                songDao.update(existingById.copy(telegramFileId = msg.fileId))
+            }
+            return
+        }
+
+        // 2./3. The same song is already synced from another message (another chat, or posted
+        // twice): that row stays and keeps playing from its own message. Only Telegram rows
+        // count - a YouTube or local copy of the song doesn't keep the Telegram one out.
+        val titleKnown = title != "Unknown title"
+        val duplicate = (if (titleKnown && artist != "Unknown artist") songDao.findTelegramByTitleAndArtist(title, artist) else null)
+            ?: (if (titleKnown && msg.durationSeconds > 0) songDao.findTelegramByTitleAndDuration(title, msg.durationSeconds) else null)
+        if (duplicate != null) return
+
+        songDao.upsert(
+            SongEntity(
+                telegramMessageId = msg.messageId,
+                telegramFileId = msg.fileId,
+                title = title,
+                artist = artist,
+                durationSeconds = msg.durationSeconds,
+                resolvedChatId = chatId
+            )
+        )
+    }
+
+    /**
+     * Collapses Telegram songs synced more than once (same title and artist) into one row. Only
+     * Telegram rows are compared - a YouTube or local copy of the same song is another source and
+     * stays - and songs without a real title/artist are never grouped (two "Unknown title" songs,
+     * or two files named "01 Intro", aren't the same song). The row kept is the downloaded one, else the one with a file, else
+     * the enriched one, else the oldest; it takes over the others' playlist entries and Like.
+     * A downloaded duplicate is never deleted. A removed row's cached stream file is cleared by
+     * reconcileOrphanedTdlibFiles at the next launch (unless the kept row uses the same file).
+     */
+    suspend fun removeDuplicates() {
+        val telegramSongs = songDao.observeAll().firstOrNull().orEmpty().filter {
+            it.telegramFileId != 0 && !it.isLocalImport && it.youtubeVideoId == null &&
+                it.title.isNotBlank() && it.title != "Unknown title" &&
+                it.artist.isNotBlank() && it.artist != "Unknown artist" && it.artist != "Telegram Document"
+        }
+        val groups = telegramSongs.groupBy { "${it.title.lowercase().trim()}|${it.artist.lowercase().trim()}" }
+        for (songs in groups.values) {
+            if (songs.size < 2) continue
+            val best = songs.sortedWith(
+                compareByDescending<SongEntity> { it.isExplicitDownload }
+                    .thenByDescending { it.localFilePath != null }
+                    .thenByDescending { it.metadataEnriched }
+                    .thenBy { it.addedAtMillis }
+            ).first()
+            for (duplicate in songs) {
+                if (duplicate.telegramMessageId == best.telegramMessageId || duplicate.isExplicitDownload) continue
+                for (entry in playlistDao.getEntriesForSong(duplicate.telegramMessageId)) {
+                    playlistDao.addSong(entry.copy(songId = best.telegramMessageId))
                 }
+                playlistDao.removeEntriesForSong(duplicate.telegramMessageId)
+                if (duplicate.isFavorite && !best.isFavorite) songDao.setFavorite(best.telegramMessageId, true)
+                songDao.delete(duplicate.telegramMessageId)
             }
         }
     }

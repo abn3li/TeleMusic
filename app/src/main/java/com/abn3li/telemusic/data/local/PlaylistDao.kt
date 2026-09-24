@@ -42,6 +42,12 @@ interface PlaylistDao {
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun addSong(crossRef: PlaylistSongCrossRef)
 
+    @Query("SELECT * FROM playlist_song_cross_ref WHERE songId = :songId")
+    suspend fun getEntriesForSong(songId: Long): List<PlaylistSongCrossRef>
+
+    @Query("DELETE FROM playlist_song_cross_ref WHERE songId = :songId")
+    suspend fun removeEntriesForSong(songId: Long)
+
     @Query(
         """
         SELECT songs.* FROM songs

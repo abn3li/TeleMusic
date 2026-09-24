@@ -369,43 +369,54 @@ class TdlibManager(private val context: Context) {
         null
     }
 
-    private val AUDIO_EXTENSIONS_SET = setOf("dsf", "dff", "flac", "wav", "m4a", "mp3", "ogg", "opus", "aac", "alac", "wma", "weba")
+    private val AUDIO_EXTENSIONS_SET = setOf("flac", "wav", "m4a", "mp3", "ogg", "opus", "aac", "alac", "wma", "weba")
+    // DSD files (.dsf/.dff) can't be played by the app, so they're never synced.
+    private val UNSUPPORTED_EXTENSIONS_SET = setOf("dsf", "dff")
 
-    suspend fun fetchAudioMessages(chatId: Long, fromMessageId: Long = 0, limit: Int = 50): List<TelegramAudioMessage> {
-        val audioResult = runCatching {
-            sendSuspend(TdApi.SearchChatMessages(chatId, null, "", null, fromMessageId, 0, limit, TdApi.SearchMessagesFilterAudio())) as TdApi.FoundChatMessages
-        }.getOrNull()
+    /**
+     * One page of a chat's music: audio messages, or (with [documents]) audio files sent as
+     * documents. The two are separate searches with their own paging - mixing them into one
+     * page and continuing from its oldest message skipped every audio message between the two.
+     * [TelegramAudioPage.nextFromMessageId] is TDLib's own cursor for the next page (0 = done);
+     * it follows the raw search, so a page of non-audio documents still pages on. A failed
+     * search ends that search (empty page, cursor 0).
+     */
+    suspend fun fetchAudioPage(chatId: Long, fromMessageId: Long, documents: Boolean, limit: Int = 50): TelegramAudioPage {
+        val filter = if (documents) TdApi.SearchMessagesFilterDocument() else TdApi.SearchMessagesFilterAudio()
+        val found = runCatching {
+            sendSuspend(TdApi.SearchChatMessages(chatId, null, "", null, fromMessageId, 0, limit, filter)) as TdApi.FoundChatMessages
+        }.getOrNull() ?: return TelegramAudioPage(emptyList(), 0)
 
-        val docResult = runCatching {
-            sendSuspend(TdApi.SearchChatMessages(chatId, null, "", null, fromMessageId, 0, limit, TdApi.SearchMessagesFilterDocument())) as TdApi.FoundChatMessages
-        }.getOrNull()
-
-        val audioMessages = audioResult?.messages?.mapNotNull { message ->
-            val audio = (message.content as? TdApi.MessageAudio)?.audio ?: return@mapNotNull null
-            TelegramAudioMessage(
-                message.id,
-                audio.audio.id,
-                audio.title.ifBlank { audio.fileName },
-                audio.performer,
-                audio.duration
-            )
-        }.orEmpty()
-
-        val docMessages = docResult?.messages?.mapNotNull { message ->
-            val doc = (message.content as? TdApi.MessageDocument)?.document ?: return@mapNotNull null
-            val ext = doc.fileName.substringAfterLast('.', "").lowercase()
-            if (ext in AUDIO_EXTENSIONS_SET) {
-                TelegramAudioMessage(
-                    message.id,
-                    doc.document.id,
-                    doc.fileName.substringBeforeLast('.'),
-                    "Telegram Document",
-                    0
-                )
-            } else null
-        }.orEmpty()
-
-        return (audioMessages + docMessages).distinctBy { it.messageId }
+        val songs = found.messages.mapNotNull { message ->
+            when (val content = message.content) {
+                is TdApi.MessageAudio -> {
+                    val audio = content.audio
+                    val ext = audio.fileName.substringAfterLast('.', "").lowercase()
+                    if (ext in UNSUPPORTED_EXTENSIONS_SET) return@mapNotNull null
+                    TelegramAudioMessage(
+                        message.id,
+                        audio.audio.id,
+                        audio.title.ifBlank { audio.fileName },
+                        audio.performer,
+                        audio.duration
+                    )
+                }
+                is TdApi.MessageDocument -> {
+                    val doc = content.document
+                    val ext = doc.fileName.substringAfterLast('.', "").lowercase()
+                    if (ext !in AUDIO_EXTENSIONS_SET) return@mapNotNull null
+                    TelegramAudioMessage(
+                        message.id,
+                        doc.document.id,
+                        doc.fileName.substringBeforeLast('.'),
+                        "Telegram Document",
+                        0
+                    )
+                }
+                else -> null
+            }
+        }
+        return TelegramAudioPage(songs, found.nextFromMessageId)
     }
 
     /** Fetches the current valid session-local file ID for a message from TDLib. [chatId] is

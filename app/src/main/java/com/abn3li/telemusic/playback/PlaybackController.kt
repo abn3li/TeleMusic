@@ -50,11 +50,17 @@ class PlaybackController(context: Context) {
                     // command. prepare() after an error is ExoPlayer's own documented recovery
                     // path (it retains the current MediaItem and position rather than
                     // restarting), so do it automatically instead of waiting on the user.
+                    //
+                    // An HTTP error (only YouTube streams use HTTP) is left to MusicService: it
+                    // is almost always an expired stream link, which retrying can't fix - the
+                    // service fetches a fresh link and resumes instead. prepare() alone keeps
+                    // play/pause as it was: calling play() here used to start a song the user
+                    // had paused, whenever its download failed in the background.
+                    if (error.errorCode == PlaybackException.ERROR_CODE_IO_BAD_HTTP_STATUS) return
                     if (consecutiveErrorRetries < MAX_ERROR_RETRIES) {
                         consecutiveErrorRetries++
                         Log.w("PlaybackController", "Auto-retrying playback (attempt $consecutiveErrorRetries/$MAX_ERROR_RETRIES)")
                         controller?.prepare()
-                        controller?.play()
                     } else {
                         Log.w("PlaybackController", "Giving up auto-retry after $MAX_ERROR_RETRIES attempts")
                     }

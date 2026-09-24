@@ -3,12 +3,15 @@ package com.abn3li.telemusic.playback
 import kotlinx.coroutines.Job
 import android.app.PendingIntent
 import android.content.Intent
+import android.os.SystemClock
 import android.util.Log
 import androidx.annotation.OptIn
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
+import androidx.media3.common.PlaybackException
+import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.decoder.ffmpeg.FfmpegLibrary
@@ -29,6 +32,9 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+
+// A song whose fresh YouTube link also fails isn't refetched again within this window.
+private const val LINK_REFRESH_COOLDOWN_MS = 60_000L
 
 class MusicService : MediaLibraryService() {
     // MediaLibrarySession (not a plain MediaSession) is what makes this service browsable by
@@ -71,6 +77,9 @@ class MusicService : MediaLibraryService() {
             .setAudioAttributes(audioAttributes, true)
             .setHandleAudioBecomingNoisy(true)
             .build()
+        player.addListener(object : Player.Listener {
+            override fun onPlayerError(error: PlaybackException) = refreshExpiredStreamLink(error)
+        })
 
         val queueAwarePlayer = QueueAwareForwardingPlayer(
             player = player,
@@ -150,6 +159,41 @@ class MusicService : MediaLibraryService() {
         withContext(Dispatchers.IO) { repository.stampLastPlayed(song) }
         if (!song.isLocalImport && song.youtubeVideoId == null && song.localFilePath == null) {
             cacheJob = serviceScope.launch(Dispatchers.IO) { repository.markStreamedFileCached(song) }
+        }
+    }
+
+    // The last expired-link recovery (see refreshExpiredStreamLink): its job, song and time.
+    private var linkRefreshJob: Job? = null
+    private var lastLinkRefreshSongId: Long? = null
+    private var lastLinkRefreshAtMs = 0L
+
+    /**
+     * A YouTube stream link only works for a few hours, so resuming a song paused for longer
+     * fails with an HTTP error that retrying the same link can never fix. This drops the cached
+     * link, fetches a fresh one and continues from the same position, keeping play/pause as it
+     * was. Runs only after an error, at most once per song per minute - a song that fails even
+     * with a fresh link stays a normal playback error instead of retrying forever.
+     */
+    private fun refreshExpiredStreamLink(error: PlaybackException) {
+        if (error.errorCode != PlaybackException.ERROR_CODE_IO_BAD_HTTP_STATUS) return
+        val item = player.currentMediaItem ?: return
+        val songId = item.mediaId.toLongOrNull() ?: return
+        if (linkRefreshJob?.isActive == true) return
+        val now = SystemClock.elapsedRealtime()
+        if (songId == lastLinkRefreshSongId && now - lastLinkRefreshAtMs < LINK_REFRESH_COOLDOWN_MS) return
+        lastLinkRefreshSongId = songId
+        lastLinkRefreshAtMs = now
+        val positionMs = player.currentPosition
+        val repository = (application as TgMusicApp).musicRepository
+        linkRefreshJob = serviceScope.launch {
+            val song = withContext(Dispatchers.IO) { repository.getSongById(songId) } ?: return@launch
+            val videoId = song.youtubeVideoId ?: return@launch
+            repository.invalidateStreamCache(videoId)
+            val uri = withContext(Dispatchers.IO) { repository.resolvePlaybackUri(song) } ?: return@launch
+            // The user may have moved on to another song while the link was being fetched.
+            if (player.currentMediaItem?.mediaId != item.mediaId) return@launch
+            player.setMediaItem(item.buildUpon().setUri(uri).build(), positionMs)
+            player.prepare()
         }
     }
 

@@ -10,8 +10,15 @@ import com.abn3li.telemusic.data.remote.NetworkModule
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
+import okhttp3.Call
+import okhttp3.Callback
 import okhttp3.Request
+import okhttp3.Response
+import java.io.IOException
+import kotlin.coroutines.cancellation.CancellationException
+import kotlin.coroutines.resume
 import kotlin.math.abs
 import kotlin.math.min
 
@@ -183,7 +190,7 @@ class LyricsRepository {
     /** Song hashes worth trying, restricted to cuts within 8 seconds of the track's own
      * duration - otherwise the first result for a common title is as likely to be a cover or a
      * remix as the right recording - ordered closest match first. */
-    private fun kuGouSearchSongHashes(keyword: String, seconds: Int): List<String> {
+    private suspend fun kuGouSearchSongHashes(keyword: String, seconds: Int): List<String> {
         val url = "https://mobileservice.kugou.com/api/v3/search/song".toHttpUrl().newBuilder()
             .addQueryParameter("version", "9108")
             .addQueryParameter("plat", "0")
@@ -199,7 +206,7 @@ class LyricsRepository {
             .map { it.hash }
     }
 
-    private fun kuGouSearchLyricsCandidates(hash: String? = null, keyword: String? = null, seconds: Int = -1): List<KuGouCandidate>? {
+    private suspend fun kuGouSearchLyricsCandidates(hash: String? = null, keyword: String? = null, seconds: Int = -1): List<KuGouCandidate>? {
         val builder = "https://lyrics.kugou.com/search".toHttpUrl().newBuilder()
             .addQueryParameter("ver", "1")
             .addQueryParameter("man", "yes")
@@ -217,7 +224,7 @@ class LyricsRepository {
         return response?.candidates
     }
 
-    private fun kuGouDownload(id: String, accessKey: String): String? {
+    private suspend fun kuGouDownload(id: String, accessKey: String): String? {
         val url = "https://lyrics.kugou.com/download".toHttpUrl().newBuilder()
             .addQueryParameter("fmt", "lrc")
             .addQueryParameter("charset", "utf8")
@@ -233,14 +240,32 @@ class LyricsRepository {
         }.getOrNull()
     }
 
-    private fun kuGouGet(url: String): String? = try {
+    /** Cancellable: when a faster provider already answered, fetchLyrics cancels KuGou, and
+     * that now aborts the request in flight. A blocking execute() ignored the cancel, so the
+     * lyrics waited for KuGou's whole chain of up to ten requests before showing. */
+    private suspend fun kuGouGet(url: String): String? = try {
         val request = Request.Builder()
             .url(url)
             .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36")
             .build()
-        NetworkModule.client.newCall(request).execute().use { response ->
-            if (response.isSuccessful) response.body?.string() else null
+        val call = NetworkModule.client.newCall(request)
+        suspendCancellableCoroutine { continuation ->
+            continuation.invokeOnCancellation { call.cancel() }
+            call.enqueue(object : Callback {
+                override fun onFailure(call: Call, e: IOException) {
+                    continuation.resume(null)
+                }
+
+                override fun onResponse(call: Call, response: Response) {
+                    val body = runCatching {
+                        response.use { if (it.isSuccessful) it.body?.string() else null }
+                    }.getOrNull()
+                    continuation.resume(body)
+                }
+            })
         }
+    } catch (e: CancellationException) {
+        throw e
     } catch (e: Exception) {
         null
     }

@@ -12,9 +12,9 @@ import java.util.Locale
 /**
  * The real format and quality of a song's file, read once when Song Info opens (callers run this
  * off the main thread). Uses the platform's own media readers for codec / sample rate / bitrate,
- * plus the file header for what they don't report on every Android version (FLAC/WAV bit depth,
- * DSD rate). Nothing is guessed: a value that can't be read is left out, and a song with no file
- * at all (streaming) says so instead of inventing a bitrate.
+ * plus the file header for what they don't report on every Android version (FLAC/WAV bit
+ * depth). Nothing is guessed: a value that can't be read is left out, and a song with no file at
+ * all (streaming) says so instead of inventing a bitrate.
  *
  * Returns (format, quality), e.g. ("FLAC · Hi-Res Lossless", "24-bit / 96 kHz · 2,851 kbps") or
  * ("MP3", "320 kbps · 44.1 kHz").
@@ -23,13 +23,6 @@ internal fun detectAudioFormat(context: Context, filePath: String?, durationSec:
     if (filePath == null) return "Streaming" to ""
     val uri = if (filePath.startsWith("content://")) Uri.parse(filePath) else Uri.fromFile(File(filePath))
     val header = readHeader(context, filePath)
-
-    // DSD isn't readable by the platform (the app plays it through its own FFmpeg extension).
-    if (header.startsWith("DSD ")) {
-        val rate = header.intLE(56)
-        val dsdLevel = if (rate > 0) "DSD${rate / 44_100}" else "DSD"
-        return "DSD" to if (rate > 0) "$dsdLevel · ${formatMHz(rate)} · 1-bit" else "1-bit"
-    }
 
     var mime: String? = null
     var sampleRate = 0
@@ -207,7 +200,7 @@ private fun ByteArray.indexOf(pattern: ByteArray, from: Int): Int {
     return -1
 }
 
-/** First 64 bytes of the file - enough for the FLAC STREAMINFO, WAV fmt and DSF fmt fields. */
+/** First 64 bytes of the file - enough for the FLAC STREAMINFO and WAV fmt fields. */
 private fun readHeader(context: Context, path: String): ByteArray = runCatching {
     val stream = if (path.startsWith("content://")) context.contentResolver.openInputStream(Uri.parse(path)) else File(path).inputStream()
     stream?.use { input ->
@@ -240,4 +233,3 @@ private fun formatKHz(hz: Int): String {
     return if (khz % 1.0 == 0.0) "${khz.toInt()} kHz" else String.format(Locale.US, "%.1f kHz", khz)
 }
 
-private fun formatMHz(hz: Int): String = String.format(Locale.US, "%.1f MHz", hz / 1_000_000.0)

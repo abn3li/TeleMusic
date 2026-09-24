@@ -24,6 +24,9 @@ data class TelegramAudioMessage(
     val title: String, val performer: String, val durationSeconds: Int
 )
 
+/** One page of a chat search: the songs found, and where the next page starts (0 = no more). */
+class TelegramAudioPage(val songs: List<TelegramAudioMessage>, val nextFromMessageId: Long)
+
 /** Which real Telegram chat kind a [TelegramChatInfo] is - channels aren't the only place audio
  * lives; a group, a bot, or a regular 1:1 chat can all have music shared in them too, and the
  * Sync screen now offers all of them instead of only channels. */

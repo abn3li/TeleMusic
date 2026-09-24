@@ -369,7 +369,11 @@ class TdlibDataSource(private val tdlibManager: TdlibManager) : BaseDataSource(t
             waited += READ_WAIT_STEP_MS
         }
 
-        return C.RESULT_END_OF_INPUT
+        // No new bytes for READ_WAIT_MAX_MS while the download isn't finished: the network
+        // stalled. That's an error, not the end of the song - end-of-input here made the player
+        // treat the song as over and skip to the next one mid-song. An IOException lets ExoPlayer
+        // retry the load (reopening resumes the TDLib download), and play on once data arrives.
+        throw IOException("No new data for fileId=$fileId in ${READ_WAIT_MAX_MS / 1000}s (download stalled)")
     }
 
     override fun getUri(): Uri? = dataSpecUri

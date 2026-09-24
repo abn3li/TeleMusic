@@ -17,11 +17,13 @@ interface SongDao {
     @Query("SELECT * FROM songs WHERE telegramMessageId = :id")
     suspend fun getById(id: Long): SongEntity?
 
-    @Query("SELECT * FROM songs WHERE LOWER(TRIM(title)) = LOWER(TRIM(:title)) AND LOWER(TRIM(artist)) = LOWER(TRIM(:artist)) LIMIT 1")
-    suspend fun findByTitleAndArtist(title: String, artist: String): SongEntity?
+    // Telegram sync's duplicate checks: only another Telegram song counts as "already synced" -
+    // a YouTube or local copy of the same song is a different source and doesn't block it.
+    @Query("SELECT * FROM songs WHERE telegramFileId != 0 AND LOWER(TRIM(title)) = LOWER(TRIM(:title)) AND LOWER(TRIM(artist)) = LOWER(TRIM(:artist)) LIMIT 1")
+    suspend fun findTelegramByTitleAndArtist(title: String, artist: String): SongEntity?
 
-    @Query("SELECT * FROM songs WHERE LOWER(TRIM(title)) = LOWER(TRIM(:title)) AND ABS(durationSeconds - :duration) <= 2 LIMIT 1")
-    suspend fun findByTitleAndDuration(title: String, duration: Int): SongEntity?
+    @Query("SELECT * FROM songs WHERE telegramFileId != 0 AND LOWER(TRIM(title)) = LOWER(TRIM(:title)) AND ABS(durationSeconds - :duration) <= 2 LIMIT 1")
+    suspend fun findTelegramByTitleAndDuration(title: String, duration: Int): SongEntity?
 
     @Query("SELECT * FROM songs WHERE metadataEnriched = 0")
     suspend fun getUnenriched(): List<SongEntity>

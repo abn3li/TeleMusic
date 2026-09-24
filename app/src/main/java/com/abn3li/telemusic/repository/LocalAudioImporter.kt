@@ -78,8 +78,9 @@ class LocalAudioImporter(private val context: Context) {
     }
 
     private fun isAudio(mimeType: String?, name: String): Boolean {
-        if (mimeType != null && mimeType.startsWith("audio/")) return true
         val lower = name.lowercase()
+        if (UNSUPPORTED_EXTENSIONS.any { lower.endsWith(it) }) return false
+        if (mimeType != null && mimeType.startsWith("audio/")) return true
         return AUDIO_EXTENSIONS.any { lower.endsWith(it) }
     }
 
@@ -168,6 +169,8 @@ class LocalAudioImporter(private val context: Context) {
         // ytdlp_bridge.py's own doc) - included so re-importing a .weba file (moved from another
         // folder, restored from backup, shared from another install) is recognized as real audio
         // instead of silently skipped by the scanner.
-        private val AUDIO_EXTENSIONS = listOf(".mp3", ".m4a", ".flac", ".ogg", ".wav", ".aac", ".opus", ".wma", ".weba", ".dsf", ".dff")
+        private val AUDIO_EXTENSIONS = listOf(".mp3", ".m4a", ".flac", ".ogg", ".wav", ".aac", ".opus", ".wma", ".weba")
+        // DSD files can't be played by the app, so they're never offered for import.
+        private val UNSUPPORTED_EXTENSIONS = listOf(".dsf", ".dff")
     }
 }
