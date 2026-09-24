@@ -516,6 +516,13 @@ class TdlibManager(private val context: Context) {
         file?.local?.path?.takeIf { it.isNotBlank() }?.let { runCatching { java.io.File(it).canonicalPath }.getOrNull() }
     }
 
+    /** Removes a finished download's file through TDLib itself (so TDLib's own records say it's
+     * gone and a later download really fetches it again), and forgets it for this session. */
+    suspend fun deleteDownloadedFile(fileId: Int) {
+        runCatching { sendSuspend(TdApi.DeleteFile(fileId)) }
+        forgetDownload(fileId)
+    }
+
     /** Called when this app deletes a finished cache file itself, so a later replay requests a
      * fresh download instead of trusting what this session saw before. */
     fun forgetDownload(fileId: Int) {

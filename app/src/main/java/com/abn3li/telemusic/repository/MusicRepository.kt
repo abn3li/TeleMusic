@@ -1,5 +1,7 @@
 package com.abn3li.telemusic.repository
 
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
@@ -92,9 +94,10 @@ class MusicRepository(
      * filename - this copy is the one the user actually sees in their file manager. The returned
      * Uri is persisted onto the song's own row (exportedFileUri) so "Delete download" can find
      * and remove this exact copy later, not just the app-private one. */
-    private fun exportToDownloadFolderIfConfigured(source: File, displayName: String): Uri? {
+    private suspend fun exportToDownloadFolderIfConfigured(source: File, displayName: String): Uri? {
         val folderUri = settingsStore.downloadFolderUri?.let { android.net.Uri.parse(it) } ?: return null
-        return mediaFolderExporter.export(source, folderUri, displayName)
+        // A whole-file copy (tens of MB for lossless): never on the caller's (often main) thread.
+        return withContext(Dispatchers.IO) { mediaFolderExporter.export(source, folderUri, displayName) }
     }
     // ---- Tracks / Favourites, metadata-driven sort ----
     fun observeLibrary(sortField: SortField, ascending: Boolean): Flow<List<SongEntity>> =
@@ -220,7 +223,7 @@ class MusicRepository(
         if (exportedUri != null) {
             // One copy only: the song now lives in (and plays from) the user's folder.
             songDao.getById(songId)?.let { songDao.update(it.copy(localFilePath = exportedUri.toString(), exportedFileUri = exportedUri.toString())) }
-            runCatching { File(result.filePath).delete() }
+            withContext(Dispatchers.IO) { runCatching { File(result.filePath).delete() } }
         }
     }
 
@@ -238,8 +241,8 @@ class MusicRepository(
             if (!song.isExplicitDownload || local.startsWith("content://")) continue
             if (!isLocalFileValid(exported)) continue
             songDao.update(song.copy(localFilePath = exported))
-            runCatching { File(local).delete() }
-            if (song.telegramFileId != 0) tdlibManager.forgetDownload(song.telegramFileId)
+            if (song.telegramFileId != 0) tdlibManager.deleteDownloadedFile(song.telegramFileId)
+            else withContext(Dispatchers.IO) { runCatching { File(local).delete() } }
         }
         settingsStore.singleCopyMigrationDone = true
     }
@@ -666,8 +669,9 @@ class MusicRepository(
             )
         )
         if (exportedUri != null) {
-            runCatching { File(path).delete() }
-            tdlibManager.forgetDownload(freshFileId)
+            // Through TDLib, not File.delete(): TDLib must know the file is gone, or a later
+            // re-download (after "Delete Download") gets told it's already complete.
+            tdlibManager.deleteDownloadedFile(freshFileId)
         }
         return finalPath
     }
@@ -779,7 +783,7 @@ class MusicRepository(
                 file.delete()
             }
             songDao.update(song.copy(localFilePath = null))
-            tdlibManager.forgetDownload(song.telegramFileId)
+            tdlibManager.deleteDownloadedFile(song.telegramFileId)
             count++
         }
         val (partial, partialBytes) = purgePartialAudioFiles()
@@ -976,7 +980,7 @@ class MusicRepository(
             val size = file.length()
             if (file.exists()) file.delete()
             songDao.update(song.copy(localFilePath = null))
-            tdlibManager.forgetDownload(song.telegramFileId)
+            tdlibManager.deleteDownloadedFile(song.telegramFileId)
             totalSize -= size
         }
     }
