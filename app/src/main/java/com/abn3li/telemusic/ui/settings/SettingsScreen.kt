@@ -427,7 +427,7 @@ fun SettingsScreen(onBack: () -> Unit, onLoggedOut: () -> Unit) {
     if (showClearCacheConfirm) {
         AppAlert(
             title = "Clear Cache?",
-            message = "Deletes cached and partially streamed songs to free up space. Downloads, your songs and playlists stay in your library.",
+            message = "Deletes cached and partially streamed songs, and unfinished YouTube downloads, to free up space. Downloads, your songs and playlists stay in your library.",
             onDismiss = { showClearCacheConfirm = false },
             actions = listOf(
                 AlertAction("Cancel") { showClearCacheConfirm = false },

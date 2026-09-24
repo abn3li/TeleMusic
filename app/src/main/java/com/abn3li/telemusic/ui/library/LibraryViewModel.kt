@@ -1,5 +1,7 @@
 package com.abn3li.telemusic.ui.library
 
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.abn3li.telemusic.data.local.AlbumSummary
@@ -132,6 +134,44 @@ class LibraryViewModel(private val repository: MusicRepository) : ViewModel() {
         _downloadingIds.value = _downloadingIds.value + song.telegramMessageId
         runCatching { repository.downloadExplicitly(song) }
         _downloadingIds.value = _downloadingIds.value - song.telegramMessageId
+    }
+
+    // "Download All" for a YouTube-imported playlist: playlistId -> (done, total), and the job
+    // behind it so it can be stopped. Runs in this app-lifetime scope, so it keeps going when the
+    // user leaves the playlist page.
+    private val _playlistDownloads = MutableStateFlow<Map<Long, Pair<Int, Int>>>(emptyMap())
+    val playlistDownloads: StateFlow<Map<Long, Pair<Int, Int>>> = _playlistDownloads
+    private val playlistDownloadJobs = mutableMapOf<Long, Job>()
+
+    /** Downloads every YouTube song in [songs] that isn't on the device yet, one at a time. */
+    fun downloadAllInPlaylist(playlistId: Long, songs: List<SongEntity>) {
+        if (playlistId in playlistDownloadJobs) return
+        val pending = songs.filter { it.youtubeVideoId != null && it.localFilePath == null && !it.isExplicitDownload }
+        if (pending.isEmpty()) return
+        playlistDownloadJobs[playlistId] = viewModelScope.launch {
+            try {
+                pending.forEachIndexed { index, song ->
+                    _playlistDownloads.update { it + (playlistId to (index to pending.size)) }
+                    _downloadingIds.update { it + song.telegramMessageId }
+                    try {
+                        repository.downloadExplicitly(song)
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (_: Exception) {
+                        // One failed song (unavailable video, network blip) doesn't stop the rest.
+                    } finally {
+                        _downloadingIds.update { it - song.telegramMessageId }
+                    }
+                }
+            } finally {
+                _playlistDownloads.update { it - playlistId }
+                playlistDownloadJobs.remove(playlistId)
+            }
+        }
+    }
+
+    fun stopPlaylistDownload(playlistId: Long) {
+        playlistDownloadJobs[playlistId]?.cancel()
     }
 
     /** The row menu's "Delete song" item - only ever shown for a song that's actually downloaded. */

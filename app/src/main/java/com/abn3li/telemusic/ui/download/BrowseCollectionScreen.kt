@@ -30,7 +30,6 @@ import com.abn3li.telemusic.data.browse.BrowseCollection
 import com.abn3li.telemusic.data.local.SongEntity
 import com.abn3li.telemusic.ui.library.GroupActionRow
 import com.abn3li.telemusic.ui.library.GroupCard
-import com.abn3li.telemusic.ui.library.GroupFooter
 import com.abn3li.telemusic.ui.library.GroupLabelColor
 import com.abn3li.telemusic.ui.library.LargeTitleGrid
 import com.abn3li.telemusic.ui.library.LargeTitleList
@@ -111,7 +110,6 @@ fun BrowseCollectionScreen(
                             else -> GroupActionRow("Import to Library") { viewModel.importToLibrary() }
                         }
                     }
-                    GroupFooter("Import downloads every song and adds them to a playlist in your library.")
                     Spacer(Modifier.height(12.dp))
                 }
                 itemsIndexed(state.tracks, key = { _, t -> t.videoId }) { index, track ->

@@ -1,5 +1,7 @@
 package com.abn3li.telemusic.ui.library
 
+import androidx.compose.material.icons.rounded.Download
+import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.runtime.mutableIntStateOf
@@ -245,6 +247,9 @@ fun PlaylistDetailScreen(playlistId: Long, playlistName: String, viewModel: Libr
     val list = songs.orEmpty()
     val pinnedKeys by viewModel.pinnedKeys.collectAsState()
     val pinned = playlistPinKey(playlistId) in pinnedKeys
+    // Only a playlist with YouTube songs (one imported from YouTube) gets Download All.
+    val notDownloaded = remember(list) { list.count { it.youtubeVideoId != null && it.localFilePath == null && !it.isExplicitDownload } }
+    val downloadProgress = viewModel.playlistDownloads.collectAsState().value[playlistId]
 
     PlaylistLikePage(
         title = playlistName,
@@ -262,6 +267,19 @@ fun PlaylistDetailScreen(playlistId: Long, playlistName: String, viewModel: Libr
             ) { scope.launch { repository.setPlaylistHiddenFromTracks(playlistId, !hidden) }; close() }
             LibraryMenuDivider()
             PinMenuItem(pinned) { viewModel.togglePin(playlistPinKey(playlistId)); close() }
+            if (downloadProgress != null) {
+                LibraryMenuDivider()
+                LibraryMenuItem(
+                    "Stop All (${downloadProgress.first + 1}/${downloadProgress.second})",
+                    Icons.Rounded.Close,
+                    destructive = true
+                ) { viewModel.stopPlaylistDownload(playlistId); close() }
+            } else if (notDownloaded > 0) {
+                LibraryMenuDivider()
+                LibraryMenuItem("Download All ($notDownloaded)", Icons.Rounded.Download) {
+                    viewModel.downloadAllInPlaylist(playlistId, list); close()
+                }
+            }
             LibraryMenuGroupGap()
             LibraryMenuItem("Delete Playlist", Icons.Rounded.Delete, destructive = true) { confirmDelete = true; close() }
         }

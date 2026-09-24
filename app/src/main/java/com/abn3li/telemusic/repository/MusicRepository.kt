@@ -745,7 +745,8 @@ class MusicRepository(
             count++
         }
         val (partial, partialBytes) = purgePartialAudioFiles()
-        return CacheClearResult(count, partial, freed + partialBytes)
+        val (ytLeftovers, ytBytes) = purgeYouTubeDownloadLeftovers(everything = false)
+        return CacheClearResult(count, partial + ytLeftovers, freed + partialBytes + ytBytes)
     }
 
     /**
@@ -772,6 +773,33 @@ class MusicRepository(
         return deleted to freed
     }
 
+    /**
+     * Cleans the YouTube downloads folder. yt-dlp writes "<stem>.<ext>.part" (plus ".ytdl" for
+     * fragmented streams) and renames on completion, so an interrupted download leaves those
+     * behind forever. [everything] = false (Clear Cache) removes those leftovers and any file no
+     * song row points at, keeping finished downloads; true (Reset Library) removes all of it.
+     * Either way a download that's still running is skipped. Returns (files deleted, bytes freed).
+     */
+    private suspend fun purgeYouTubeDownloadLeftovers(everything: Boolean): Pair<Int, Long> {
+        val files = File(appContext.filesDir, "youtube_downloads").listFiles() ?: return 0 to 0L
+        val active = ytDlpRepository.activeDownloadStems()
+        val referenced = if (everything) emptySet() else songDao.getAllReferencedLocalFilePaths()
+            .mapNotNullTo(HashSet()) { runCatching { File(it).canonicalPath }.getOrNull() }
+        var deleted = 0
+        var freed = 0L
+        for (file in files) {
+            if (!file.isFile || file.name.substringBefore('.') in active) continue
+            val canonical = runCatching { file.canonicalPath }.getOrNull() ?: continue
+            if (canonical in referenced) continue
+            val size = file.length()
+            if (file.delete()) {
+                deleted++
+                freed += size
+            }
+        }
+        return deleted to freed
+    }
+
     /** Deletes EVERY song - Telegram-synced, YouTube-downloaded, and local imports alike - plus
      * playlists and every cached/downloaded/exported audio file on disk, for a 100% fresh start.
      * See [releaseLocalFile] for why a local import's localFilePath isn't always safe to delete
@@ -789,8 +817,10 @@ class MusicRepository(
         }
         settingsStore.lastSyncedChatId = 0L
         // Every row is gone, so any file still in TDLib's music folder is a half-streamed
-        // leftover - wipe those too for a truly fresh start.
+        // leftover, and anything left in the YouTube downloads folder is an orphan or an
+        // interrupted download - wipe those too for a truly fresh start.
         purgePartialAudioFiles()
+        purgeYouTubeDownloadLeftovers(everything = true)
     }
 
     var pinnedPlaylists: List<String>

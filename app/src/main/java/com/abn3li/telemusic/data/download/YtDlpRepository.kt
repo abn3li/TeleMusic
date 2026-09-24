@@ -34,6 +34,12 @@ class YtDlpRepository(context: Context) {
             .also { Log.d("YtDlpRepository", "search(query=$query): ${it.size} results in ${SystemClock.elapsedRealtime() - startedAt}ms") }
     }
 
+    // File-name stems of downloads running right now, so a cache/library wipe never deletes a
+    // file yt-dlp is still writing (its "<stem>.<ext>.part").
+    private val activeStems = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+
+    fun activeDownloadStems(): Set<String> = activeStems.toSet()
+
     suspend fun download(
         videoId: String,
         destDir: File,
@@ -41,7 +47,12 @@ class YtDlpRepository(context: Context) {
         formatSelector: String
     ): Result<YtDlpDownloadResult> =
         withContext(Dispatchers.IO) {
-            runCatching { service.download(videoId, destDir, destFilenameStem, formatSelector) }
+            activeStems.add(destFilenameStem)
+            try {
+                runCatching { service.download(videoId, destDir, destFilenameStem, formatSelector) }
+            } finally {
+                activeStems.remove(destFilenameStem)
+            }
         }
 
     suspend fun resolveStreamUrl(videoId: String, formatSelector: String): Result<YtDlpStreamResult> =
