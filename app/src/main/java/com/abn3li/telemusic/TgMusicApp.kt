@@ -27,6 +27,7 @@ import kotlinx.coroutines.withContext
 class TgMusicApp : Application(), ImageLoaderFactory {
     lateinit var tdlibManager: TdlibManager; private set
     lateinit var musicRepository: MusicRepository; private set
+    lateinit var downloadGate: com.abn3li.telemusic.data.settings.DownloadLocationGate; private set
     lateinit var credentialsStore: TelegramCredentialsStore; private set
     lateinit var settingsStore: AppSettingsStore; private set
     lateinit var playbackQueue: PlaybackQueue; private set
@@ -41,6 +42,7 @@ class TgMusicApp : Application(), ImageLoaderFactory {
         val db = AppDatabase.get(this)
         credentialsStore = TelegramCredentialsStore(this)
         settingsStore = AppSettingsStore(this)
+        downloadGate = com.abn3li.telemusic.data.settings.DownloadLocationGate(settingsStore)
         tdlibManager = TdlibManager(this)
         playbackQueue = PlaybackQueue()
         playbackController = PlaybackController(this)
@@ -72,6 +74,7 @@ class TgMusicApp : Application(), ImageLoaderFactory {
         appScope.launch { musicRepository.backfillThumbnails() }
         appScope.launch { musicRepository.normalizeArtistCredits() }
         appScope.launch { musicRepository.reconcileOrphanedTdlibFiles() }
+        appScope.launch { musicRepository.migrateDownloadsToSingleCopy() }
     }
 
     /**

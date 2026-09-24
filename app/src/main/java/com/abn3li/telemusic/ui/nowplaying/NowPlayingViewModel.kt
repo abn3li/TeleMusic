@@ -588,7 +588,7 @@ class NowPlayingViewModel(
             // for a different song - see that function's own doc for the other half of this: our
             // poll coroutine dying doesn't stop TDLib's own independent download, which needs an
             // explicit cancel.
-            if (!song.isLocalImport && song.youtubeVideoId == null) {
+            if (!song.isLocalImport && song.youtubeVideoId == null && song.localFilePath == null) {
                 launch(Dispatchers.IO) { repository.markStreamedFileCached(song) }
             }
         }

@@ -36,7 +36,6 @@ data class YouTubeDownloadUiState(
     // Set the moment a download is tapped but no folder is saved yet - the screen reacts by
     // launching the system folder picker. The result waiting behind that prompt is kept here
     // rather than re-requested, so picking a folder resumes the exact song the user tapped.
-    val pendingFolderPrompt: YtDlpSearchResult? = null,
     // A row streams (not downloads) while its videoId is in here - shows a spinner in place of
     // its Play icon, same idea as downloadingIds/downloadedIds above but for onPlayClick.
     val loadingStreamIds: Set<String> = emptySet(),
@@ -181,48 +180,14 @@ class YouTubeDownloadViewModel(
         }
     }
 
-    /** Entry point from a row's Download tap - always grabs the best real audio yt-dlp/YouTube
-     * can offer (Opus preferred, see DownloadQuality's own doc), no quality picker any more. The
-     * very first download ever (no folder saved yet) doesn't start immediately: it parks itself
-     * as [YouTubeDownloadUiState.pendingFolderPrompt] so the screen can ask where to save
-     * downloads first. Every later tap - once a folder is saved, or after Skip - goes straight
-     * to [startDownload]. */
+    /** Entry point from a row's Download tap (after the app-wide download-location prompt, see
+     * DownloadLocationGate) - always grabs the best real audio yt-dlp/YouTube can offer (Opus
+     * preferred, see DownloadQuality's own doc). */
     fun onDownloadIconClick(result: YtDlpSearchResult) {
         if (result.videoId in _uiState.value.downloadingIds || result.videoId in _uiState.value.downloadedIds) return
-        if (settingsStore.downloadFolderUri == null) {
-            _uiState.update { it.copy(pendingFolderPrompt = result) }
-        } else {
-            startDownload(result)
-        }
+        startDownload(result)
     }
 
-    /** The user picked a folder from the system picker for [pendingFolderPrompt] (or any later
-     * "Change" in Settings, which doesn't touch this ViewModel at all). Persists it with a
-     * persistable permission grant - without that grant, the URI stops working the moment this
-     * process dies, since a plain SAF grant is only good for the activity result's own lifetime. */
-    fun onFolderPicked(uri: Uri) {
-        runCatching {
-            context.contentResolver.takePersistableUriPermission(
-                uri,
-                android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION or android.content.Intent.FLAG_GRANT_WRITE_URI_PERMISSION
-            )
-        }
-        settingsStore.downloadFolderUri = uri.toString()
-        resumePendingDownload()
-    }
-
-    /** User dismissed the folder prompt without picking one - the download still proceeds, it
-     * just won't have a visible shared-storage copy until a folder is set (in Settings or by
-     * downloading again later). */
-    fun skipFolderPrompt() {
-        resumePendingDownload()
-    }
-
-    private fun resumePendingDownload() {
-        val pending = _uiState.value.pendingFolderPrompt ?: return
-        _uiState.update { it.copy(pendingFolderPrompt = null) }
-        startDownload(pending)
-    }
 
     private fun startDownload(result: YtDlpSearchResult) {
         viewModelScope.launch {

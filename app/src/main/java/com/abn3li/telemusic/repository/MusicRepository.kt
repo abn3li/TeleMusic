@@ -218,8 +218,30 @@ class MusicRepository(
         val extension = File(result.filePath).extension.ifBlank { "m4a" }
         val exportedUri = exportToDownloadFolderIfConfigured(File(result.filePath), sanitizedFileName(result.title, result.artist, extension))
         if (exportedUri != null) {
-            songDao.getById(songId)?.let { songDao.update(it.copy(exportedFileUri = exportedUri.toString())) }
+            // One copy only: the song now lives in (and plays from) the user's folder.
+            songDao.getById(songId)?.let { songDao.update(it.copy(localFilePath = exportedUri.toString(), exportedFileUri = exportedUri.toString())) }
+            runCatching { File(result.filePath).delete() }
         }
+    }
+
+    /**
+     * One-time cleanup for downloads made before single-copy downloads: each one that also has a
+     * copy in the download folder keeps only that copy. The private file is deleted only after
+     * the folder copy is confirmed readable. A single bounded pass, flag-guarded so it never runs
+     * again.
+     */
+    suspend fun migrateDownloadsToSingleCopy() {
+        if (settingsStore.singleCopyMigrationDone) return
+        for (song in songDao.observeAll().firstOrNull().orEmpty()) {
+            val exported = song.exportedFileUri ?: continue
+            val local = song.localFilePath ?: continue
+            if (!song.isExplicitDownload || local.startsWith("content://")) continue
+            if (!isLocalFileValid(exported)) continue
+            songDao.update(song.copy(localFilePath = exported))
+            runCatching { File(local).delete() }
+            if (song.telegramFileId != 0) tdlibManager.forgetDownload(song.telegramFileId)
+        }
+        settingsStore.singleCopyMigrationDone = true
     }
 
     /** A safe, readable filename for the exported copy - real filesystems reject a handful of
@@ -339,7 +361,16 @@ class MusicRepository(
 
     suspend fun clearStaleLocalPath(songId: Long) {
         songDao.getById(songId)?.let { song ->
-            songDao.update(song.copy(localFilePath = null))
+            // A download whose only copy (in the user's folder) was deleted or moved is no longer
+            // a download - it goes back to streaming instead of still showing as downloaded.
+            val wasFolderCopy = song.localFilePath != null && song.localFilePath == song.exportedFileUri
+            songDao.update(
+                song.copy(
+                    localFilePath = null,
+                    isExplicitDownload = if (wasFolderCopy) false else song.isExplicitDownload,
+                    exportedFileUri = if (wasFolderCopy) null else song.exportedFileUri
+                )
+            )
         }
     }
 
@@ -625,13 +656,20 @@ class MusicRepository(
         check(File(path).let { it.exists() && it.length() > 0 }) { "Download completed but file missing/empty at $path" }
         val extension = File(path).extension.ifBlank { "mp3" }
         val exportedUri = exportToDownloadFolderIfConfigured(File(path), sanitizedFileName(song.title, song.artist, extension))
+        // With a download folder, the folder copy is the only copy: it's what plays, and TDLib's
+        // own file is removed (and forgotten) so the song isn't stored twice.
+        val finalPath = exportedUri?.toString() ?: path
         songDao.update(
             song.copy(
-                telegramFileId = freshFileId, localFilePath = path, isExplicitDownload = true,
+                telegramFileId = freshFileId, localFilePath = finalPath, isExplicitDownload = true,
                 exportedFileUri = exportedUri?.toString() ?: song.exportedFileUri
             )
         )
-        return path
+        if (exportedUri != null) {
+            runCatching { File(path).delete() }
+            tdlibManager.forgetDownload(freshFileId)
+        }
+        return finalPath
     }
 
     /** Removes a single song from the library entirely - the row's own "Clear song" menu item.
@@ -640,7 +678,7 @@ class MusicRepository(
      * local copy it has - an auto-cached stream, an explicit download, or a local import's own
      * private copy - and any exported shared-storage copy, so nothing orphaned is left behind. */
     suspend fun clearSong(song: SongEntity) {
-        song.localFilePath?.let(::releaseLocalFile)
+        song.localFilePath?.takeIf { it != song.exportedFileUri }?.let(::releaseLocalFile)
         song.exportedFileUri?.let { uri -> runCatching { mediaFolderExporter.delete(android.net.Uri.parse(uri)) } }
         songDao.delete(song.telegramMessageId)
     }
@@ -670,7 +708,7 @@ class MusicRepository(
      * from before youtubeVideoId existed, has nowhere to fall back to, so removing its only file
      * removes the whole row instead of leaving a dead, unplayable entry behind. */
     suspend fun removeDownload(song: SongEntity) {
-        song.localFilePath?.let(::releaseLocalFile)
+        song.localFilePath?.takeIf { it != song.exportedFileUri }?.let(::releaseLocalFile)
         song.exportedFileUri?.let { uri -> mediaFolderExporter.delete(android.net.Uri.parse(uri)) }
         if (song.youtubeVideoId != null || song.telegramFileId != 0) {
             songDao.update(song.copy(localFilePath = null, isExplicitDownload = false, exportedFileUri = null))
@@ -807,7 +845,7 @@ class MusicRepository(
     suspend fun clearAllLibrarySongs() {
         val allSongs = songDao.observeAll().firstOrNull().orEmpty()
         for (song in allSongs) {
-            song.localFilePath?.let(::releaseLocalFile)
+            song.localFilePath?.takeIf { it != song.exportedFileUri }?.let(::releaseLocalFile)
             song.exportedFileUri?.let { uri -> runCatching { mediaFolderExporter.delete(android.net.Uri.parse(uri)) } }
             songDao.delete(song.telegramMessageId)
         }

@@ -100,12 +100,6 @@ fun YouTubeDownloadScreen(
         )
     }
 
-    val folderPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
-        if (uri != null) viewModel.onFolderPicked(uri) else viewModel.skipFolderPrompt()
-    }
-    if (state.pendingFolderPrompt != null) {
-        DownloadFolderDialog(onChoose = { folderPicker.launch(null) }, onSkip = viewModel::skipFolderPrompt)
-    }
 
     LargeTitleList(
         title = "YouTube",
@@ -134,7 +128,7 @@ fun YouTubeDownloadScreen(
                     isDownloading = result.videoId in state.downloadingIds,
                     isDownloaded = result.videoId in state.downloadedIds,
                     isLoadingStream = result.videoId in state.loadingStreamIds,
-                    onDownloadClick = { viewModel.onDownloadIconClick(result) },
+                    onDownloadClick = { app.downloadGate.run { viewModel.onDownloadIconClick(result) } },
                     onPlayClick = { viewModel.onPlayClick(result) }
                 )
                 if (index < state.results.lastIndex) LibraryDivider(start = 88.dp)
@@ -360,18 +354,6 @@ internal fun CenteredMessage(text: String) {
     }
 }
 
-@Composable
-internal fun DownloadFolderDialog(onChoose: () -> Unit, onSkip: () -> Unit) {
-    AppAlert(
-        title = "Where should downloads be saved?",
-        message = "Pick a folder in your shared storage - every song you download gets a real, visible copy there. You can change this later in Settings.",
-        onDismiss = onSkip,
-        actions = listOf(
-            AlertAction("Skip for Now", onClick = onSkip),
-            AlertAction("Choose Folder", bold = true, onClick = onChoose)
-        )
-    )
-}
 
 /** Paste a YouTube playlist link to pin it in Discovery. */
 @Composable

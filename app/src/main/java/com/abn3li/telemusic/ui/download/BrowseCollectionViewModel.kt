@@ -32,7 +32,6 @@ data class BrowseCollectionUiState(
     val loadingStreamIds: Set<String> = emptySet(),
     // Same folder-prompt flow YouTubeDownloadViewModel uses - kept here too since a user could
     // reach a downloadable track from Discovery without ever visiting the search screen first.
-    val pendingFolderPrompt: BrowseTrack? = null,
     // Non-null while "Import to Library" is running - (done, total) so the button can show real
     // progress instead of just a spinner, since downloading a whole playlist track-by-track can
     // take a while. Set back to null when it finishes (success or failure alike).
@@ -113,38 +112,14 @@ class BrowseCollectionViewModel(
         }
     }
 
-    /** Entry point from a row's Download tap - always grabs the best real audio available (see
-     * DownloadQuality's own doc), no quality picker any more. Matches the search screen's own
-     * folder-prompt flow otherwise. */
+    /** Entry point from a row's Download tap (after the app-wide download-location prompt, see
+     * DownloadLocationGate) - always grabs the best real audio available (see DownloadQuality's
+     * own doc). */
     fun onDownloadClick(track: BrowseTrack) {
         if (track.videoId in _uiState.value.downloadingIds || track.videoId in _uiState.value.downloadedIds) return
-        if (settingsStore.downloadFolderUri == null) {
-            _uiState.update { it.copy(pendingFolderPrompt = track) }
-        } else {
-            startDownload(track)
-        }
+        startDownload(track)
     }
 
-    fun onFolderPicked(uri: Uri) {
-        runCatching {
-            context.contentResolver.takePersistableUriPermission(
-                uri,
-                android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION or android.content.Intent.FLAG_GRANT_WRITE_URI_PERMISSION
-            )
-        }
-        settingsStore.downloadFolderUri = uri.toString()
-        resumePendingDownload()
-    }
-
-    fun skipFolderPrompt() {
-        resumePendingDownload()
-    }
-
-    private fun resumePendingDownload() {
-        val pending = _uiState.value.pendingFolderPrompt ?: return
-        _uiState.update { it.copy(pendingFolderPrompt = null) }
-        startDownload(pending)
-    }
 
     /** "Import to Library" - turns this whole browse collection into a real, permanent library
      * playlist: creates the playlist, then adds every track as a real, lightweight library row

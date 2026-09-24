@@ -6,7 +6,6 @@ import com.abn3li.telemusic.ui.library.AlertTextField
 import android.content.Context
 import android.net.Uri
 import android.os.SystemClock
-import android.provider.OpenableColumns
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.Crossfade
@@ -78,8 +77,6 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import java.io.File
-import java.io.RandomAccessFile
-import java.util.Locale
 import kotlin.math.roundToInt
 
 /** Open/close motion of the whole player sheet - quick, no overshoot. */
@@ -399,7 +396,7 @@ private fun NowPlayingContent(
                 song = song,
                 isDownloading = state.isDownloading,
                 onDismiss = { overflowSong = null },
-                onDownload = { viewModel.downloadCurrentSong() },
+                onDownload = { (context.applicationContext as TgMusicApp).downloadGate.run { viewModel.downloadCurrentSong() } },
                 onSongInfo = { showSongInfoDialog = true },
                 onSearchLyrics = { showManualLyricsDialog = true },
                 onOpenArtist = onOpenArtist,
@@ -767,97 +764,9 @@ internal fun rememberPressScale(interactionSource: InteractionSource): Float {
     return scale
 }
 
-/** Extension-only guess, used both as the final fallback and as the immediate answer for a file
- * too small to have a real header. */
-private fun formatFromExtension(ext: String): String = when (ext.lowercase(Locale.US)) {
-    "mp3" -> "MP3"
-    "m4a", "aac", "mp4" -> "M4A / AAC"
-    "flac" -> "FLAC (Lossless)"
-    "ogg", "opus" -> "OGG / Opus"
-    "wav" -> "WAV"
-    "dsf", "dff" -> "DSD / DSF"
-    else -> ext.uppercase(Locale.US).ifBlank { "Audio Track" }
-}
-
-/** The actual magic-byte sniffing, shared by both the real-file and content:// URI paths below -
- * [header] is the file/stream's first 16 bytes, [bitrateKbps] already derived from its total
- * size. Returns null (caller falls back to an extension guess) if nothing matched. */
-private fun formatFromHeader(header: ByteArray, bitrateKbps: Long): Pair<String, String>? = when {
-    // 0. DSD / DSF Container ("DSD " at byte 0..3)
-    header[0] == 0x44.toByte() && header[1] == 0x53.toByte() && header[2] == 0x44.toByte() && header[3] == 0x20.toByte() ->
-        "DSD / DSF" to "Hi-Res DSD"
-    // 1. MP3 ("ID3" at byte 0..2 or 0xFF 0xFB)
-    (header[0] == 0x49.toByte() && header[1] == 0x44.toByte() && header[2] == 0x33.toByte()) ||
-        (header[0] == 0xFF.toByte() && (header[1].toInt() and 0xE0) == 0xE0) ->
-        "MP3" to "$bitrateKbps kbps"
-    // 2. M4A / AAC ("ftyp" at byte 4..7)
-    header[4] == 0x66.toByte() && header[5] == 0x74.toByte() && header[6] == 0x79.toByte() && header[7] == 0x70.toByte() ->
-        "M4A / AAC" to "$bitrateKbps kbps"
-    // 3. FLAC ("fLaC" at byte 0..3)
-    header[0] == 0x66.toByte() && header[1] == 0x4C.toByte() && header[2] == 0x61.toByte() && header[3] == 0x43.toByte() ->
-        "FLAC (Lossless)" to "Hi-Res Lossless"
-    // 4. OGG / Opus ("OggS" at byte 0..3)
-    header[0] == 0x4F.toByte() && header[1] == 0x67.toByte() && header[2] == 0x68.toByte() && header[3] == 0x53.toByte() ->
-        "OGG / Opus" to "$bitrateKbps kbps"
-    // 5. WAV ("RIFF" at byte 0..3)
-    header[0] == 0x52.toByte() && header[1] == 0x56.toByte() && header[2] == 0x46.toByte() && header[3] == 0x46.toByte() ->
-        "WAV (Uncompressed)" to "Uncompressed Audio"
-    else -> null
-}
-
-/**
- * Inspects file headers to detect the exact audio codec/container format (MP3, M4A/AAC, FLAC,
- * OGG, WAV). [filePath] is either a real filesystem path or a referenced local import's own
- * content:// URI (see SongEntity.isLocalImport's own doc) - java.io.File/RandomAccessFile can't
- * open the latter at all, so that case goes through ContentResolver instead, reading the same
- * first-16-bytes header sequentially rather than via random access (a plain InputStream is all a
- * content:// URI reliably offers).
- */
-internal fun detectAudioFormat(context: Context, filePath: String?, durationSec: Int): Pair<String, String> {
-    if (filePath == null) return "Audio Track" to "320 kbps"
-    val duration = durationSec.coerceAtLeast(1)
-
-    if (filePath.startsWith("content://")) {
-        val uri = Uri.parse(filePath)
-        val extGuess = formatFromExtension(queryDisplayName(context, uri)?.substringAfterLast('.', "").orEmpty())
-        return try {
-            context.contentResolver.openAssetFileDescriptor(uri, "r")?.use { afd ->
-                val header = ByteArray(16)
-                val bytesRead = afd.createInputStream().use { it.read(header) }
-                val fileBytes = afd.length
-                if (bytesRead < 12 || fileBytes <= 0) {
-                    extGuess to "320 kbps"
-                } else {
-                    val bitrateKbps = fileBytes * 8 / duration / 1000
-                    formatFromHeader(header, bitrateKbps) ?: (extGuess to "320 kbps")
-                }
-            } ?: (extGuess to "320 kbps")
-        } catch (_: Exception) {
-            extGuess to "320 kbps"
-        }
-    }
-
-    val file = File(filePath)
-    if (!file.exists() || file.length() < 12) {
-        return formatFromExtension(file.extension) to "320 kbps"
-    }
-
-    try {
-        RandomAccessFile(file, "r").use { raf ->
-            val header = ByteArray(16)
-            raf.readFully(header)
-            val bitrateKbps = file.length() * 8 / duration / 1000
-            formatFromHeader(header, bitrateKbps)?.let { return it }
-        }
-    } catch (_: Exception) {
-    }
-
-    return formatFromExtension(file.extension) to "320 kbps"
-}
 
 /** Size on disk for the Song Info popup - handles both a real filesystem path and a referenced
- * local import's own content:// URI (see detectAudioFormat's own doc for why the two need
- * separate handling). Zero (shown as "Streaming") if the path is missing/unreadable rather than
+ * local import's own content:// URI. Zero (shown as "Streaming") if the path is missing/unreadable rather than
  * a real size. */
 internal fun localFileSizeBytes(context: Context, path: String): Long = try {
     if (path.startsWith("content://")) {
@@ -867,17 +776,6 @@ internal fun localFileSizeBytes(context: Context, path: String): Long = try {
     }
 } catch (_: Exception) {
     0L
-}
-
-/** [OpenableColumns.DISPLAY_NAME] for a content:// URI - the only reliable way to recover a
- * referenced local import's original filename/extension, since the URI itself is an opaque
- * document id, not a real path. Null if the provider won't answer (rare, but not guaranteed). */
-private fun queryDisplayName(context: Context, uri: Uri): String? = try {
-    context.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
-        if (cursor.moveToFirst()) cursor.getString(0) else null
-    }
-} catch (_: Exception) {
-    null
 }
 
 internal fun formatMs(ms: Long): String {

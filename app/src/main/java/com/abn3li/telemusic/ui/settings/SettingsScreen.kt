@@ -157,9 +157,11 @@ fun SettingsScreen(onBack: () -> Unit, onLoggedOut: () -> Unit) {
                 )
             }
             app.settingsStore.downloadFolderUri = treeUri.toString()
+            app.settingsStore.downloadLocationChosen = true
             downloadFolderUri = treeUri
         }
     }
+    var downloadOptionsOpen by remember { mutableStateOf(false) }
 
     LargeTitleList(title = "Settings", onBack = onBack) {
         item("now_playing") {
@@ -213,11 +215,29 @@ fun SettingsScreen(onBack: () -> Unit, onLoggedOut: () -> Unit) {
                 GroupRow(
                     title = "Download Location",
                     icon = { GroupIcon(Icons.Rounded.Folder, TileBlue) },
-                    onClick = { downloadFolderLauncher.launch(null) },
-                    trailing = { GroupValue(downloadFolderUri?.let { readableFolderName(it) } ?: "Not Set") }
+                    onClick = { downloadOptionsOpen = !downloadOptionsOpen },
+                    trailing = { GroupValue(downloadFolderUri?.let { readableFolderName(it) } ?: "App Storage") }
                 )
+                if (downloadOptionsOpen) {
+                    GroupDivider(start = 57.dp)
+                    GroupOption(label = "App Storage", selected = downloadFolderUri == null, startPadding = 57) {
+                        app.settingsStore.downloadFolderUri = null
+                        app.settingsStore.downloadLocationChosen = true
+                        downloadFolderUri = null
+                        downloadOptionsOpen = false
+                    }
+                    GroupDivider(start = 57.dp)
+                    GroupOption(
+                        label = downloadFolderUri?.let { "Folder: ${readableFolderName(it)}" } ?: "Choose Folder…",
+                        selected = downloadFolderUri != null,
+                        startPadding = 57
+                    ) {
+                        downloadOptionsOpen = false
+                        downloadFolderLauncher.launch(null)
+                    }
+                }
             }
-            GroupFooter("Auto-fetch looks up titles, artists, covers and lyrics. Downloads also get a visible copy in the download location, if one is set.")
+            GroupFooter("Auto-fetch looks up titles, artists, covers and lyrics. With a folder, each downloaded song is saved there once and plays from there; App Storage keeps downloads private to TeleMusic. Changing it applies to new downloads.")
         }
 
         item("storage") {

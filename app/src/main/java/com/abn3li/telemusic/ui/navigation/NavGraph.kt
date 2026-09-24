@@ -1,5 +1,10 @@
 package com.abn3li.telemusic.ui.navigation
 
+import com.abn3li.telemusic.ui.library.AlertAction
+import com.abn3li.telemusic.ui.library.AppAlert
+import android.content.Intent
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.activity.compose.rememberLauncherForActivityResult
 import android.net.Uri
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
@@ -299,6 +304,8 @@ fun TgMusicNavGraph(navController: NavHostController = rememberNavController()) 
             )
         }
 
+        DownloadLocationPrompt(app)
+
         PlayerSheetOverlay(
             viewModel = playerViewModel,
             bottomOffset = miniPlayerBottomMargin,
@@ -402,3 +409,36 @@ private data class NavigationItem(
     val label: String,
     val icon: ImageVector
 )
+
+/** The one-time "where should downloads go?" question, shown the first time any download is
+ * started (see DownloadLocationGate). Nothing here runs until a download is actually waiting. */
+@Composable
+private fun DownloadLocationPrompt(app: TgMusicApp) {
+    val gate = app.downloadGate
+    val pending by gate.pending.collectAsState()
+    val folderPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { treeUri ->
+        if (treeUri == null) {
+            gate.cancel()
+        } else {
+            runCatching {
+                app.contentResolver.takePersistableUriPermission(
+                    treeUri,
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+                )
+            }
+            gate.chooseFolder(treeUri.toString())
+        }
+    }
+    if (pending != null) {
+        AppAlert(
+            title = "Where should downloads go?",
+            message = "A folder keeps one copy of each song where your file manager and other music apps can see it. App Storage keeps them private to TeleMusic. You can change this in Settings.",
+            onDismiss = gate::cancel,
+            actions = listOf(
+                AlertAction("Choose Folder", bold = true) { folderPicker.launch(null) },
+                AlertAction("App Storage", onClick = gate::chooseAppStorage),
+                AlertAction("Cancel", onClick = gate::cancel)
+            )
+        )
+    }
+}

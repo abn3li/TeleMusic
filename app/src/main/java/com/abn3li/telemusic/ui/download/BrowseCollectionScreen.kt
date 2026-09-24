@@ -58,12 +58,6 @@ fun BrowseCollectionScreen(
     }
     val state by viewModel.uiState.collectAsState()
 
-    val folderPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
-        if (uri != null) viewModel.onFolderPicked(uri) else viewModel.skipFolderPrompt()
-    }
-    if (state.pendingFolderPrompt != null) {
-        DownloadFolderDialog(onChoose = { folderPicker.launch(null) }, onSkip = viewModel::skipFolderPrompt)
-    }
 
     if (state.collections.isNotEmpty() && state.tracks.isEmpty()) {
         LargeTitleGrid(title = state.title, onBack = onBack) {
@@ -120,7 +114,7 @@ fun BrowseCollectionScreen(
                         isDownloading = track.videoId in state.downloadingIds,
                         isDownloaded = track.videoId in state.downloadedIds,
                         isLoadingStream = track.videoId in state.loadingStreamIds,
-                        onDownloadClick = { viewModel.onDownloadClick(track) },
+                        onDownloadClick = { app.downloadGate.run { viewModel.onDownloadClick(track) } },
                         onPlayClick = { viewModel.onPlayClick(track) }
                     )
                     if (index < state.tracks.lastIndex) LibraryDivider(start = 88.dp)

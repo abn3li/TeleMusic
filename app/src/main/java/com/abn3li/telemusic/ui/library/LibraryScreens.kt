@@ -1,5 +1,7 @@
 package com.abn3li.telemusic.ui.library
 
+import androidx.compose.ui.platform.LocalContext
+import com.abn3li.telemusic.TgMusicApp
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.foundation.layout.Arrangement
@@ -82,6 +84,7 @@ internal fun rememberLibrarySongActions(
     onGoToArtist: (String) -> Unit,
     onGoToAlbum: (String) -> Unit
 ): LibrarySongActions {
+    val app = LocalContext.current.applicationContext as TgMusicApp
     val playlists by viewModel.playlists.collectAsState()
     val downloadingIds by viewModel.downloadingIds.collectAsState()
     return remember(playlists, downloadingIds, viewModel, onPlayNext, onGoToArtist, onGoToAlbum) {
@@ -90,7 +93,7 @@ internal fun rememberLibrarySongActions(
             downloadingIds = downloadingIds,
             onPlayNext = { onPlayNext(it.telegramMessageId) },
             onToggleFavorite = { viewModel.toggleFavorite(it) },
-            onDownload = { viewModel.downloadSong(it) },
+            onDownload = { song -> app.downloadGate.run { viewModel.downloadSong(song) } },
             onRemoveDownload = { viewModel.removeDownload(it) },
             onClearSong = { viewModel.clearSong(it) },
             onAddToPlaylist = { id, song -> viewModel.addSongToPlaylist(id, song) },

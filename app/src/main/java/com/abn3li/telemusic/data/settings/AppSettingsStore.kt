@@ -124,6 +124,23 @@ class AppSettingsStore(context: Context) {
         get() = prefs.getString(KEY_DOWNLOAD_FOLDER_URI, null)
         set(value) = prefs.edit().putString(KEY_DOWNLOAD_FOLDER_URI, value).apply()
 
+    /** Whether the user has answered "where should downloads go?" (app storage or a folder).
+     * Someone who already set a folder before this existed counts as having chosen. */
+    var downloadLocationChosen: Boolean
+        get() = prefs.getBoolean(KEY_DOWNLOAD_LOCATION_CHOSEN, downloadFolderUri != null)
+        set(value) = prefs.edit().putBoolean(KEY_DOWNLOAD_LOCATION_CHOSEN, value).apply()
+
+    /** The one-time "keep only the folder copy" cleanup for downloads made before single-copy
+     * downloads existed has run. */
+    var singleCopyMigrationDone: Boolean
+        get() = prefs.getBoolean(KEY_SINGLE_COPY_DONE, false)
+        set(value) = prefs.edit().putBoolean(KEY_SINGLE_COPY_DONE, value).apply()
+
+    /** The first-launch Android permission pop-ups (notifications, music & audio) were shown. */
+    var permissionsRequested: Boolean
+        get() = prefs.getBoolean(KEY_PERMISSIONS_REQUESTED, false)
+        set(value) = prefs.edit().putBoolean(KEY_PERMISSIONS_REQUESTED, value).apply()
+
     // The three smart (dynamic) playlists' own "Hide from tracks" button - Liked/Telegram/
     // Downloaded aren't real PlaylistEntity rows (see SmartPlaylistKind's own doc), just a
     // different filter over the same songs table, so their own hidden-from-tracks flag lives
@@ -187,6 +204,9 @@ class AppSettingsStore(context: Context) {
         private const val KEY_CACHE_LIMIT = "max_cache_size_bytes"
         private const val KEY_LAST_CHAT_ID = "last_synced_chat_id"
         private const val KEY_DOWNLOAD_FOLDER_URI = "download_folder_uri"
+        private const val KEY_DOWNLOAD_LOCATION_CHOSEN = "download_location_chosen"
+        private const val KEY_SINGLE_COPY_DONE = "single_copy_migration_done"
+        private const val KEY_PERMISSIONS_REQUESTED = "permissions_requested"
         private const val KEY_HIDE_LIKED = "hide_liked_from_tracks"
         private const val KEY_HIDE_TELEGRAM = "hide_telegram_from_tracks"
         private const val KEY_HIDE_DOWNLOADED = "hide_downloaded_from_tracks"

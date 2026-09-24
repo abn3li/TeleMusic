@@ -247,6 +247,7 @@ fun PlaylistDetailScreen(playlistId: Long, playlistName: String, viewModel: Libr
     val list = songs.orEmpty()
     val pinnedKeys by viewModel.pinnedKeys.collectAsState()
     val pinned = playlistPinKey(playlistId) in pinnedKeys
+    val downloadGate = (LocalContext.current.applicationContext as TgMusicApp).downloadGate
     // Only a playlist with YouTube songs (one imported from YouTube) gets Download All.
     val notDownloaded = remember(list) { list.count { it.youtubeVideoId != null && it.localFilePath == null && !it.isExplicitDownload } }
     val downloadProgress = viewModel.playlistDownloads.collectAsState().value[playlistId]
@@ -277,7 +278,7 @@ fun PlaylistDetailScreen(playlistId: Long, playlistName: String, viewModel: Libr
             } else if (notDownloaded > 0) {
                 LibraryMenuDivider()
                 LibraryMenuItem("Download All ($notDownloaded)", Icons.Rounded.Download) {
-                    viewModel.downloadAllInPlaylist(playlistId, list); close()
+                    downloadGate.run { viewModel.downloadAllInPlaylist(playlistId, list) }; close()
                 }
             }
             LibraryMenuGroupGap()
