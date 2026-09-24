@@ -77,6 +77,7 @@ class TgMusicApp : Application(), ImageLoaderFactory {
         appScope.launch { musicRepository.normalizeArtistCredits() }
         appScope.launch { musicRepository.reconcileOrphanedTdlibFiles() }
         appScope.launch { musicRepository.migrateDownloadsToSingleCopy() }
+        appScope.launch { musicRepository.upgradeYouTubeArtwork() }
     }
 
     /**

@@ -1,5 +1,7 @@
 package com.abn3li.telemusic.repository
 
+import com.abn3li.telemusic.data.browse.SAVED_ARTWORK_SIZE
+import com.abn3li.telemusic.data.browse.googleArtworkAtSize
 import android.util.Log
 import com.abn3li.telemusic.data.browse.BrowseParser
 import com.abn3li.telemusic.data.browse.BrowseTrack
@@ -174,7 +176,7 @@ class SpotifyImporter(
             .filter { it.second }
             .minByOrNull { it.third }
             ?.first
-            ?.let { it.copy(title = track.title, thumbnailUrl = biggerArtwork(it.thumbnailUrl)) }
+            ?.let { it.copy(title = track.title, thumbnailUrl = googleArtworkAtSize(it.thumbnailUrl, SAVED_ARTWORK_SIZE)) }
     }
 
     private sealed interface OdesliResult {
@@ -240,8 +242,6 @@ class SpotifyImporter(
         return 1.0 - previous[b.length].toDouble() / longer
     }
 
-    /** YouTube Music search art is 120 px; the same image is served at 544 px by changing the size. */
-    private fun biggerArtwork(url: String?): String? = url?.replace(Regex("""=w\d+-h\d+"""), "=w544-h544")
 
     companion object {
         private const val TAG = "SpotifyImporter"

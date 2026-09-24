@@ -1,5 +1,6 @@
 package com.abn3li.telemusic.ui.library
 
+import com.abn3li.telemusic.data.local.listArtwork
 import android.widget.Toast
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Animatable
@@ -243,7 +244,7 @@ internal fun LibrarySongRow(
 
 @Composable
 internal fun SongArtwork(song: SongEntity, size: Dp, corner: Dp) {
-    val art = song.thumbnailPath ?: song.albumArtUrl
+    val art = song.listArtwork
     Box(
         Modifier.size(size).clip(RoundedCornerShape(corner)).background(Color(0xFF2A2A2E)),
         contentAlignment = Alignment.Center
@@ -338,7 +339,7 @@ private fun SongContextCard(
     var playlistsOpen by remember { mutableStateOf(false) }
     val shape = RoundedCornerShape(18.dp)
     val isRealLocalImport = song.isLocalImport && song.localFilePath != null
-    val hasArtwork = !(song.thumbnailPath ?: song.albumArtUrl).isNullOrEmpty()
+    val hasArtwork = song.listArtwork != null
     val album = song.album?.takeIf { it.isNotBlank() }
 
     Column(

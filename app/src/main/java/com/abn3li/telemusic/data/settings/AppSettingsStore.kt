@@ -136,6 +136,11 @@ class AppSettingsStore(context: Context) {
         get() = prefs.getBoolean(KEY_SINGLE_COPY_DONE, false)
         set(value) = prefs.edit().putBoolean(KEY_SINGLE_COPY_DONE, value).apply()
 
+    /** The one-time upgrade of saved 120 px YouTube artwork links to the sharp size has run. */
+    var youTubeArtworkUpgraded: Boolean
+        get() = prefs.getBoolean(KEY_YT_ARTWORK_UPGRADED, false)
+        set(value) = prefs.edit().putBoolean(KEY_YT_ARTWORK_UPGRADED, value).apply()
+
     /** The first-launch Android permission pop-ups (notifications, music & audio) were shown. */
     var permissionsRequested: Boolean
         get() = prefs.getBoolean(KEY_PERMISSIONS_REQUESTED, false)
@@ -207,6 +212,7 @@ class AppSettingsStore(context: Context) {
         private const val KEY_DOWNLOAD_LOCATION_CHOSEN = "download_location_chosen"
         private const val KEY_SINGLE_COPY_DONE = "single_copy_migration_done"
         private const val KEY_PERMISSIONS_REQUESTED = "permissions_requested"
+        private const val KEY_YT_ARTWORK_UPGRADED = "yt_artwork_upgraded"
         private const val KEY_HIDE_LIKED = "hide_liked_from_tracks"
         private const val KEY_HIDE_TELEGRAM = "hide_telegram_from_tracks"
         private const val KEY_HIDE_DOWNLOADED = "hide_downloaded_from_tracks"

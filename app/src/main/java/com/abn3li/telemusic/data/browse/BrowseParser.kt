@@ -302,7 +302,7 @@ object BrowseParser {
      * always returns, so the last one is the highest resolution available. */
     private fun JSONArray?.best(): String? {
         if (this == null || length() == 0) return null
-        return optJSONObject(length() - 1)?.optString("url")?.takeIf { it.isNotBlank() }
+        return googleArtworkAtSize(optJSONObject(length() - 1)?.optString("url")?.takeIf { it.isNotBlank() }, SAVED_ARTWORK_SIZE)
     }
 
     /** True when the largest thumbnail's own width/height ratio reads as a video frame (16:9-

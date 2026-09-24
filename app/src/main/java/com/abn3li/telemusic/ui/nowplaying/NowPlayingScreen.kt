@@ -1,5 +1,7 @@
 package com.abn3li.telemusic.ui.nowplaying
 
+import com.abn3li.telemusic.data.browse.FULL_ARTWORK_SIZE
+import com.abn3li.telemusic.data.browse.googleArtworkAtSize
 import com.abn3li.telemusic.ui.library.AppAlert
 import com.abn3li.telemusic.ui.library.AlertAction
 import com.abn3li.telemusic.ui.library.AlertTextField
@@ -493,12 +495,15 @@ private fun PlayerPageArea(
     )
     val latestState by rememberUpdatedState(state)
 
-    val artworkRequest = remember(song?.displayArtwork, context) {
+    // YouTube Music art is fetched at 1200 px here (the big cover); everywhere else keeps the
+    // saved 544 px link. Local files and other hosts pass through unchanged.
+    val fullArtwork = remember(song?.displayArtwork) { googleArtworkAtSize(song?.displayArtwork, FULL_ARTWORK_SIZE) }
+    val artworkRequest = remember(fullArtwork, context) {
         ImageRequest.Builder(context)
-            .data(song?.displayArtwork)
+            .data(fullArtwork)
             .crossfade(200)
-            .memoryCacheKey(song?.displayArtwork)
-            .diskCacheKey(song?.displayArtwork)
+            .memoryCacheKey(fullArtwork)
+            .diskCacheKey(fullArtwork)
             .build()
     }
 

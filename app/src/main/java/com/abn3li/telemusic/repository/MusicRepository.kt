@@ -206,7 +206,7 @@ class MusicRepository(
                 title = result.title,
                 artist = result.artist,
                 durationSeconds = result.durationSeconds,
-                albumArtUrl = result.thumbnailUrl,
+                albumArtUrl = com.abn3li.telemusic.data.browse.googleArtworkAtSize(result.thumbnailUrl, com.abn3li.telemusic.data.browse.SAVED_ARTWORK_SIZE),
                 localFilePath = result.filePath,
                 isExplicitDownload = true,
                 metadataEnriched = true,
@@ -247,6 +247,21 @@ class MusicRepository(
         settingsStore.singleCopyMigrationDone = true
     }
 
+    /**
+     * One-time upgrade for YouTube songs saved before artwork was stored sharp: their 120 px
+     * googleusercontent links become the 544 px version of the same image. Only the link changes
+     * (list thumbnails already cached on disk stay); flag-guarded so it never runs again.
+     */
+    suspend fun upgradeYouTubeArtwork() {
+        if (settingsStore.youTubeArtworkUpgraded) return
+        for (song in songDao.observeAll().firstOrNull().orEmpty()) {
+            val url = song.albumArtUrl ?: continue
+            val upgraded = com.abn3li.telemusic.data.browse.googleArtworkAtSize(url, com.abn3li.telemusic.data.browse.SAVED_ARTWORK_SIZE)
+            if (upgraded != url) songDao.update(song.copy(albumArtUrl = upgraded))
+        }
+        settingsStore.youTubeArtworkUpgraded = true
+    }
+
     /** A safe, readable filename for the exported copy - real filesystems reject a handful of
      * characters a song title/artist can legitimately contain (a "/" in a title, for instance). */
     private fun sanitizedFileName(title: String, artist: String, extension: String): String {
@@ -271,7 +286,7 @@ class MusicRepository(
             title = track.title,
             artist = track.artist,
             durationSeconds = track.durationSeconds,
-            albumArtUrl = track.thumbnailUrl,
+            albumArtUrl = com.abn3li.telemusic.data.browse.googleArtworkAtSize(track.thumbnailUrl, com.abn3li.telemusic.data.browse.SAVED_ARTWORK_SIZE),
             youtubeVideoId = track.videoId,
             metadataEnriched = true
         )

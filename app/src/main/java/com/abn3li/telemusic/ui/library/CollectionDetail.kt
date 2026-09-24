@@ -1,5 +1,6 @@
 package com.abn3li.telemusic.ui.library
 
+import com.abn3li.telemusic.data.local.displayArtwork
 import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Check
@@ -128,7 +129,7 @@ fun AlbumDetailScreen(album: String, viewModel: LibraryViewModel, callbacks: Lib
         subtitle = albumArtist,
         onSubtitleClick = albumArtist?.let { artist -> { callbacks.onOpenArtist(artist) } },
         detailLine = songCountLine(list),
-        hero = { HeroImage(list.firstNotNullOfOrNull { it.albumArtUrl ?: it.thumbnailPath }, Icons.Rounded.Album) },
+        hero = { HeroImage(list.firstNotNullOfOrNull { it.displayArtwork }, Icons.Rounded.Album) },
         songs = list,
         loaded = songs != null,
         callbacks = callbacks,
@@ -177,7 +178,7 @@ fun ArtistDetailScreen(artist: String, viewModel: LibraryViewModel, callbacks: L
         subtitle = null,
         onSubtitleClick = null,
         detailLine = "${list.size} ${if (list.size == 1) "Song" else "Songs"}",
-        hero = { HeroImage(list.firstNotNullOfOrNull { it.albumArtUrl ?: it.thumbnailPath }, Icons.Rounded.Album) },
+        hero = { HeroImage(list.firstNotNullOfOrNull { it.displayArtwork }, Icons.Rounded.Album) },
         songs = list,
         loaded = songs != null,
         callbacks = callbacks,
@@ -395,7 +396,7 @@ private fun PlaylistLikePage(
         subtitle = null,
         onSubtitleClick = null,
         detailLine = songCountLine(list),
-        hero = { HeroImage(list.firstNotNullOfOrNull { it.albumArtUrl ?: it.thumbnailPath }, placeholder) },
+        hero = { HeroImage(list.firstNotNullOfOrNull { it.displayArtwork }, placeholder) },
         songs = list,
         loaded = songs != null,
         callbacks = callbacks,

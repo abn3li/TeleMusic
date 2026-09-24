@@ -88,6 +88,13 @@ data class SongEntity(
  * Excludes the literal "none" sentinel [ThumbnailGenerator]/ensureThumbnail's failure path writes
  * to thumbnailPath - that string is not a path, it's a "don't retry" marker.
  */
+/** The small list-row cover: the cached 160 px thumbnail when there is one, else the art link.
+ * Skips the "none" marker a failed thumbnail leaves behind (loading it as an image showed a blank
+ * cover even though the song has art). */
+val SongEntity.listArtwork: String?
+    get() = thumbnailPath?.takeIf { it.isNotBlank() && it != "none" }
+        ?: albumArtUrl?.takeIf { it.isNotBlank() }
+
 val SongEntity.displayArtwork: String?
     get() = albumArtUrl?.takeIf { it.isNotBlank() }
         ?: thumbnailPath?.takeIf { it.isNotBlank() && it != "none" }
