@@ -18,18 +18,22 @@
 </p>
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/abn3li/TeleMusic/master/assets/screenshot-library.jpg" alt="Library" width="30%">
-  <img src="https://raw.githubusercontent.com/abn3li/TeleMusic/master/assets/screenshot-now-playing.jpg" alt="Now Playing" width="30%">
-  <img src="https://raw.githubusercontent.com/abn3li/TeleMusic/master/assets/screenshot-lyrics.jpg" alt="Lyrics" width="30%">
+  <img src="https://raw.githubusercontent.com/abn3li/TeleMusic/master/assets/screenshot-home.jpg" alt="Home" width="23%">
+  <img src="https://raw.githubusercontent.com/abn3li/TeleMusic/master/assets/screenshot-library.jpg" alt="Library" width="23%">
+  <img src="https://raw.githubusercontent.com/abn3li/TeleMusic/master/assets/screenshot-now-playing.jpg" alt="Now Playing" width="23%">
+  <img src="https://raw.githubusercontent.com/abn3li/TeleMusic/master/assets/screenshot-lyrics.jpg" alt="Lyrics" width="23%">
 </p>
 
 ---
 
 ## ✨ Features
 
+- **🏠 Home** — shortcuts, pinned playlists, Recently Played, Made for You mixes, Top Artists and picks from YouTube Music
+- **📱 Home-screen widgets** — small, medium and large, with a live progress bar, shuffle, repeat, Like and up next
 - **🎵 Telegram-native library** — syncs audio from any channel/chat you already belong to, no `@username` guessing
 - **📚 Full library UI** — Playlists, Tracks, Albums, Artists, sortable by name/artist/album/date added
 - **🔍 YouTube Music Discovery** — real, browsable Home/New Releases/Genres feed for downloading
+- **🟢 Spotify import** — paste a Spotify playlist or album link; songs are matched on YouTube Music and can be downloaded
 - **📥 Smart playlists** — Liked Songs, Telegram Songs, and Downloaded Songs, built in and always up to date
 - **🔄 Update checker** — Settings → About checks GitHub for a newer release
 - **🏷️ Auto metadata & artwork** — fills in missing title/artist/album/art via iTunes → Deezer → MusicBrainz
