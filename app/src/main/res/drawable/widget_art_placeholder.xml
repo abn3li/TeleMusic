@@ -1,0 +1,10 @@
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item>
+        <shape android:shape="rectangle">
+            <solid android:color="#FF2A2A2E" />
+            <size android:width="120dp" android:height="120dp" />
+            <corners android:radius="14dp" />
+        </shape>
+    </item>
+    <item android:drawable="@drawable/ic_widget_note" android:gravity="center" android:width="40dp" android:height="40dp" />
+</layer-list>

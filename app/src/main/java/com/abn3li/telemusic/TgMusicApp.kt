@@ -78,6 +78,8 @@ class TgMusicApp : Application(), ImageLoaderFactory {
         appScope.launch { musicRepository.reconcileOrphanedTdlibFiles() }
         appScope.launch { musicRepository.migrateDownloadsToSingleCopy() }
         appScope.launch { musicRepository.upgradeYouTubeArtwork() }
+        // Widgets show the last played song until something plays (no-op with no widget).
+        com.abn3li.telemusic.widget.MusicWidgets.refresh(this)
     }
 
     /**

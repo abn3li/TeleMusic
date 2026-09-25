@@ -89,6 +89,8 @@ class NowPlayingViewModel(
     private var queueRefreshJob: Job? = null
 
     private fun refreshQueue() {
+        // The large widget lists the next songs and shows shuffle (a no-op with no widget).
+        com.abn3li.telemusic.widget.MusicWidgets.refresh(context)
         val nextIds = queue.nextInQueueIds()
         val upNextIds = queue.upNextIds()
         _uiState.value = _uiState.value.copy(hasNext = queue.hasNext(), hasPrevious = queue.hasPrevious())
@@ -432,6 +434,7 @@ class NowPlayingViewModel(
 
     fun toggleRepeat() {
         val mode = queue.toggleRepeat()
+        com.abn3li.telemusic.widget.MusicWidgets.refresh(context)
         _uiState.value = _uiState.value.copy(
             repeatMode = mode,
             hasNext = queue.hasNext(),
@@ -631,6 +634,9 @@ class NowPlayingViewModel(
         }
     }
 
+    // (song id, stored Like) as last seen by the ticker - see its Like sync.
+    private var lastStoredFavorite: Pair<Long, Boolean>? = null
+
     private fun startPositionTicker() {
         tickerJob?.cancel()
         tickerJob = viewModelScope.launch {
@@ -639,10 +645,22 @@ class NowPlayingViewModel(
                 val playing = playbackController.isPlaying()
                 val knownDurationMs = _uiState.value.song?.durationSeconds?.takeIf { it > 0 }?.times(1000L)
                 val effectiveDurationMs = knownDurationMs ?: playbackController.durationMs().coerceAtLeast(_uiState.value.durationMs)
+                // Shuffle, repeat and Like can also change from the home-screen widget.
+                // Like follows a CHANGE in the stored value only, so the in-app star (set before the
+                // database catches up) never flickers back.
+                val shown = _uiState.value.song
+                val storedFavorite = shown?.let { allSongsMap.value[it.telegramMessageId]?.isFavorite }
+                val favoriteKey = shown?.telegramMessageId?.let { id -> storedFavorite?.let { id to it } }
+                val applyStored = favoriteKey != null && lastStoredFavorite?.first == favoriteKey.first &&
+                    lastStoredFavorite != favoriteKey && storedFavorite != shown.isFavorite
+                lastStoredFavorite = favoriteKey
                 _uiState.value = _uiState.value.copy(
                     currentPositionMs = pos,
                     durationMs = effectiveDurationMs,
-                    isPlaying = playing
+                    isPlaying = playing,
+                    isShuffleEnabled = queue.isShuffleEnabled,
+                    repeatMode = queue.repeatMode,
+                    song = if (applyStored && shown != null && storedFavorite != null) shown.copy(isFavorite = storedFavorite) else shown
                 )
                 // Nothing moves while paused; a slower poll still catches a resume from the
                 // notification or headset within a second.

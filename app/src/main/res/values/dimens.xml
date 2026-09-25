@@ -1,0 +1,4 @@
+<resources>
+    <!-- Widget corner radius; Android 12+ uses the launcher's own radius (values-v31). -->
+    <dimen name="widget_radius">24dp</dimen>
+</resources>

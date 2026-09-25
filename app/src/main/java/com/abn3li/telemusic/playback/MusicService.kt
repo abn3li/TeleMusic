@@ -2,8 +2,17 @@ package com.abn3li.telemusic.playback
 
 import kotlinx.coroutines.Job
 import android.app.PendingIntent
+import android.app.KeyguardManager
+import android.content.BroadcastReceiver
+import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
+import android.os.Handler
+import android.os.Looper
+import android.os.PowerManager
 import android.os.SystemClock
+import androidx.core.content.ContextCompat
+import com.abn3li.telemusic.widget.MusicWidgets
 import android.util.Log
 import androidx.annotation.OptIn
 import androidx.media3.common.AudioAttributes
@@ -36,7 +45,16 @@ import kotlinx.coroutines.withContext
 // A song whose fresh YouTube link also fails isn't refetched again within this window.
 private const val LINK_REFRESH_COOLDOWN_MS = 60_000L
 
+// How often the widget progress bar moves while music plays (see widgetProgressTick).
+private const val WIDGET_TICK_MS = 1_000L
+
 class MusicService : MediaLibraryService() {
+    companion object {
+        // The running service, for the widget's next/previous (same process, main thread).
+        @Volatile var running: MusicService? = null
+            private set
+    }
+
     // MediaLibrarySession (not a plain MediaSession) is what makes this service browsable by
     // Android Auto/Automotive - see AutoLibraryCallback for the actual browse tree/car playback
     // resolution wired in below via .setCallback().
@@ -47,6 +65,7 @@ class MusicService : MediaLibraryService() {
     @OptIn(UnstableApi::class)
     override fun onCreate() {
         super.onCreate()
+        running = this
         val app = application as TgMusicApp
         val dataSourceFactory = DefaultDataSource.Factory(this, ResolvingDataSource.Factory(app.tdlibManager))
 
@@ -79,7 +98,24 @@ class MusicService : MediaLibraryService() {
             .build()
         player.addListener(object : Player.Listener {
             override fun onPlayerError(error: PlaybackException) = refreshExpiredStreamLink(error)
+
+            override fun onEvents(player: Player, events: Player.Events) {
+                if (events.containsAny(
+                        Player.EVENT_MEDIA_ITEM_TRANSITION, Player.EVENT_IS_PLAYING_CHANGED,
+                        Player.EVENT_PLAYBACK_STATE_CHANGED, Player.EVENT_POSITION_DISCONTINUITY
+                    )
+                ) onPlayerChangedForWidgets()
+            }
         })
+        ContextCompat.registerReceiver(
+            this, screenReceiver,
+            IntentFilter().apply {
+                addAction(Intent.ACTION_SCREEN_ON)
+                addAction(Intent.ACTION_SCREEN_OFF)
+                addAction(Intent.ACTION_USER_PRESENT)
+            },
+            ContextCompat.RECEIVER_NOT_EXPORTED
+        )
 
         val queueAwarePlayer = QueueAwareForwardingPlayer(
             player = player,
@@ -112,6 +148,10 @@ class MusicService : MediaLibraryService() {
     // Background "did this stream finish?" poll for the song a skip started - same auto-cache
     // bookkeeping NowPlayingViewModel does for in-app plays, replaced on every skip.
     private var cacheJob: Job? = null
+
+    /** Widget next/previous: the same skip the notification buttons do. Main thread only. */
+    fun skipToNextFromWidget() = skipTo((application as TgMusicApp).playbackQueue.next())
+    fun skipToPreviousFromWidget() = skipTo((application as TgMusicApp).playbackQueue.previous())
 
     private fun skipTo(songId: Long?) {
         if (songId == null) return
@@ -162,6 +202,48 @@ class MusicService : MediaLibraryService() {
         }
     }
 
+    // ---- Home-screen widgets ----
+    // The widgets are redrawn on player events only. The one repeating job is the progress
+    // bar's once-a-second step, and it runs only while ALL of these hold: music is playing, a
+    // widget is placed, the screen is on and unlocked. Pause, screen off or lock stops it.
+    private val widgetHandler = Handler(Looper.getMainLooper())
+    private val widgetProgressTick = object : Runnable {
+        override fun run() {
+            if (!shouldTickWidgets()) return
+            MusicWidgets.updateProgress(this@MusicService)
+            widgetHandler.postDelayed(this, WIDGET_TICK_MS)
+        }
+    }
+    private val screenReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) = updateWidgetTicking()
+    }
+
+    private fun onPlayerChangedForWidgets() {
+        val duration = player.duration.takeIf { it != androidx.media3.common.C.TIME_UNSET && it > 0 } ?: 0L
+        MusicWidgets.onPlayerChanged(
+            this,
+            MusicWidgets.PlayerState(
+                songId = player.currentMediaItem?.mediaId?.toLongOrNull(),
+                isPlaying = player.isPlaying,
+                positionMs = player.currentPosition,
+                durationMs = duration
+            )
+        )
+        updateWidgetTicking()
+    }
+
+    private fun shouldTickWidgets(): Boolean {
+        if (!player.isPlaying || !MusicWidgets.hasWidgets(this)) return false
+        val interactive = getSystemService(PowerManager::class.java)?.isInteractive ?: true
+        val locked = getSystemService(KeyguardManager::class.java)?.isKeyguardLocked ?: false
+        return interactive && !locked
+    }
+
+    private fun updateWidgetTicking() {
+        widgetHandler.removeCallbacks(widgetProgressTick)
+        if (shouldTickWidgets()) widgetHandler.postDelayed(widgetProgressTick, WIDGET_TICK_MS)
+    }
+
     // The last expired-link recovery (see refreshExpiredStreamLink): its job, song and time.
     private var linkRefreshJob: Job? = null
     private var lastLinkRefreshSongId: Long? = null
@@ -205,6 +287,14 @@ class MusicService : MediaLibraryService() {
     }
 
     override fun onDestroy() {
+        if (running === this) running = null
+        widgetHandler.removeCallbacks(widgetProgressTick)
+        runCatching { unregisterReceiver(screenReceiver) }
+        // The player goes away with the service: widgets show the song as paused.
+        val last = MusicWidgets.player
+        MusicWidgets.onPlayerChanged(
+            this, last.copy(isPlaying = false, positionMs = last.positionNow(), atElapsedMs = SystemClock.elapsedRealtime())
+        )
         serviceScope.cancel()
         mediaSession?.run { player.release(); release(); mediaSession = null }
         super.onDestroy()

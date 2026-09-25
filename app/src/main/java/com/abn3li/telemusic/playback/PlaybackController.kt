@@ -132,6 +132,20 @@ class PlaybackController(context: Context) {
     fun stop() { controller?.stop() }
 
     fun togglePlayPause() { controller?.let { if (it.isPlaying) it.pause() else it.play() } }
+
+    /** True once the controller is connected and a song is loaded in the player. */
+    fun hasMedia(): Boolean = (controller?.mediaItemCount ?: 0) > 0
+
+    /** Suspends until [connect] has finished (immediately if it already has), or [timeoutMs]
+     * passes. For callers that can run right at process start, like a widget button. */
+    suspend fun awaitConnected(timeoutMs: Long = 5_000L): Boolean {
+        if (controller != null) return true
+        val deadline = android.os.SystemClock.elapsedRealtime() + timeoutMs
+        while (controller == null && android.os.SystemClock.elapsedRealtime() < deadline) {
+            kotlinx.coroutines.delay(50)
+        }
+        return controller != null
+    }
     fun seekTo(positionMs: Long) { controller?.seekTo(positionMs) }
     fun currentPositionMs(): Long = controller?.currentPosition ?: 0L
     fun durationMs(): Long = controller?.duration?.takeIf { it > 0 } ?: 0L

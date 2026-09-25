@@ -48,6 +48,47 @@
             android:exported="false"
             android:foregroundServiceType="dataSync" />
 
+        <!-- Home-screen widgets (see widget/MusicWidgets.kt) and their button handler. -->
+        <receiver
+            android:name=".widget.SmallMusicWidget"
+            android:exported="false"
+            android:label="@string/widget_small_label">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/widget_small_info" />
+        </receiver>
+
+        <receiver
+            android:name=".widget.MediumMusicWidget"
+            android:exported="false"
+            android:label="@string/widget_medium_label">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/widget_medium_info" />
+        </receiver>
+
+        <receiver
+            android:name=".widget.LargeMusicWidget"
+            android:exported="false"
+            android:label="@string/widget_large_label">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/widget_large_info" />
+        </receiver>
+
+        <receiver
+            android:name=".widget.WidgetActionReceiver"
+            android:exported="false" />
+
         <!-- Declares this app as an Android Auto media app - required for Auto's launcher to
              list it at all, separate from the MediaLibraryService intent-filter above (that's
              what lets Auto's browser actually connect once it does). -->

@@ -1,3 +1,9 @@
 <resources>
     <string name="app_name">TeleMusic</string>
+    <string name="widget_small_label">TeleMusic Small</string>
+    <string name="widget_medium_label">TeleMusic Medium</string>
+    <string name="widget_large_label">TeleMusic Large</string>
+    <string name="widget_small_description">Cover and play button</string>
+    <string name="widget_medium_description">Now playing with controls</string>
+    <string name="widget_large_description">Controls, Like and up next</string>
 </resources>

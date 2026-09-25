@@ -113,7 +113,11 @@ class MusicRepository(
     fun observeFavorites(sortField: SortField, ascending: Boolean): Flow<List<SongEntity>> =
         songDao.observeFavorites().map { it.sortedByField(sortField, ascending) }
 
-    suspend fun setFavorite(song: SongEntity, isFavorite: Boolean) = songDao.setFavorite(song.telegramMessageId, isFavorite)
+    suspend fun setFavorite(song: SongEntity, isFavorite: Boolean) {
+        songDao.setFavorite(song.telegramMessageId, isFavorite)
+        // The large widget shows the Like star (a no-op when no widget is placed).
+        com.abn3li.telemusic.widget.MusicWidgets.refresh(appContext)
+    }
 
     // ---- Smart (built-in) playlists: Liked/Telegram/Downloaded - not real rows in the
     // playlists table, just a different filter over the same songs table. ----
