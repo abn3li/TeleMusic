@@ -29,8 +29,8 @@ android {
         applicationId = "com.abn3li.telemusic"
         minSdk = 26
         targetSdk = 34
-        versionCode = 11
-        versionName = "2.0"
+        versionCode = 12
+        versionName = "2.1"
         // No Telegram credentials anywhere in the build - user enters them at runtime
         // (see ui/credentials/CredentialsScreen.kt + data/telegram/TelegramCredentialsStore.kt)
 
