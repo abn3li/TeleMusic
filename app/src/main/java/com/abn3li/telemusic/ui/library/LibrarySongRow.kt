@@ -1,6 +1,7 @@
 package com.abn3li.telemusic.ui.library
 
 import com.abn3li.telemusic.data.local.listArtwork
+import com.abn3li.telemusic.data.local.displayArtwork
 import android.widget.Toast
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Animatable
@@ -244,14 +245,22 @@ internal fun LibrarySongRow(
 
 @Composable
 internal fun SongArtwork(song: SongEntity, size: Dp, corner: Dp) {
-    val art = song.listArtwork
+    // The cached list thumbnail is only 160 px - sharp in a list row, blurry stretched across a
+    // Home card (128 dp is ~380 px). Big tiles load the full cover instead; Coil decodes it down
+    // to the tile's size once and keeps it in memory, so scrolling back costs nothing.
+    // If the full cover can't load (a dead link), fall back to the thumbnail rather than blank.
+    var fullFailed by remember(song.telegramMessageId) { mutableStateOf(false) }
+    val art = if (size >= LARGE_TILE && !fullFailed) song.displayArtwork else song.listArtwork
     Box(
         Modifier.size(size).clip(RoundedCornerShape(corner)).background(Color(0xFF2A2A2E)),
         contentAlignment = Alignment.Center
     ) {
         Icon(Icons.Rounded.MusicNote, null, tint = Color.White.copy(alpha = 0.3f), modifier = Modifier.size(size * 0.45f))
         if (!art.isNullOrEmpty()) {
-            AsyncImage(model = art, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+            AsyncImage(
+                model = art, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize(),
+                onError = { if (size >= LARGE_TILE && art != song.listArtwork) fullFailed = true }
+            )
         }
     }
 }
@@ -262,6 +271,9 @@ private object WindowOriginPosition : PopupPositionProvider {
 }
 
 private val MenuEstimatedHeight = 430.dp
+
+/** From this size up, [SongArtwork] shows the full cover rather than the list thumbnail. */
+private val LARGE_TILE = 96.dp
 
 /** The long-press card: song header, then actions. Pops in at the pressed row. */
 @Composable
