@@ -17,7 +17,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -110,7 +109,7 @@ private fun AlertButton(action: AlertAction, modifier: Modifier) {
         contentAlignment = Alignment.Center
     ) {
         if (action.loading) {
-            CircularProgressIndicator(color = color, strokeWidth = 2.dp, modifier = Modifier.size(18.dp))
+            CalmSpinner(color = color, strokeWidth = 2.dp, modifier = Modifier.size(18.dp))
         } else {
             Text(
                 action.label,

@@ -1,5 +1,6 @@
 package com.abn3li.telemusic.ui.nowplaying
 
+import com.abn3li.telemusic.ui.library.CalmSpinner
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
@@ -49,7 +50,6 @@ import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.automirrored.rounded.QueueMusic
 import androidx.compose.material.icons.automirrored.rounded.VolumeDown
 import androidx.compose.material.icons.automirrored.rounded.VolumeUp
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -279,7 +279,7 @@ private fun TransportButton(
             Icon(icon, contentDescription, tint = Color.White, modifier = Modifier.size(iconSize).alpha(alpha))
         }
         if (loading) {
-            CircularProgressIndicator(
+            CalmSpinner(
                 color = Color.White.copy(alpha = 0.55f),
                 strokeWidth = 2.dp,
                 modifier = Modifier.size(iconSize + 16.dp)

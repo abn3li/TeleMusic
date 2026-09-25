@@ -152,7 +152,13 @@ class PlaybackQueue {
         }
     }
 
+    // Bumped when shuffle or repeat changes, from anywhere (the app or the home-screen widget),
+    // so Now Playing can follow without polling.
+    private val _modeChanges = kotlinx.coroutines.flow.MutableStateFlow(0)
+    val modeChanges: kotlinx.coroutines.flow.StateFlow<Int> = _modeChanges
+
     fun toggleShuffle(): Boolean {
+        _modeChanges.value++
         isShuffleEnabled = !isShuffleEnabled
         val currentId = currentSongId() ?: return isShuffleEnabled
         if (isShuffleEnabled) {
@@ -166,6 +172,7 @@ class PlaybackQueue {
     }
 
     fun toggleRepeat(): RepeatMode {
+        _modeChanges.value++
         repeatMode = when (repeatMode) {
             RepeatMode.OFF -> RepeatMode.ALL
             RepeatMode.ALL -> RepeatMode.ONE

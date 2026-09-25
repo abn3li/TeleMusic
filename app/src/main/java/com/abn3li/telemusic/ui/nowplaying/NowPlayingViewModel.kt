@@ -205,6 +205,11 @@ class NowPlayingViewModel(
     // still reacted to a song ending - advancing the shared queue and stopping playback from a
     // scope that could no longer start the next song.
     private val playerListener = object : Player.Listener {
+            override fun onIsPlayingChanged(isPlaying: Boolean) = startPositionTicker()
+
+            override fun onPositionDiscontinuity(oldPosition: Player.PositionInfo, newPosition: Player.PositionInfo, reason: Int) =
+                startPositionTicker()
+
             override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
                 val songId = mediaItem?.mediaId?.toLongOrNull() ?: return
                 // Already showing this song - either nothing changed, or this transition is the
@@ -235,11 +240,23 @@ class NowPlayingViewModel(
     }
 
     init {
-        // A single persistent ticker for the life of this ViewModel (now app-session-scoped,
-        // constructed once at the nav root instead of per-screen) - just keeps
-        // position/duration/isPlaying/queue-flags in sync; song changes are always driven
-        // explicitly below, never detected passively here.
+        // Keeps position/duration/isPlaying in sync while playing (it stops when paused - see
+        // startPositionTicker); song changes are always driven explicitly below.
         startPositionTicker()
+
+        // Shuffle, repeat and Like can also change from the home-screen widget. Both are
+        // followed as events - a queue mode change, or the library table changing - never polled.
+        viewModelScope.launch {
+            queue.modeChanges.collect {
+                _uiState.value = _uiState.value.copy(
+                    isShuffleEnabled = queue.isShuffleEnabled,
+                    repeatMode = queue.repeatMode,
+                    hasNext = queue.hasNext(),
+                    hasPrevious = queue.hasPrevious()
+                )
+            }
+        }
+        viewModelScope.launch { allSongsMap.collect { syncLikeFromLibrary(it) } }
 
         // The system media notification's own next/previous buttons are handled entirely
         // inside MusicService (via QueueAwareForwardingPlayer), independent of whether this
@@ -634,8 +651,16 @@ class NowPlayingViewModel(
         }
     }
 
-    // (song id, stored Like) as last seen by the ticker - see its Like sync.
-    private var lastStoredFavorite: Pair<Long, Boolean>? = null
+    /** Applies a Like changed outside Now Playing (the widget, a song row). Runs only when the
+     * library changes; the database is always written before the in-app star, so the stored
+     * value here is never older than what's shown. */
+    private fun syncLikeFromLibrary(library: Map<Long, SongEntity>) {
+        val shown = _uiState.value.song ?: return
+        val storedFavorite = library[shown.telegramMessageId]?.isFavorite ?: return
+        if (storedFavorite != shown.isFavorite) {
+            _uiState.value = _uiState.value.copy(song = shown.copy(isFavorite = storedFavorite))
+        }
+    }
 
     private fun startPositionTicker() {
         tickerJob?.cancel()
@@ -645,26 +670,16 @@ class NowPlayingViewModel(
                 val playing = playbackController.isPlaying()
                 val knownDurationMs = _uiState.value.song?.durationSeconds?.takeIf { it > 0 }?.times(1000L)
                 val effectiveDurationMs = knownDurationMs ?: playbackController.durationMs().coerceAtLeast(_uiState.value.durationMs)
-                // Shuffle, repeat and Like can also change from the home-screen widget.
-                // Like follows a CHANGE in the stored value only, so the in-app star (set before the
-                // database catches up) never flickers back.
-                val shown = _uiState.value.song
-                val storedFavorite = shown?.let { allSongsMap.value[it.telegramMessageId]?.isFavorite }
-                val favoriteKey = shown?.telegramMessageId?.let { id -> storedFavorite?.let { id to it } }
-                val applyStored = favoriteKey != null && lastStoredFavorite?.first == favoriteKey.first &&
-                    lastStoredFavorite != favoriteKey && storedFavorite != shown.isFavorite
-                lastStoredFavorite = favoriteKey
                 _uiState.value = _uiState.value.copy(
                     currentPositionMs = pos,
                     durationMs = effectiveDurationMs,
-                    isPlaying = playing,
-                    isShuffleEnabled = queue.isShuffleEnabled,
-                    repeatMode = queue.repeatMode,
-                    song = if (applyStored && shown != null && storedFavorite != null) shown.copy(isFavorite = storedFavorite) else shown
+                    isPlaying = playing
                 )
-                // Nothing moves while paused; a slower poll still catches a resume from the
-                // notification or headset within a second.
-                delay(if (playing) 300 else 1000)
+                // Paused: nothing moves, so stop - no polling while idle. The player listener
+                // (onIsPlayingChanged / onPositionDiscontinuity) starts it again on a resume or a
+                // seek from anywhere: the app, the notification, headphones or the widget.
+                if (!playing) break
+                delay(300)
             }
         }
     }
@@ -680,15 +695,14 @@ class NowPlayingViewModel(
         }
     }
 
-    // Flips isPlaying in state immediately, not just the player itself - the icon otherwise
-    // only caught up on the NEXT 300ms position-tick poll (startPositionTicker below), which
-    // read as the wrong icon (still showing Play right after tapping it) sitting there for a
-    // beat before flipping. This is the standard optimistic-update pattern: assume the toggle
-    // succeeded and show that immediately, then let the next tick's real
-    // playbackController.isPlaying() read silently correct it if it didn't.
+    // Shows the new state right away (optimistic), as the state the tap goes TO - not a flip of
+    // what's on screen: pause() reports "not playing" to the player listener synchronously,
+    // which already updates the state, and flipping after that put the Pause icon back on a
+    // paused song. The listener then keeps it right (onIsPlayingChanged).
     fun togglePlayPause() {
+        val willPlay = !playbackController.isPlaying()
         playbackController.togglePlayPause()
-        _uiState.value = _uiState.value.copy(isPlaying = !_uiState.value.isPlaying)
+        _uiState.value = _uiState.value.copy(isPlaying = willPlay)
     }
 
     fun seekTo(positionMs: Long) {

@@ -48,6 +48,22 @@
             android:exported="false"
             android:foregroundServiceType="dataSync" />
 
+        <!-- Spotify sign-in comes back here (telemusic://spotify) - see SpotifyAccount. -->
+        <activity
+            android:name=".ui.spotify.SpotifyAuthActivity"
+            android:exported="true"
+            android:excludeFromRecents="true"
+            android:noHistory="true"
+            android:taskAffinity=""
+            android:theme="@android:style/Theme.NoDisplay">
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="telemusic" android:host="spotify" />
+            </intent-filter>
+        </activity>
+
         <!-- Home-screen widgets (see widget/MusicWidgets.kt) and their button handler. -->
         <receiver
             android:name=".widget.SmallMusicWidget"

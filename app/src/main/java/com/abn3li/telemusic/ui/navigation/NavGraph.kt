@@ -1,5 +1,6 @@
 package com.abn3li.telemusic.ui.navigation
 
+import kotlinx.coroutines.flow.first
 import com.abn3li.telemusic.ui.library.HomeScreen
 import androidx.compose.material.icons.filled.Home
 import com.abn3li.telemusic.ui.library.AlertAction
@@ -102,6 +103,7 @@ object Routes {
     const val PLAYLIST = "playlist/{id}/{name}"
     const val SMART_PLAYLIST = "smart_playlist/{kind}"
     const val YOUTUBE_DOWNLOAD = "youtube_download"
+    const val SPOTIFY = "spotify"
     const val YOUTUBE_BROWSE = "youtube_browse/{browseId}/{title}/{params}"
 
     fun album(name: String) = "album/${Uri.encode(name)}"
@@ -166,6 +168,16 @@ fun TgMusicNavGraph(navController: NavHostController = rememberNavController()) 
         }
     }
 
+    // "Import and Download All" from Spotify: once the import finishes, queue its songs through
+    // the same Download All (and download-location prompt) as the playlist menu.
+    val pendingSpotifyDownload by app.spotifyImporter.pendingDownload.collectAsState()
+    LaunchedEffect(pendingSpotifyDownload) {
+        val playlistId = pendingSpotifyDownload ?: return@LaunchedEffect
+        app.spotifyImporter.downloadStarted()
+        val songs = app.musicRepository.observeSongsInPlaylist(playlistId).first()
+        app.downloadGate.run { libraryViewModel.downloadAllInPlaylist(playlistId, songs) }
+    }
+
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = navBackStackEntry?.destination?.route
     val inLibrary = currentRoute in LibraryRoutes
@@ -205,6 +217,12 @@ fun TgMusicNavGraph(navController: NavHostController = rememberNavController()) 
                         onOpenPlaylist = { id, name -> navController.navigate(Routes.playlist(id, name)) },
                         onOpenSmartPlaylist = { kind -> navController.navigate(Routes.smartPlaylist(kind)) },
                         onOpenYouTubeCollection = { c -> navController.navigate(Routes.youtubeBrowse(c.browseId, c.title, c.params)) }
+                    )
+                }
+                composable(Routes.SPOTIFY) {
+                    com.abn3li.telemusic.ui.spotify.SpotifyLibraryScreen(
+                        onBack = { navController.popBackStack() },
+                        onOpenPlaylist = { id, name -> navController.navigate(Routes.playlist(id, name)) }
                     )
                 }
                 composable(Routes.LIBRARY) {
@@ -265,6 +283,7 @@ fun TgMusicNavGraph(navController: NavHostController = rememberNavController()) 
                 composable(Routes.SETTINGS) {
                     SettingsScreen(
                         onBack = { navController.popBackStack() },
+                        onOpenSpotify = { navController.navigate(Routes.SPOTIFY) },
                         onLoggedOut = { navController.navigate(Routes.CREDENTIALS) { popUpTo(0) { inclusive = true } } }
                     )
                 }

@@ -28,6 +28,8 @@ class TgMusicApp : Application(), ImageLoaderFactory {
     lateinit var tdlibManager: TdlibManager; private set
     lateinit var musicRepository: MusicRepository; private set
     lateinit var spotifyImporter: com.abn3li.telemusic.repository.SpotifyImporter; private set
+    lateinit var spotifyAccount: com.abn3li.telemusic.data.spotify.SpotifyAccount; private set
+    lateinit var spotifyDao: com.abn3li.telemusic.data.local.SpotifyDao; private set
     lateinit var downloadGate: com.abn3li.telemusic.data.settings.DownloadLocationGate; private set
     lateinit var credentialsStore: TelegramCredentialsStore; private set
     lateinit var settingsStore: AppSettingsStore; private set
@@ -58,9 +60,12 @@ class TgMusicApp : Application(), ImageLoaderFactory {
             localAudioImporter = LocalAudioImporter(this),
             mediaFolderExporter = MediaFolderExporter(this),
             ytDlpRepository = ytDlpRepository,
+            database = db,
             context = this
         )
-        spotifyImporter = com.abn3li.telemusic.repository.SpotifyImporter(musicRepository, appScope)
+        spotifyAccount = com.abn3li.telemusic.data.spotify.SpotifyAccount(this, appScope)
+        spotifyDao = db.spotifyDao()
+        spotifyImporter = com.abn3li.telemusic.repository.SpotifyImporter(musicRepository, appScope, spotifyAccount, spotifyDao, this)
         if (credentialsStore.hasCredentials()) {
             tdlibManager.start(
                 apiId = credentialsStore.getApiId(),

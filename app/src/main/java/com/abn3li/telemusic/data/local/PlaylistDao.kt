@@ -42,6 +42,12 @@ interface PlaylistDao {
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun addSong(crossRef: PlaylistSongCrossRef)
 
+    @Query("SELECT COUNT(*) FROM playlists WHERE id = :id")
+    suspend fun countById(id: Long): Int
+
+    @Query("SELECT songId FROM playlist_song_cross_ref WHERE playlistId = :playlistId")
+    suspend fun songIdsInPlaylist(playlistId: Long): List<Long>
+
     @Query("SELECT * FROM playlist_song_cross_ref WHERE songId = :songId")
     suspend fun getEntriesForSong(songId: Long): List<PlaylistSongCrossRef>
 

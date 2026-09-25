@@ -1,17 +1,24 @@
 package com.abn3li.telemusic.repository
 
-import com.abn3li.telemusic.data.browse.SAVED_ARTWORK_SIZE
-import com.abn3li.telemusic.data.browse.googleArtworkAtSize
+import android.content.Context
 import android.util.Log
+import android.widget.Toast
 import com.abn3li.telemusic.data.browse.BrowseParser
 import com.abn3li.telemusic.data.browse.BrowseTrack
 import com.abn3li.telemusic.data.browse.InnertubeBrowseClient
+import com.abn3li.telemusic.data.browse.SAVED_ARTWORK_SIZE
+import com.abn3li.telemusic.data.browse.googleArtworkAtSize
+import com.abn3li.telemusic.data.local.SpotifyDao
+import com.abn3li.telemusic.data.local.SpotifyLinkEntity
+import com.abn3li.telemusic.data.local.SpotifyTrackMapEntity
+import com.abn3li.telemusic.data.spotify.SpotifyAccount
+import com.abn3li.telemusic.data.spotify.SpotifyPlaylist
+import com.abn3li.telemusic.data.spotify.SpotifyTrack
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
@@ -22,25 +29,41 @@ import java.text.Normalizer
 import java.util.concurrent.TimeUnit
 import kotlin.math.abs
 
-/** Where a Spotify import is at, for the Import Playlist dialog. */
+/** Where a Spotify import is at, for the Import Playlist dialog and Home. */
 sealed interface SpotifyImportState {
     data object Idle : SpotifyImportState
-    data class Running(val name: String, val done: Int, val total: Int) : SpotifyImportState
-    data class Finished(val name: String, val matched: Int, val total: Int) : SpotifyImportState
+    data class Running(val name: String, val done: Int, val total: Int, val key: String = "") : SpotifyImportState
+    data class Finished(
+        val name: String,
+        val matched: Int,
+        val total: Int,
+        val playlistId: Long = 0L,
+        val added: Int = 0,
+        val updated: Boolean = false
+    ) : SpotifyImportState {
+        /** One line for a dialog or a toast. */
+        val summary: String
+            get() = if (updated) {
+                if (added == 0) "\"$name\" is up to date." else "Added $added new ${if (added == 1) "song" else "songs"} to \"$name\"."
+            } else {
+                "Added $matched of $total songs to \"$name\"." + if (matched < total) " The rest couldn't be found on YouTube Music." else ""
+            }
+    }
     data class Failed(val message: String) : SpotifyImportState
 }
 
 /**
- * Imports a Spotify playlist or album as a library playlist of YouTube Music songs, the same
- * lightweight streamable rows a YouTube import creates - so they play on demand and download
- * (one by one or with Download All) through the normal yt-dlp path.
+ * Imports Spotify songs as a library playlist of YouTube Music songs, the same lightweight
+ * streamable rows a YouTube import creates - so they play on demand and download (one by one or
+ * with Download All) through the normal yt-dlp path. The songs come from:
+ * - a public playlist/album link (Spotify's embed page - no login, first 100 songs), or
+ * - your signed-in account ([SpotifyAccount]) - Liked Songs and your playlists, no limit.
  *
- * 1. The track list (title, artists, exact duration) comes from Spotify's public embed page -
- *    no login or developer keys.
- * 2. Each track is matched with one YouTube Music "Songs" search, picking the result whose title
- *    matches and whose duration is within a few seconds.
- * 3. Only a track that finds no good match asks Songlink/Odesli (rate-limited to ~10/min without
- *    a key, so it's the fallback, never the main path; a 429 turns it off for the rest).
+ * Each track is matched with one YouTube Music "Songs" search (title plus a duration within a
+ * few seconds); only a miss asks Songlink/Odesli (rate-limited, so a 429 turns it off for the
+ * rest). A match is remembered (spotify_track_map), and the source is linked to its playlist
+ * (spotify_links): importing the same source again - "Update from Spotify" - only adds songs
+ * that aren't in the playlist yet and never searches for a song it already found.
  *
  * Runs once, sequentially, in the app-wide scope so it survives leaving the screen, and stops
  * when done - no polling, no background loop.
@@ -48,8 +71,12 @@ sealed interface SpotifyImportState {
 class SpotifyImporter(
     private val musicRepository: MusicRepository,
     private val scope: CoroutineScope,
+    private val account: SpotifyAccount,
+    private val dao: SpotifyDao,
+    context: Context,
     private val innertube: InnertubeBrowseClient = InnertubeBrowseClient()
 ) {
+    private val appContext = context.applicationContext
     private val http = OkHttpClient.Builder()
         .connectTimeout(15, TimeUnit.SECONDS)
         .readTimeout(20, TimeUnit.SECONDS)
@@ -59,45 +86,52 @@ class SpotifyImporter(
     val state: StateFlow<SpotifyImportState> = _state
     private var job: Job? = null
 
+    // A playlist whose import finished with "and download all": picked up once by the app's
+    // navigation host, which owns the download queue (see NavGraph), then cleared.
+    private val _pendingDownload = MutableStateFlow<Long?>(null)
+    val pendingDownload: StateFlow<Long?> = _pendingDownload
+    fun downloadStarted() { _pendingDownload.value = null }
+
+    val isRunning: Boolean get() = job?.isActive == true
+
     fun isSpotifyLink(text: String): Boolean = parseLink(text) != null
 
+    /** A pasted public playlist/album link (the Import Playlist dialog). */
     fun start(link: String) {
-        if (job?.isActive == true) return
         val target = parseLink(link) ?: run {
             _state.value = SpotifyImportState.Failed("That isn't a Spotify playlist or album link.")
             return
         }
-        job = scope.launch(Dispatchers.IO) {
-            try {
-                val collection = fetchCollection(target.first, target.second)
-                if (collection == null || collection.tracks.isEmpty()) {
-                    _state.value = SpotifyImportState.Failed("Couldn't read that Spotify link. Make sure the playlist is public.")
-                    return@launch
-                }
-                val total = collection.tracks.size
-                _state.value = SpotifyImportState.Running(collection.name, 0, total)
-                val playlistId = musicRepository.createPlaylist(collection.name)
-                var matched = 0
-                var odesliAllowed = true
-                collection.tracks.forEachIndexed { index, track ->
-                    var found = runCatching { matchOnYouTubeMusic(track) }.getOrNull()
-                    if (found == null && odesliAllowed) {
-                        val result = runCatching { matchWithOdesli(track) }.getOrNull()
-                        if (result == OdesliResult.RateLimited) odesliAllowed = false
-                        found = (result as? OdesliResult.Found)?.track
-                    }
-                    if (found != null) {
-                        val song = musicRepository.importPlaylistTrackAsStreamable(found)
-                        musicRepository.addSongToPlaylist(playlistId, song)
-                        matched++
-                    }
-                    _state.update { SpotifyImportState.Running(collection.name, index + 1, total) }
-                }
-                musicRepository.backfillThumbnails()
-                _state.value = SpotifyImportState.Finished(collection.name, matched, total)
-            } catch (e: Exception) {
-                Log.w(TAG, "Spotify import failed", e)
-                _state.value = SpotifyImportState.Failed("Import failed: ${e.message ?: "network error"}")
+        launchImport("${target.first}:${target.second}", "Spotify", announce = false, downloadAll = false) {
+            fetchEmbed(target.first, target.second)
+                ?: throw IllegalStateException("Couldn't read that Spotify link. Make sure the playlist is public.")
+        }
+    }
+
+    /** Your Liked Songs, from the signed-in account. */
+    fun importLiked(downloadAll: Boolean) =
+        launchImport(LIKED_KEY, LIKED_NAME, announce = true, downloadAll = downloadAll) { LIKED_NAME to account.likedTracks() }
+
+    /** One of your playlists, from the signed-in account. */
+    fun importPlaylist(playlist: SpotifyPlaylist, downloadAll: Boolean) =
+        launchImport("playlist:${playlist.id}", playlist.name, announce = true, downloadAll = downloadAll) {
+            playlist.name to account.playlistTracks(playlist.id)
+        }
+
+    /** "Update from Spotify" on an imported playlist: adds only what's new. */
+    fun update(link: SpotifyLinkEntity) {
+        val key = link.sourceKey
+        val type = key.substringBefore(':')
+        val id = key.substringAfter(':', "")
+        when {
+            key == LIKED_KEY -> {
+                if (!account.isConnected) return toast("Connect Spotify in Settings to update Liked Songs")
+                launchImport(key, link.name, announce = true, downloadAll = false) { link.name to account.likedTracks() }
+            }
+            type == "playlist" && account.isConnected ->
+                launchImport(key, link.name, announce = true, downloadAll = false) { link.name to account.playlistTracks(id) }
+            else -> launchImport(key, link.name, announce = true, downloadAll = false) {
+                fetchEmbed(type, id) ?: throw IllegalStateException("Couldn't read this playlist from Spotify.")
             }
         }
     }
@@ -107,10 +141,104 @@ class SpotifyImporter(
         if (_state.value !is SpotifyImportState.Running) _state.value = SpotifyImportState.Idle
     }
 
-    // ---- Spotify ----
+    private fun launchImport(
+        key: String,
+        displayName: String,
+        announce: Boolean,
+        downloadAll: Boolean,
+        fetch: suspend () -> Pair<String, List<SpotifyTrack>>
+    ) {
+        if (job?.isActive == true) {
+            toast("A Spotify import is already running")
+            return
+        }
+        _state.value = SpotifyImportState.Running(displayName, 0, 0, key)
+        job = scope.launch(Dispatchers.IO) {
+            try {
+                val (name, tracks) = fetch()
+                if (tracks.isEmpty()) {
+                    fail("\"$name\" has no songs to import.", announce)
+                    return@launch
+                }
+                val total = tracks.size
+                _state.value = SpotifyImportState.Running(name, 0, total, key)
 
-    private class SpotifyTrack(val id: String, val title: String, val artists: String, val durationMs: Long)
-    private class SpotifyCollection(val name: String, val tracks: List<SpotifyTrack>)
+                val existing = dao.getLink(key)?.playlistId?.takeIf { musicRepository.playlistExists(it) }
+                val playlistId = existing ?: musicRepository.createPlaylist(name)
+                dao.upsertLink(SpotifyLinkEntity(key, playlistId, name, System.currentTimeMillis()))
+                val inPlaylist = musicRepository.songIdsInPlaylist(playlistId).toHashSet()
+                // Playlists list newest first: the first song gets the latest time, so the
+                // playlist reads in Spotify's order (and new songs of an update go on top).
+                val base = System.currentTimeMillis()
+
+                var matched = 0
+                var added = 0
+                var odesliAllowed = true
+                // Matches are written in batches: every write to the library makes open screens
+                // reload it, so one transaction per batch instead of two writes per song.
+                val pending = mutableListOf<PendingTrack>()
+                suspend fun flush() {
+                    if (pending.isEmpty()) return
+                    musicRepository.inTransaction {
+                        for (p in pending) {
+                            val songId = p.knownSongId ?: musicRepository.importPlaylistTrackAsStreamable(p.found!!).telegramMessageId.also { id ->
+                                if (p.spotifyId.isNotBlank()) dao.saveMatch(SpotifyTrackMapEntity(p.spotifyId, id))
+                            }
+                            if (inPlaylist.add(songId)) {
+                                musicRepository.addSongToPlaylistAt(playlistId, songId, base - p.index)
+                                added++
+                            }
+                        }
+                    }
+                    pending.clear()
+                }
+                tracks.forEachIndexed { index, track ->
+                    val knownId = track.id.takeIf { it.isNotBlank() }
+                        ?.let { dao.songIdFor(it) }
+                        ?.takeIf { musicRepository.getSongById(it) != null }
+                    if (knownId != null) {
+                        matched++
+                        pending += PendingTrack(index, track.id, knownId, null)
+                    } else {
+                        var found = runCatching { matchOnYouTubeMusic(track) }.getOrNull()
+                        if (found == null && odesliAllowed) {
+                            val result = runCatching { matchWithOdesli(track) }.getOrNull()
+                            if (result == OdesliResult.RateLimited) odesliAllowed = false
+                            found = (result as? OdesliResult.Found)?.track
+                        }
+                        if (found != null) {
+                            matched++
+                            pending += PendingTrack(index, track.id, null, found)
+                        }
+                    }
+                    if (pending.size >= WRITE_BATCH) flush()
+                    _state.value = SpotifyImportState.Running(name, index + 1, total, key)
+                }
+                flush()
+                val finished = SpotifyImportState.Finished(name, matched, total, playlistId, added, updated = existing != null)
+                _state.value = finished
+                if (downloadAll) _pendingDownload.value = playlistId
+                if (announce) toast(finished.summary)
+                // Covers for the list rows fill in after "done" - they show from the full
+                // artwork link meanwhile, so nothing waits on this.
+                musicRepository.backfillThumbnails()
+            } catch (e: Exception) {
+                Log.w(TAG, "Spotify import failed", e)
+                fail(e.message ?: "Import failed: network error", announce)
+            }
+        }
+    }
+
+    private suspend fun fail(message: String, announce: Boolean) {
+        _state.value = SpotifyImportState.Failed(message)
+        if (announce) toast(message)
+    }
+
+    private fun toast(message: String) {
+        scope.launch(Dispatchers.Main) { Toast.makeText(appContext, message, Toast.LENGTH_LONG).show() }
+    }
+
+    // ---- Public links (embed page) ----
 
     /** (type, id) from open.spotify.com/(intl-xx/)(playlist|album)/ID or spotify:playlist:ID. */
     private fun parseLink(text: String): Pair<String, String>? {
@@ -124,17 +252,18 @@ class SpotifyImporter(
         return null
     }
 
-    private fun fetchCollection(type: String, id: String): SpotifyCollection? {
+    /** Name and songs from Spotify's public embed page (at most the first 100 songs). */
+    private suspend fun fetchEmbed(type: String, id: String): Pair<String, List<SpotifyTrack>>? = withContext(Dispatchers.IO) {
         val request = Request.Builder()
             .url("https://open.spotify.com/embed/$type/$id")
             .header("User-Agent", USER_AGENT)
             .build()
-        val html = http.newCall(request).execute().use { if (it.isSuccessful) it.body?.string() else null } ?: return null
+        val html = http.newCall(request).execute().use { if (it.isSuccessful) it.body?.string() else null } ?: return@withContext null
         val json = Regex("""<script id="__NEXT_DATA__" type="application/json">(.*?)</script>""", RegexOption.DOT_MATCHES_ALL)
-            .find(html)?.groupValues?.get(1) ?: return null
+            .find(html)?.groupValues?.get(1) ?: return@withContext null
         val entity = JSONObject(json).optJSONObject("props")?.optJSONObject("pageProps")?.optJSONObject("state")
-            ?.optJSONObject("data")?.optJSONObject("entity") ?: return null
-        val list = entity.optJSONArray("trackList") ?: return null
+            ?.optJSONObject("data")?.optJSONObject("entity") ?: return@withContext null
+        val list = entity.optJSONArray("trackList") ?: return@withContext null
         val tracks = (0 until list.length()).mapNotNull { i ->
             val t = list.optJSONObject(i) ?: return@mapNotNull null
             val title = t.optString("title").takeIf { it.isNotBlank() } ?: return@mapNotNull null
@@ -146,7 +275,7 @@ class SpotifyImporter(
             )
         }
         val name = entity.optString("name").ifBlank { entity.optString("title") }.ifBlank { "Spotify Playlist" }
-        return SpotifyCollection(name, tracks)
+        name to tracks
     }
 
     // ---- Matching ----
@@ -178,6 +307,9 @@ class SpotifyImporter(
             ?.first
             ?.let { it.copy(title = track.title, thumbnailUrl = googleArtworkAtSize(it.thumbnailUrl, SAVED_ARTWORK_SIZE)) }
     }
+
+    /** A matched track waiting for the next batched write: an already-known song, or a new match. */
+    private class PendingTrack(val index: Int, val spotifyId: String, val knownSongId: Long?, val found: BrowseTrack?)
 
     private sealed interface OdesliResult {
         data class Found(val track: BrowseTrack) : OdesliResult
@@ -242,9 +374,11 @@ class SpotifyImporter(
         return 1.0 - previous[b.length].toDouble() / longer
     }
 
-
     companion object {
         private const val TAG = "SpotifyImporter"
+        const val LIKED_KEY = "liked"
+        private const val WRITE_BATCH = 25
+        const val LIKED_NAME = "Spotify Liked Songs"
         private const val USER_AGENT = "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Mobile Safari/537.36"
     }
 }

@@ -1,5 +1,6 @@
 package com.abn3li.telemusic.ui.download
 
+import com.abn3li.telemusic.ui.library.CalmSpinner
 import com.abn3li.telemusic.repository.SpotifyImportState
 import androidx.compose.ui.text.input.KeyboardType
 import com.abn3li.telemusic.ui.library.AppAlert
@@ -39,7 +40,6 @@ import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.Folder
 import androidx.compose.material.icons.rounded.MusicNote
 import androidx.compose.material.icons.rounded.PlayArrow
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -317,7 +317,7 @@ internal fun TrackResultRow(
         // Fixed 44dp slots so the row doesn't shift when a button turns into a spinner.
         Box(Modifier.size(44.dp), contentAlignment = Alignment.Center) {
             if (isLoadingStream) {
-                CircularProgressIndicator(color = AppAccent, strokeWidth = 2.dp, modifier = Modifier.size(20.dp))
+                CalmSpinner(color = AppAccent, strokeWidth = 2.dp, modifier = Modifier.size(20.dp))
             } else {
                 Icon(
                     Icons.Rounded.PlayArrow,
@@ -333,7 +333,7 @@ internal fun TrackResultRow(
         }
         Box(Modifier.size(44.dp), contentAlignment = Alignment.Center) {
             when {
-                isDownloading -> CircularProgressIndicator(color = AppAccent, strokeWidth = 2.dp, modifier = Modifier.size(20.dp))
+                isDownloading -> CalmSpinner(color = AppAccent, strokeWidth = 2.dp, modifier = Modifier.size(20.dp))
                 isDownloaded -> Icon(Icons.Rounded.CheckCircle, contentDescription = "Downloaded", tint = AppAccent, modifier = Modifier.size(22.dp))
                 else -> Icon(
                     Icons.Rounded.Download,
@@ -353,7 +353,7 @@ internal fun TrackResultRow(
 @Composable
 internal fun CenteredSpinner() {
     Box(Modifier.fillMaxWidth().padding(vertical = 48.dp), contentAlignment = Alignment.Center) {
-        CircularProgressIndicator(color = AppAccent)
+        CalmSpinner(color = AppAccent)
     }
 }
 
@@ -386,8 +386,7 @@ private fun ImportPlaylistDialog(
         )
         is SpotifyImportState.Finished -> AppAlert(
             title = "Imported",
-            message = "Added ${spotifyState.matched} of ${spotifyState.total} songs to \"${spotifyState.name}\" in Library > Playlists." +
-                if (spotifyState.matched < spotifyState.total) " The rest couldn't be found on YouTube Music." else "",
+            message = spotifyState.summary + " It's in Library > Playlists.",
             onDismiss = onDismiss,
             actions = listOf(AlertAction("Done", bold = true, onClick = onDismiss))
         )

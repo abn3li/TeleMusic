@@ -1,5 +1,6 @@
 package com.abn3li.telemusic.repository
 
+import androidx.room.withTransaction
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import android.content.Context
@@ -39,6 +40,9 @@ enum class SortField(val label: String) { TITLE("Name"), ARTIST("Artist"), ALBUM
 // ~10 minutes at the 1s poll interval below - see markStreamedFileCached's own doc.
 private const val MAX_CACHE_POLL_ATTEMPTS = 600
 
+// Thumbnails saved per database transaction - see backfillThumbnails.
+private const val THUMBNAIL_BATCH = 25
+
 // Mirrors ytdlp_bridge.py's _ARTIST_SPLIT regex exactly - same separators, same "first segment
 // wins" rule, so a collab credit collapses to the same primary artist regardless of which path
 // (a fresh download vs this cleanup pass) it went through.
@@ -58,6 +62,7 @@ class MusicRepository(
     private val localAudioImporter: LocalAudioImporter,
     private val mediaFolderExporter: MediaFolderExporter,
     private val ytDlpRepository: YtDlpRepository,
+    private val database: com.abn3li.telemusic.data.local.AppDatabase,
     context: Context
 ) {
     private val appContext = context.applicationContext
@@ -412,6 +417,12 @@ class MusicRepository(
     suspend fun createPlaylist(name: String): Long = playlistDao.insert(PlaylistEntity(name = name))
     suspend fun deletePlaylist(playlistId: Long) = playlistDao.delete(playlistId)
     suspend fun addSongToPlaylist(playlistId: Long, song: SongEntity) = playlistDao.addSong(PlaylistSongCrossRef(playlistId, song.telegramMessageId))
+    /** Adds with an explicit sort time - playlists list newest first, so an import gives its first
+     * song the latest time to keep the source's order. */
+    suspend fun addSongToPlaylistAt(playlistId: Long, songId: Long, addedAtMillis: Long) =
+        playlistDao.addSong(PlaylistSongCrossRef(playlistId, songId, addedAtMillis))
+    suspend fun playlistExists(playlistId: Long): Boolean = playlistDao.countById(playlistId) > 0
+    suspend fun songIdsInPlaylist(playlistId: Long): List<Long> = playlistDao.songIdsInPlaylist(playlistId)
     suspend fun setPlaylistHiddenFromTracks(playlistId: Long, hidden: Boolean) = playlistDao.setHiddenFromTracks(playlistId, hidden)
     // Every song id belonging to a playlist that's had its own "Hide from tracks" turned on -
     // see PlaylistDao.observeSongIdsInHiddenPlaylists' own doc.
@@ -639,17 +650,23 @@ class MusicRepository(
      * Safe to call repeatedly - only songs missing a thumbnail do any work. Paced with 100ms
      * delays to ensure 0% CPU background impact.
      */
+    /** Runs [block]'s database writes as one transaction - open screens reload once, not per write. */
+    suspend fun <T> inTransaction(block: suspend () -> T): T = database.withTransaction(block)
+
     suspend fun backfillThumbnails() {
         val missing = songDao.getSongsMissingThumbnail()
         if (missing.isEmpty()) return
-        for (song in missing) {
-            val artUrl = song.albumArtUrl
-            if (artUrl.isNullOrBlank()) {
-                songDao.setThumbnailPath(song.telegramMessageId, "none")
-                continue
+        // Saved in batches, not one by one: every write to the songs table makes each open
+        // screen reload the whole library, so 700 single writes (a big Spotify import) meant 700
+        // full reloads - 25-40% CPU for minutes. One transaction per batch = one reload.
+        for (batch in missing.chunked(THUMBNAIL_BATCH)) {
+            val paths = batch.map { song ->
+                val artUrl = song.albumArtUrl
+                val path = if (artUrl.isNullOrBlank()) null else thumbnailGenerator.generate(song.telegramMessageId, artUrl)
+                if (!artUrl.isNullOrBlank()) delay(100)
+                song.telegramMessageId to (path ?: "none") // "none" = failed, never retried
             }
-            ensureThumbnail(song.telegramMessageId, artUrl)
-            delay(100)
+            database.withTransaction { paths.forEach { (id, path) -> songDao.setThumbnailPath(id, path) } }
         }
     }
 

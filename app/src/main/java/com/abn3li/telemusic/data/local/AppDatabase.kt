@@ -8,14 +8,15 @@ import androidx.sqlite.db.SupportSQLiteDatabase
 import androidx.room.migration.Migration
 
 @Database(
-    entities = [SongEntity::class, PlaylistEntity::class, PlaylistSongCrossRef::class, ImportedPlaylistEntity::class],
-    version = 8,
+    entities = [SongEntity::class, PlaylistEntity::class, PlaylistSongCrossRef::class, ImportedPlaylistEntity::class, SpotifyLinkEntity::class, SpotifyTrackMapEntity::class],
+    version = 9,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
     abstract fun songDao(): SongDao
     abstract fun playlistDao(): PlaylistDao
     abstract fun importedPlaylistDao(): ImportedPlaylistDao
+    abstract fun spotifyDao(): SpotifyDao
 
     companion object {
         @Volatile private var INSTANCE: AppDatabase? = null
@@ -95,10 +96,19 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        // Spotify sign-in: which Spotify source became which playlist, and which song each
+        // Spotify track matched (see SpotifyEntities.kt). Two new tables, nothing else touched.
+        private val MIGRATION_8_9 = object : Migration(8, 9) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("CREATE TABLE IF NOT EXISTS `spotify_links` (`sourceKey` TEXT NOT NULL, `playlistId` INTEGER NOT NULL, `name` TEXT NOT NULL, `lastImportedAtMillis` INTEGER NOT NULL, PRIMARY KEY(`sourceKey`))")
+                db.execSQL("CREATE TABLE IF NOT EXISTS `spotify_track_map` (`spotifyTrackId` TEXT NOT NULL, `songId` INTEGER NOT NULL, PRIMARY KEY(`spotifyTrackId`))")
+            }
+        }
+
         fun get(context: Context): AppDatabase =
             INSTANCE ?: synchronized(this) {
                 INSTANCE ?: Room.databaseBuilder(context.applicationContext, AppDatabase::class.java, "tgmusic.db")
-                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8)
+                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9)
                     .fallbackToDestructiveMigration() // fine during active development, for any version this migration chain doesn't cover
                     .build().also { INSTANCE = it }
             }

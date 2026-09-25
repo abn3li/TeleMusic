@@ -1,5 +1,6 @@
 package com.abn3li.telemusic.ui.nowplaying
 
+import com.abn3li.telemusic.ui.library.CalmSpinner
 import com.abn3li.telemusic.data.browse.FULL_ARTWORK_SIZE
 import com.abn3li.telemusic.data.browse.googleArtworkAtSize
 import com.abn3li.telemusic.ui.library.AppAlert
@@ -547,7 +548,9 @@ private fun PlayerPageArea(
                     fontWeight = FontWeight.SemiBold,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
-                    modifier = if (isExpanded) Modifier.basicMarquee(iterations = 2) else Modifier
+                    // A long title scrolls once, then rests: the scroll redraws the whole screen
+                    // every frame (~45% CPU while it runs), so it shouldn't repeat.
+                    modifier = if (isExpanded) Modifier.basicMarquee(iterations = 1) else Modifier
                 )
                 Text(
                     text = song?.artist ?: "",
@@ -693,7 +696,7 @@ private fun PlayerPageArea(
                     .background(Color.Black.copy(alpha = 0.45f), CircleShape),
                 contentAlignment = Alignment.Center
             ) {
-                CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp, color = Color.White)
+                CalmSpinner(modifier = Modifier.size(20.dp), strokeWidth = 2.dp, color = Color.White)
             }
         }
     }

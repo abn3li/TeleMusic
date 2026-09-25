@@ -1,5 +1,6 @@
 package com.abn3li.telemusic.ui.nowplaying
 
+import com.abn3li.telemusic.ui.library.CalmSpinner
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Animatable
@@ -36,7 +37,6 @@ import androidx.compose.material.icons.rounded.Headphones
 import androidx.compose.material.icons.rounded.MusicNote
 import androidx.compose.material.icons.rounded.Pause
 import androidx.compose.material.icons.rounded.PlayArrow
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -238,7 +238,7 @@ fun MiniPlayer(
                     contentAlignment = Alignment.Center
                 ) {
                     if (loading) {
-                        CircularProgressIndicator(color = Color.White, strokeWidth = 2.dp, modifier = Modifier.size(20.dp))
+                        CalmSpinner(color = Color.White, strokeWidth = 2.dp, modifier = Modifier.size(20.dp))
                     } else {
                         AnimatedContent(
                             targetState = state.isPlaying,

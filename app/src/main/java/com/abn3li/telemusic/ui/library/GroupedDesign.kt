@@ -24,7 +24,6 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Check
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -274,7 +273,7 @@ internal fun GroupActionRow(
         verticalAlignment = Alignment.CenterVertically
     ) {
         Text(label, color = color, fontSize = 16.5.sp, modifier = Modifier.weight(1f))
-        if (loading) CircularProgressIndicator(color = color, strokeWidth = 2.dp, modifier = Modifier.size(18.dp))
+        if (loading) CalmSpinner(color = color, strokeWidth = 2.dp, modifier = Modifier.size(18.dp))
     }
 }
 

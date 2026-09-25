@@ -43,7 +43,7 @@ import kotlin.random.Random
 
 private const val BACKDROP_SIZE_PX = 96
 private const val KEN_BURNS_STEP_MS = 9_000
-private const val KEN_BURNS_FRAME_MS = 33L
+private const val KEN_BURNS_FRAME_MS = 16L
 
 private val backdropCache = LruCache<String, ImageBitmap>(8)
 
@@ -82,8 +82,8 @@ fun FloatingArtworkBackground(
     var offsetY by remember { mutableFloatStateOf(0f) }
     var rotation by remember { mutableFloatStateOf(0f) }
 
-    // Driven at ~30fps instead of every display frame (up to 120Hz): the drift is so slow the
-    // difference is invisible, but each frame here repaints the whole screen. withFrameNanos
+    // Driven at ~60fps instead of every display frame (up to 120Hz): 30fps looked choppy, while
+    // 120 would repaint the whole screen twice as often for no visible gain. withFrameNanos
     // suspends while the app is in the background, so this stops there on its own.
     LaunchedEffect(animate) {
         if (!animate) return@LaunchedEffect

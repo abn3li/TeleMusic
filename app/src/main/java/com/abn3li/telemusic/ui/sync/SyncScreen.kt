@@ -1,5 +1,6 @@
 package com.abn3li.telemusic.ui.sync
 
+import com.abn3li.telemusic.ui.library.CalmSpinner
 import com.abn3li.telemusic.ui.library.AlertColor
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.width
@@ -47,7 +48,6 @@ import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material.icons.rounded.Person
 import androidx.compose.material.icons.rounded.Public
 import androidx.compose.material.icons.rounded.SmartToy
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -145,7 +145,7 @@ fun SyncScreen(onBack: () -> Unit) {
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         if (connection != TelegramConnectionState.DISCONNECTED) {
-                            CircularProgressIndicator(color = AppAccent, strokeWidth = 2.dp, modifier = Modifier.size(18.dp))
+                            CalmSpinner(color = AppAccent, strokeWidth = 2.dp, modifier = Modifier.size(18.dp))
                             Spacer(Modifier.size(12.dp))
                         }
                         Text(
@@ -172,7 +172,7 @@ fun SyncScreen(onBack: () -> Unit) {
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         if (syncing) {
-                            CircularProgressIndicator(color = AppAccent, strokeWidth = 2.dp, modifier = Modifier.size(18.dp))
+                            CalmSpinner(color = AppAccent, strokeWidth = 2.dp, modifier = Modifier.size(18.dp))
                             Spacer(Modifier.size(12.dp))
                         }
                         Text(progress, color = Color.White, fontSize = 15.sp, maxLines = 3, overflow = TextOverflow.Ellipsis)
@@ -198,7 +198,7 @@ fun SyncScreen(onBack: () -> Unit) {
                     horizontalArrangement = Arrangement.Center,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    CircularProgressIndicator(color = AppAccent, strokeWidth = 2.dp, modifier = Modifier.size(18.dp))
+                    CalmSpinner(color = AppAccent, strokeWidth = 2.dp, modifier = Modifier.size(18.dp))
                     Spacer(Modifier.size(10.dp))
                     Text("Connecting to Telegram…", color = GroupLabelColor, fontSize = 15.sp)
                 }
@@ -383,7 +383,7 @@ private fun LazyListScope.chatPicker(
     when {
         state.isLoadingChats -> item("loading") {
             Box(Modifier.fillMaxWidth().padding(top = 40.dp), contentAlignment = Alignment.Center) {
-                CircularProgressIndicator(color = AppAccent)
+                CalmSpinner(color = AppAccent)
             }
         }
         state.loadChatsError != null -> item("load_error") {

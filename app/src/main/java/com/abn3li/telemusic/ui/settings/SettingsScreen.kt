@@ -89,7 +89,7 @@ private val TileGrey = Color(0xFF636366)
 private val TileIndigo = Color(0xFF5E5CE6)
 
 @Composable
-fun SettingsScreen(onBack: () -> Unit, onLoggedOut: () -> Unit) {
+fun SettingsScreen(onBack: () -> Unit, onOpenSpotify: () -> Unit, onLoggedOut: () -> Unit) {
     val context = LocalContext.current
     val app = context.applicationContext as TgMusicApp
     val scope = rememberCoroutineScope()
@@ -164,6 +164,14 @@ fun SettingsScreen(onBack: () -> Unit, onLoggedOut: () -> Unit) {
     var downloadOptionsOpen by remember { mutableStateOf(false) }
 
     LargeTitleList(title = "Settings", onBack = onBack) {
+        item("spotify") {
+            GroupHeader("Spotify")
+            com.abn3li.telemusic.ui.spotify.SpotifySettingsGroup(
+                onOpenPlaylists = onOpenSpotify,
+                onHelp = { uriHandler.openUri("https://developer.spotify.com/dashboard") }
+            )
+        }
+
         item("now_playing") {
             GroupHeader("Now Playing")
             GroupCard {

@@ -52,7 +52,6 @@ import androidx.compose.material.icons.rounded.MusicNote
 import androidx.compose.material.icons.rounded.QueuePlayNext
 import androidx.compose.material.icons.rounded.Star
 import androidx.compose.material.icons.rounded.StarBorder
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -231,7 +230,7 @@ internal fun LibrarySongRow(
             }
             when {
                 song.telegramMessageId in actions.downloadingIds ->
-                    CircularProgressIndicator(color = Color.White.copy(alpha = 0.5f), strokeWidth = 1.5.dp, modifier = Modifier.size(14.dp))
+                    CalmSpinner(color = Color.White.copy(alpha = 0.5f), strokeWidth = 1.5.dp, modifier = Modifier.size(14.dp))
                 song.isExplicitDownload ->
                     Icon(Icons.Rounded.ArrowCircleDown, contentDescription = "Downloaded", tint = Color.White.copy(alpha = 0.35f), modifier = Modifier.size(16.dp))
             }

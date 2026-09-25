@@ -1,5 +1,6 @@
 package com.abn3li.telemusic.ui.settings
 
+import com.abn3li.telemusic.ui.library.CalmSpinner
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -100,7 +101,7 @@ fun ImportLocalMusicSheet(
                 isScanning -> Box(
                     modifier = Modifier.fillMaxWidth().padding(vertical = 32.dp),
                     contentAlignment = Alignment.Center
-                ) { CircularProgressIndicator(color = AppAccent, strokeWidth = 2.5.dp, modifier = Modifier.size(28.dp)) }
+                ) { CalmSpinner(color = AppAccent, strokeWidth = 2.5.dp, modifier = Modifier.size(28.dp)) }
 
                 files.isEmpty() -> Text(
                     text = "No audio files found in that folder.",

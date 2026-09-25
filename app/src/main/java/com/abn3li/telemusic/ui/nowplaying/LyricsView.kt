@@ -1,5 +1,6 @@
 package com.abn3li.telemusic.ui.nowplaying
 
+import com.abn3li.telemusic.ui.library.CalmSpinner
 import android.os.Build
 import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.LinearEasing
@@ -39,7 +40,6 @@ import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
@@ -116,7 +116,7 @@ internal fun LyricsPage(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.Center
             ) {
-                CircularProgressIndicator(color = Color.White.copy(alpha = 0.8f), strokeWidth = 2.5.dp)
+                CalmSpinner(color = Color.White.copy(alpha = 0.8f), strokeWidth = 2.5.dp)
                 Spacer(Modifier.height(14.dp))
                 Text("Searching lyrics…", color = Color.White.copy(alpha = 0.6f), fontSize = 15.sp)
             }

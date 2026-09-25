@@ -1,5 +1,6 @@
 package com.abn3li.telemusic.ui.nowplaying
 
+import com.abn3li.telemusic.ui.library.CalmSpinner
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -22,7 +23,6 @@ import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.Lyrics
 import androidx.compose.material.icons.rounded.MusicNote
 import androidx.compose.material3.BottomSheetDefaults
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -205,7 +205,7 @@ private fun SheetAction(
     ) {
         Box(Modifier.size(22.dp), contentAlignment = Alignment.Center) {
             if (busy) {
-                CircularProgressIndicator(color = Color.White, strokeWidth = 2.dp, modifier = Modifier.size(18.dp))
+                CalmSpinner(color = Color.White, strokeWidth = 2.dp, modifier = Modifier.size(18.dp))
             } else {
                 Icon(icon, contentDescription = null, tint = Color.White, modifier = Modifier.size(22.dp))
             }
