@@ -1,6 +1,5 @@
 package com.abn3li.telemusic.ui.nowplaying
 
-import com.abn3li.telemusic.ui.library.CalmSpinner
 import com.abn3li.telemusic.data.browse.FULL_ARTWORK_SIZE
 import com.abn3li.telemusic.data.browse.googleArtworkAtSize
 import com.abn3li.telemusic.ui.library.AppAlert
@@ -685,19 +684,6 @@ private fun PlayerPageArea(
                 contentScale = ContentScale.Crop,
                 modifier = Modifier.fillMaxSize()
             )
-        }
-        if (state.loadingSongId != null || state.isBuffering) {
-            Box(
-                Modifier
-                    .align(Alignment.BottomEnd)
-                    .padding(12.dp)
-                    .size(36.dp)
-                    .graphicsLayer { alpha = 1f - morph.value }
-                    .background(Color.Black.copy(alpha = 0.45f), CircleShape),
-                contentAlignment = Alignment.Center
-            ) {
-                CalmSpinner(modifier = Modifier.size(20.dp), strokeWidth = 2.dp, color = Color.White)
-            }
         }
     }
 }

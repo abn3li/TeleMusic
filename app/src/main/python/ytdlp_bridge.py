@@ -212,10 +212,25 @@ def resolve_stream_url(video_id, format_selector="bestaudio/best"):
         "skip_download": True,
         "extractor_args": {"youtube": {"player_client": ["android", "ios"]}},
     }
+    # Light first: one client, and no watch page / configs / player JS - the android client's
+    # URLs need no deciphering, so those are pure overhead, and parsing them in Python was most
+    # of the ~8 s of CPU each song start cost. Anything that fails light falls back to the full
+    # extraction above, so nothing that played before stops playing.
+    light = dict(opts)
+    light["extractor_args"] = {"youtube": {"player_client": ["android"], "player_skip": ["webpage", "configs", "js"]}}
+    url = f"https://music.youtube.com/watch?v={video_id}"
     t0 = time.monotonic()
-    with yt_dlp.YoutubeDL(opts) as ydl:
-        info = ydl.extract_info(f"https://music.youtube.com/watch?v={video_id}", download=False)
-    print(f"[timing] resolve_stream_url({video_id}): {time.monotonic() - t0:.2f}s")
+    mode = "light"
+    try:
+        with yt_dlp.YoutubeDL(light) as ydl:
+            info = ydl.extract_info(url, download=False)
+        if not info or not info.get("url"):
+            raise ValueError("no stream url")
+    except Exception:
+        mode = "full"
+        with yt_dlp.YoutubeDL(opts) as ydl:
+            info = ydl.extract_info(url, download=False)
+    print(f"[timing] resolve_stream_url({video_id}) [{mode}]: {time.monotonic() - t0:.2f}s")
     entry = _entry_from_info(info)
     entry["url"] = info.get("url")
     return entry

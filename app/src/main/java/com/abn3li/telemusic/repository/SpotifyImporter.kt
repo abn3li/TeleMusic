@@ -153,6 +153,8 @@ class SpotifyImporter(
             return
         }
         _state.value = SpotifyImportState.Running(displayName, 0, 0, key)
+        // Keeps the import going with a progress notification when you leave the app.
+        runCatching { SpotifyImportService.start(appContext) }
         job = scope.launch(Dispatchers.IO) {
             try {
                 val (name, tracks) = fetch()

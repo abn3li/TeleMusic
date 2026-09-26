@@ -48,6 +48,12 @@
             android:exported="false"
             android:foregroundServiceType="dataSync" />
 
+        <!-- Keeps a Spotify import running (with a progress notification) outside the app. -->
+        <service
+            android:name=".repository.SpotifyImportService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
+
         <!-- Spotify sign-in comes back here (telemusic://spotify) - see SpotifyAccount. -->
         <activity
             android:name=".ui.spotify.SpotifyAuthActivity"
