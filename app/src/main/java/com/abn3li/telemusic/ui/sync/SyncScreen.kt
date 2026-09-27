@@ -71,6 +71,7 @@ import com.abn3li.telemusic.data.telegram.TelegramAuthState
 import com.abn3li.telemusic.data.telegram.TelegramConnectionState
 import com.abn3li.telemusic.data.telegram.TelegramChatCategory
 import com.abn3li.telemusic.data.telegram.TelegramChatInfo
+import com.abn3li.telemusic.ui.credentials.TelegramSetupStep
 import com.abn3li.telemusic.ui.library.AppAccent
 import com.abn3li.telemusic.ui.library.ChevronIcon
 import com.abn3li.telemusic.ui.library.DestructiveRed
@@ -98,6 +99,8 @@ fun SyncScreen(onBack: () -> Unit) {
     val progress by viewModel.syncProgress.collectAsState()
     val ready = state.authState == TelegramAuthState.Ready
     val connection by app.tdlibManager.connectionState.collectAsState()
+    // No API ID/hash yet (a new install, or after Log Out): Telegram setup comes first.
+    var configured by remember { mutableStateOf(app.credentialsStore.hasCredentials()) }
 
     val haptics = LocalHapticFeedback.current
     val swipeThresholdPx = with(LocalDensity.current) { 72.dp.toPx() }
@@ -180,7 +183,9 @@ fun SyncScreen(onBack: () -> Unit) {
                 }
             }
         }
-        when (val auth = state.authState) {
+        if (!configured) {
+            item("setup") { TelegramSetupStep(onStarted = { configured = true }) }
+        } else when (val auth = state.authState) {
             TelegramAuthState.WaitingForPhoneNumber -> item("phone") { PhoneStep(viewModel) }
             is TelegramAuthState.WaitingForCode -> item("code") { CodeStep(viewModel, auth.deliveryDescription) }
             TelegramAuthState.WaitingForPassword -> item("password") { PasswordStep(viewModel) }

@@ -406,10 +406,13 @@ fun SettingsScreen(onBack: () -> Unit, onOpenSpotify: () -> Unit, onLoggedOut: (
             )
         }
 
-        item("account") {
-            GroupHeader("Telegram Account")
-            GroupCard {
-                GroupActionRow("Log Out", color = DestructiveRed) { showLogoutConfirm = true }
+        // Nothing to log out of until Telegram is set up in the Sync tab.
+        if (app.credentialsStore.hasCredentials()) {
+            item("account") {
+                GroupHeader("Telegram Account")
+                GroupCard {
+                    GroupActionRow("Log Out", color = DestructiveRed) { showLogoutConfirm = true }
+                }
             }
         }
 

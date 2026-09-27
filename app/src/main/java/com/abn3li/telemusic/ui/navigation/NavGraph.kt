@@ -57,7 +57,6 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.abn3li.telemusic.TgMusicApp
-import com.abn3li.telemusic.ui.credentials.CredentialsScreen
 import com.abn3li.telemusic.ui.download.BrowseCollectionScreen
 import com.abn3li.telemusic.ui.download.YouTubeDownloadScreen
 import com.abn3li.telemusic.ui.library.AppAccent
@@ -123,7 +122,8 @@ object Routes {
 @Composable
 fun TgMusicNavGraph(navController: NavHostController = rememberNavController()) {
     val app = LocalContext.current.applicationContext as TgMusicApp
-    val startDestination = if (app.credentialsStore.hasCredentials()) Routes.HOME else Routes.CREDENTIALS
+    // Always Home: Telegram's API ID/hash are asked for in the Sync tab, only when you use it.
+    val startDestination = Routes.HOME
 
     // viewModel() (not remember{}) so this survives a config change (rotation) via the Activity's
     // own ViewModelStore - TgMusicNavGraph is composed directly in MainActivity's setContent, so
@@ -158,15 +158,6 @@ fun TgMusicNavGraph(navController: NavHostController = rememberNavController()) 
     }
 
     val playerState by playerViewModel.stableUiState.collectAsState()
-
-    // After Android kills and recreates the app, NavHost restores its saved back stack, which
-    // can still hold the first-run Welcome page. The saved credentials are what decide
-    // whether the user is signed in, so skip past it.
-    LaunchedEffect(Unit) {
-        if (navController.currentDestination?.route == Routes.CREDENTIALS && app.credentialsStore.hasCredentials()) {
-            navController.navigate(Routes.HOME) { popUpTo(0) { inclusive = true } }
-        }
-    }
 
     // "Import and Download All" from Spotify: once the import finishes, queue its songs through
     // the same Download All (and download-location prompt) as the playlist menu.
@@ -203,11 +194,12 @@ fun TgMusicNavGraph(navController: NavHostController = rememberNavController()) 
                 popEnterTransition = { EnterTransition.None },
                 popExitTransition = { ExitTransition.None }
             ) {
+                // The old first-run Welcome page, now part of the Sync tab. Kept only so a back
+                // stack saved by an older version still restores - it just goes Home.
                 composable(Routes.CREDENTIALS) {
-                    CredentialsScreen(onSaved = {
-                        navController.navigate(Routes.HOME) { popUpTo(Routes.CREDENTIALS) { inclusive = true } }
-                        navController.navigate(Routes.SYNC)
-                    })
+                    LaunchedEffect(Unit) {
+                        navController.navigate(Routes.HOME) { popUpTo(0) { inclusive = true } }
+                    }
                 }
                 composable(Routes.HOME) {
                     HomeScreen(
@@ -284,7 +276,10 @@ fun TgMusicNavGraph(navController: NavHostController = rememberNavController()) 
                     SettingsScreen(
                         onBack = { navController.popBackStack() },
                         onOpenSpotify = { navController.navigate(Routes.SPOTIFY) },
-                        onLoggedOut = { navController.navigate(Routes.CREDENTIALS) { popUpTo(0) { inclusive = true } } }
+                        onLoggedOut = {
+                            navController.navigate(Routes.HOME) { popUpTo(0) { inclusive = true } }
+                            navController.navigate(Routes.SYNC)
+                        }
                     )
                 }
                 composable(Routes.ALBUM) { backStackEntry ->
