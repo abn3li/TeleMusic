@@ -58,6 +58,7 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.abn3li.telemusic.TgMusicApp
 import com.abn3li.telemusic.ui.download.BrowseCollectionScreen
+import com.abn3li.telemusic.ui.onboarding.OnboardingScreen
 import com.abn3li.telemusic.ui.download.YouTubeDownloadScreen
 import com.abn3li.telemusic.ui.library.AppAccent
 import com.abn3li.telemusic.ui.library.AlbumDetailScreen
@@ -88,6 +89,7 @@ private val LibraryRoutes = setOf(
 
 object Routes {
     const val CREDENTIALS = "credentials"
+    const val ONBOARDING = "onboarding"
     const val HOME = "home"
     const val LIBRARY = "library"
     const val LIBRARY_SONGS = "library/songs"
@@ -122,8 +124,9 @@ object Routes {
 @Composable
 fun TgMusicNavGraph(navController: NavHostController = rememberNavController()) {
     val app = LocalContext.current.applicationContext as TgMusicApp
-    // Always Home: Telegram's API ID/hash are asked for in the Sync tab, only when you use it.
-    val startDestination = Routes.HOME
+    // The hello screens on the very first start, then always Home. Telegram's API ID/hash are
+    // asked for in the Sync tab, only when you use it.
+    val startDestination = if (app.settingsStore.onboardingDone) Routes.HOME else Routes.ONBOARDING
 
     // viewModel() (not remember{}) so this survives a config change (rotation) via the Activity's
     // own ViewModelStore - TgMusicNavGraph is composed directly in MainActivity's setContent, so
@@ -200,6 +203,11 @@ fun TgMusicNavGraph(navController: NavHostController = rememberNavController()) 
                     LaunchedEffect(Unit) {
                         navController.navigate(Routes.HOME) { popUpTo(0) { inclusive = true } }
                     }
+                }
+                composable(Routes.ONBOARDING) {
+                    OnboardingScreen(onFinished = {
+                        navController.navigate(Routes.HOME) { popUpTo(Routes.ONBOARDING) { inclusive = true } }
+                    })
                 }
                 composable(Routes.HOME) {
                     HomeScreen(

@@ -141,10 +141,17 @@ class AppSettingsStore(context: Context) {
         get() = prefs.getBoolean(KEY_YT_ARTWORK_UPGRADED, false)
         set(value) = prefs.edit().putBoolean(KEY_YT_ARTWORK_UPGRADED, value).apply()
 
-    /** The first-launch Android permission pop-ups (notifications, music & audio) were shown. */
+    /** Versions before the hello screens showed Android's permission pop-ups on first launch
+     * and set this - it's now only read to tell those existing users apart (see onboardingDone). */
     var permissionsRequested: Boolean
         get() = prefs.getBoolean(KEY_PERMISSIONS_REQUESTED, false)
         set(value) = prefs.edit().putBoolean(KEY_PERMISSIONS_REQUESTED, value).apply()
+
+    /** The first-start hello screens (OnboardingScreen) were finished. Anyone who already used
+     * an older version counts as done, so they never see them. */
+    var onboardingDone: Boolean
+        get() = prefs.getBoolean(KEY_ONBOARDING_DONE, permissionsRequested)
+        set(value) = prefs.edit().putBoolean(KEY_ONBOARDING_DONE, value).apply()
 
     // The three smart (dynamic) playlists' own "Hide from tracks" button - Liked/Telegram/
     // Downloaded aren't real PlaylistEntity rows (see SmartPlaylistKind's own doc), just a
@@ -212,6 +219,7 @@ class AppSettingsStore(context: Context) {
         private const val KEY_DOWNLOAD_LOCATION_CHOSEN = "download_location_chosen"
         private const val KEY_SINGLE_COPY_DONE = "single_copy_migration_done"
         private const val KEY_PERMISSIONS_REQUESTED = "permissions_requested"
+        private const val KEY_ONBOARDING_DONE = "onboarding_done"
         private const val KEY_YT_ARTWORK_UPGRADED = "yt_artwork_upgraded"
         private const val KEY_HIDE_LIKED = "hide_liked_from_tracks"
         private const val KEY_HIDE_TELEGRAM = "hide_telegram_from_tracks"

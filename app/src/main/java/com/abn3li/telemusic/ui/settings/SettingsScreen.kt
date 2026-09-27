@@ -76,7 +76,7 @@ import kotlinx.coroutines.withContext
 
 /** A SAF tree URI's own document id looks like "primary:Music/TeleMusic" - the part after the
  * last "/" is the folder name the user actually picked. */
-private fun readableFolderName(uri: Uri): String =
+internal fun readableFolderName(uri: Uri): String =
     uri.lastPathSegment?.substringAfterLast('/')?.takeIf { it.isNotBlank() } ?: "Folder selected"
 
 // iOS-style icon tile colours.
