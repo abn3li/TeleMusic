@@ -1,0 +1,109 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The loading screen's icon (Theme.TgMusic.Starting): six pink equalizer bars bouncing on
+     black. 288dp with no icon background, as Android's splash screen expects; the bars stay
+     inside its middle 192dp circle so nothing gets cut off. Before Android 12 it shows still. -->
+<animated-vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt">
+    <aapt:attr name="android:drawable">
+        <vector
+            android:width="288dp" android:height="288dp"
+            android:viewportWidth="288" android:viewportHeight="288">
+            <group android:name="bar1" android:pivotX="96" android:pivotY="144">
+                <path android:fillColor="#E64366" android:pathData="M90,135 A6,6 0 0 1 102,135 V153 A6,6 0 0 1 90,153 Z" />
+            </group>
+            <group android:name="bar2" android:pivotX="115.5" android:pivotY="144">
+                <path android:fillColor="#E64366" android:pathData="M109.5,111 A6,6 0 0 1 121.5,111 V177 A6,6 0 0 1 109.5,177 Z" />
+            </group>
+            <group android:name="bar3" android:pivotX="135" android:pivotY="144">
+                <path android:fillColor="#E64366" android:pathData="M129,87 A6,6 0 0 1 141,87 V201 A6,6 0 0 1 129,201 Z" />
+            </group>
+            <group android:name="bar4" android:pivotX="154.5" android:pivotY="144">
+                <path android:fillColor="#E64366" android:pathData="M148.5,102 A6,6 0 0 1 160.5,102 V186 A6,6 0 0 1 148.5,186 Z" />
+            </group>
+            <group android:name="bar5" android:pivotX="174" android:pivotY="144">
+                <path android:fillColor="#E64366" android:pathData="M168,120 A6,6 0 0 1 180,120 V168 A6,6 0 0 1 168,168 Z" />
+            </group>
+            <group android:name="bar6" android:pivotX="193.5" android:pivotY="144">
+                <path android:fillColor="#E64366" android:pathData="M187.5,138 A6,6 0 0 1 199.5,138 V150 A6,6 0 0 1 187.5,150 Z" />
+            </group>
+        </vector>
+    </aapt:attr>
+    <target android:name="bar1">
+        <aapt:attr name="android:animation">
+            <objectAnimator
+                android:propertyName="scaleY"
+                android:valueFrom="1"
+                android:valueTo="0.35"
+                android:duration="450"
+                android:startOffset="0"
+                android:repeatCount="infinite"
+                android:repeatMode="reverse"
+                android:interpolator="@android:interpolator/accelerate_decelerate" />
+        </aapt:attr>
+    </target>
+    <target android:name="bar2">
+        <aapt:attr name="android:animation">
+            <objectAnimator
+                android:propertyName="scaleY"
+                android:valueFrom="1"
+                android:valueTo="0.35"
+                android:duration="450"
+                android:startOffset="300"
+                android:repeatCount="infinite"
+                android:repeatMode="reverse"
+                android:interpolator="@android:interpolator/accelerate_decelerate" />
+        </aapt:attr>
+    </target>
+    <target android:name="bar3">
+        <aapt:attr name="android:animation">
+            <objectAnimator
+                android:propertyName="scaleY"
+                android:valueFrom="1"
+                android:valueTo="0.35"
+                android:duration="450"
+                android:startOffset="150"
+                android:repeatCount="infinite"
+                android:repeatMode="reverse"
+                android:interpolator="@android:interpolator/accelerate_decelerate" />
+        </aapt:attr>
+    </target>
+    <target android:name="bar4">
+        <aapt:attr name="android:animation">
+            <objectAnimator
+                android:propertyName="scaleY"
+                android:valueFrom="1"
+                android:valueTo="0.35"
+                android:duration="450"
+                android:startOffset="400"
+                android:repeatCount="infinite"
+                android:repeatMode="reverse"
+                android:interpolator="@android:interpolator/accelerate_decelerate" />
+        </aapt:attr>
+    </target>
+    <target android:name="bar5">
+        <aapt:attr name="android:animation">
+            <objectAnimator
+                android:propertyName="scaleY"
+                android:valueFrom="1"
+                android:valueTo="0.35"
+                android:duration="450"
+                android:startOffset="200"
+                android:repeatCount="infinite"
+                android:repeatMode="reverse"
+                android:interpolator="@android:interpolator/accelerate_decelerate" />
+        </aapt:attr>
+    </target>
+    <target android:name="bar6">
+        <aapt:attr name="android:animation">
+            <objectAnimator
+                android:propertyName="scaleY"
+                android:valueFrom="1"
+                android:valueTo="0.35"
+                android:duration="450"
+                android:startOffset="500"
+                android:repeatCount="infinite"
+                android:repeatMode="reverse"
+                android:interpolator="@android:interpolator/accelerate_decelerate" />
+        </aapt:attr>
+    </target>
+</animated-vector>

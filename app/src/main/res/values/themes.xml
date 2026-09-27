@@ -1,3 +1,15 @@
 <resources>
-    <style name="Theme.TgMusic" parent="android:Theme.Material.NoActionBar" />
+    <!-- Black window so nothing grey shows between the loading screen and the first frame. -->
+    <style name="Theme.TgMusic" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@android:color/black</item>
+    </style>
+
+    <!-- The loading screen on every start: pink bars bouncing on black, drawn by Android itself
+         until the app's first frame is ready (no extra delay), then Theme.TgMusic takes over. -->
+    <style name="Theme.TgMusic.Starting" parent="Theme.SplashScreen">
+        <item name="windowSplashScreenBackground">@android:color/black</item>
+        <item name="windowSplashScreenAnimatedIcon">@drawable/splash_bars</item>
+        <item name="windowSplashScreenAnimationDuration">1000</item>
+        <item name="postSplashScreenTheme">@style/Theme.TgMusic</item>
+    </style>
 </resources>
