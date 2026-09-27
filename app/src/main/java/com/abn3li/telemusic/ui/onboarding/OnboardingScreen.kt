@@ -102,12 +102,14 @@ fun OnboardingScreen(onFinished: () -> Unit) {
     val context = LocalContext.current
     val app = context.applicationContext as TgMusicApp
     // Android 12 and older allow notifications without asking, and a granted one needs no page.
-    val needsNotifications = remember {
+    // Saved, not re-checked: allowing them mid-way must not drop the page (and shift every page
+    // after it) when the screen is recreated.
+    val needsNotifications = rememberSaveable {
         Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
             ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
     }
     // The pages this phone shows, in order; back and next just move along this list.
-    val steps = remember {
+    val steps = remember(needsNotifications) {
         listOfNotNull(STEP_WELCOME, STEP_FEATURES, STEP_NOTIFICATIONS.takeIf { needsNotifications }, STEP_DOWNLOADS)
     }
     var index by rememberSaveable { mutableIntStateOf(0) }
@@ -116,13 +118,15 @@ fun OnboardingScreen(onFinished: () -> Unit) {
 
     fun finish() {
         app.settingsStore.onboardingDone = true
+        // Notifications were offered here, so MainActivity's one-time ask for older users skips.
+        app.settingsStore.permissionsRequested = true
         onFinished()
     }
 
     BackHandler(enabled = index > 0, onBack = back)
 
     Box(Modifier.fillMaxSize().background(Color.Black)) {
-        when (steps[index]) {
+        when (steps[index.coerceIn(0, steps.lastIndex)]) {
             STEP_WELCOME -> WelcomeStep(onNext = next)
             STEP_FEATURES -> FeaturesStep(onBack = back, onNext = next)
             STEP_NOTIFICATIONS -> NotificationsStep(onBack = back, onNext = next)

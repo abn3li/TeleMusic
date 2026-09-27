@@ -17,6 +17,8 @@ import okhttp3.Callback
 import okhttp3.Request
 import okhttp3.Response
 import java.io.IOException
+import java.util.concurrent.atomic.AtomicBoolean
+import retrofit2.HttpException
 import kotlin.coroutines.cancellation.CancellationException
 import kotlin.coroutines.resume
 import kotlin.math.abs
@@ -29,8 +31,18 @@ enum class LyricsProvider(val label: String, val detail: String) {
     LRCLIB("LRCLIB", "Synced when available"),
     KUGOU("KuGou", "Synced"),
     LYRICS_OVH("lyrics.ovh", "Plain text"),
-    GOOGLE("Google", "Plain text")
+    GOOGLE("Google", "Plain text");
+
+    companion object {
+        /** The provider saved under [name] (LyricsCacheEntity.provider), if still known. */
+        fun fromName(name: String?): LyricsProvider? = entries.firstOrNull { it.name == name }
+    }
 }
+
+/** One automatic search. No [result] with [reachedLrcLib] means no lyrics anywhere; without it
+ * the search never got through (offline, say), which says nothing about the song. LRCLIB
+ * answers every search, found or not, so it's the one to tell the two apart. */
+data class LyricsSearch(val result: LyricsResult?, val reachedLrcLib: Boolean)
 
 /**
  * Lyrics are fetched ONLY when the user explicitly asks for them (the Lyrics button in Now
@@ -72,11 +84,17 @@ class LyricsRepository {
      * outside of the button press itself (that boundary hasn't changed: this whole function is
      * still only ever called from fetchLyricsForSong(), on-demand).
      */
-    suspend fun fetchLyrics(title: String, artist: String, durationSeconds: Int?): LyricsResult? = coroutineScope {
+    suspend fun fetchLyrics(title: String, artist: String, durationSeconds: Int?): LyricsSearch {
+        val reachedLrcLib = AtomicBoolean(false)
+        val result = searchAll(title, artist, durationSeconds, reachedLrcLib)
+        return LyricsSearch(result, reachedLrcLib.get())
+    }
+
+    private suspend fun searchAll(title: String, artist: String, durationSeconds: Int?, reachedLrcLib: AtomicBoolean): LyricsResult? = coroutineScope {
         val (cleanTitle, cleanArtist) = sanitizeTitleAndArtist(title, artist)
         Log.d("LyricsRepository", "Searching lyrics for '$cleanTitle' by '$cleanArtist'")
 
-        val lrcLibDeferred = async { fetchLrcLibLyrics(cleanTitle, cleanArtist, durationSeconds) }
+        val lrcLibDeferred = async { fetchLrcLibLyrics(cleanTitle, cleanArtist, durationSeconds, reachedLrcLib) }
         val kuGouDeferred = async { fetchKuGouLyrics(cleanTitle, cleanArtist, durationSeconds) }
         val ovhDeferred = async { fetchLyricsOvhLyrics(cleanTitle, cleanArtist) }
 
@@ -161,14 +179,23 @@ class LyricsRepository {
      * which may only have plain lyrics while a different entry for the same song (findable via
      * search) has a synced version. Synced is always preferred when it exists anywhere in
      * LRCLIB, never just settled for plain because the first lookup happened to find it first. */
-    private suspend fun fetchLrcLibLyrics(title: String, artist: String, durationSeconds: Int?): LyricsResult? =
+    private suspend fun fetchLrcLibLyrics(
+        title: String,
+        artist: String,
+        durationSeconds: Int?,
+        reached: AtomicBoolean? = null
+    ): LyricsResult? =
         withContext(Dispatchers.IO) {
             val exactMatch = try {
                 NetworkModule.lrcLibApi.getLyrics(
                     trackName = title,
                     artistName = artist,
                     durationSeconds = durationSeconds
-                ).toLyricsResultOrNull()
+                ).toLyricsResultOrNull().also { reached?.set(true) }
+            } catch (e: HttpException) {
+                // A 404 is LRCLIB answering "no exact match" - it was reached. (A 5xx isn't.)
+                if (e.code() == 404) reached?.set(true)
+                null
             } catch (e: Exception) {
                 null
             }
@@ -177,6 +204,7 @@ class LyricsRepository {
 
             val searchMatch = try {
                 val results = NetworkModule.lrcLibApi.searchLyrics(trackName = title, artistName = artist)
+                reached?.set(true)
                 val bestMatch = results.firstOrNull { !it.syncedLyrics.isNullOrBlank() }
                     ?: results.firstOrNull { !it.plainLyrics.isNullOrBlank() }
                 bestMatch?.toLyricsResultOrNull()

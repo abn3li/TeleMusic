@@ -59,8 +59,9 @@ interface SongDao {
     @Query("UPDATE songs SET lyricsPlain = :plain, lyricsSynced = :synced WHERE telegramMessageId = :id")
     suspend fun setLyrics(id: Long, plain: String?, synced: String?)
 
-    @Query("SELECT * FROM songs WHERE (lyricsPlain IS NOT NULL AND lyricsPlain != '') OR (lyricsSynced IS NOT NULL AND lyricsSynced != '')")
-    suspend fun getSongsWithLyrics(): List<SongEntity>
+    // Only what the lyrics cache needs, not whole rows - see MusicRepository.backfillLyricsCache.
+    @Query("SELECT title, artist, lyricsPlain, lyricsSynced FROM songs WHERE TRIM(COALESCE(lyricsPlain, '')) != '' OR TRIM(COALESCE(lyricsSynced, '')) != ''")
+    suspend fun getLyricsToBackfill(): List<SongLyricsRow>
 
     @Query("UPDATE songs SET telegramFileId = :fileId WHERE telegramMessageId = :id")
     suspend fun setTelegramFileId(id: Long, fileId: Int)

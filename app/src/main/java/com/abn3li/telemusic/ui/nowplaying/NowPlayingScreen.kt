@@ -433,7 +433,7 @@ private fun NowPlayingContent(
         }
 
         if (showLyricsSourceDialog && state.song != null) {
-            LyricsSourceDialog(viewModel = viewModel, onDismiss = { showLyricsSourceDialog = false })
+            LyricsSourceDialog(viewModel = viewModel, song = state.song, onDismiss = { showLyricsSourceDialog = false })
         }
 
         state.song?.takeIf { showSongInfoDialog }?.let { song ->

@@ -125,8 +125,9 @@ fun TgMusicNavGraph(navController: NavHostController = rememberNavController()) 
     val app = LocalContext.current.applicationContext as TgMusicApp
     // The hello screens on the very first start, then always Home. Telegram's API ID/hash are
     // asked for in the Sync tab, only when you use it.
-    val showOnboarding = !app.settingsStore.onboardingDone && !app.credentialsStore.hasCredentials()
-    val startDestination = if (showOnboarding) Routes.ONBOARDING else Routes.HOME
+    // Decided once: finishing the hello screens must not change the start page mid-session,
+    // which would rebuild the whole navigation graph.
+    val startDestination = remember { if (app.needsOnboarding()) Routes.ONBOARDING else Routes.HOME }
 
     // viewModel() (not remember{}) so this survives a config change (rotation) via the Activity's
     // own ViewModelStore - TgMusicNavGraph is composed directly in MainActivity's setContent, so

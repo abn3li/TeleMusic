@@ -96,6 +96,9 @@ fun SettingsScreen(onBack: () -> Unit, onOpenSpotify: () -> Unit, onLoggedOut: (
 
     // DNS and proxy as typed; each section below saves and applies its own part.
     val network = rememberTelegramNetworkForm(app.settingsStore)
+    var dnsMessage by remember { mutableStateOf<String?>(null) }
+    // Before Telegram is set up (Sync tab) there's nothing to connect or restart: just save.
+    val telegramRunning = app.tdlibManager.isStarted
     var proxyStatusMessage by remember { mutableStateOf<String?>(null) }
     var isApplyingProxy by remember { mutableStateOf(false) }
 
@@ -276,9 +279,13 @@ fun SettingsScreen(onBack: () -> Unit, onOpenSpotify: () -> Unit, onLoggedOut: (
             GroupCard {
                 DnsResolverRows(network, icon = { GroupIcon(Icons.Rounded.Dns, TileGreen) })
                 GroupDivider()
-                GroupActionRow("Apply & Restart App") {
+                GroupActionRow(if (telegramRunning) "Apply & Restart App" else "Save") {
                     app.settingsStore.dnsResolver = network.dns
                     app.settingsStore.customDnsIps = network.customDns
+                    if (!telegramRunning) {
+                        dnsMessage = "Saved. Telegram uses it once you set it up in the Sync tab."
+                        return@GroupActionRow
+                    }
                     app.tdlibManager.applyDns(network.dns, network.customDns)
                     // Restart the process so TDLib starts fresh with the new DNS.
                     val intent = context.packageManager.getLaunchIntentForPackage(context.packageName)
@@ -286,7 +293,7 @@ fun SettingsScreen(onBack: () -> Unit, onOpenSpotify: () -> Unit, onLoggedOut: (
                     Runtime.getRuntime().exit(0)
                 }
             }
-            GroupFooter("Bypasses ISP DNS blocking and can speed up connecting. Presets from Telegram, Telegram X and Nagram X.")
+            GroupFooter(dnsMessage ?: "Bypasses ISP DNS blocking and can speed up connecting. Presets from Telegram, Telegram X and Nagram X.")
         }
 
         item("proxy") {
@@ -294,12 +301,16 @@ fun SettingsScreen(onBack: () -> Unit, onOpenSpotify: () -> Unit, onLoggedOut: (
             GroupCard {
                 ProxyRows(network, onMessage = { proxyStatusMessage = it }, icon = { GroupIcon(Icons.Rounded.VpnKey, TileIndigo) })
                 GroupDivider()
-                GroupActionRow("Save & Connect", loading = isApplyingProxy) {
+                GroupActionRow(if (telegramRunning) "Save & Connect" else "Save", loading = isApplyingProxy) {
                     val enabled = network.proxyEnabled
                     val server = network.proxyServer
                     val port = network.proxyPort
                     val secret = network.proxySecret
                     app.settingsStore.updateProxy(enabled, server, port, secret)
+                    if (!telegramRunning) {
+                        proxyStatusMessage = "Saved. Telegram uses it once you set it up in the Sync tab."
+                        return@GroupActionRow
+                    }
                     scope.launch {
                         isApplyingProxy = true
                         proxyStatusMessage = "Connecting…"

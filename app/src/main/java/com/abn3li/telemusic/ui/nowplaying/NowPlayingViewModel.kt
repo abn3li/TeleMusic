@@ -414,13 +414,21 @@ class NowPlayingViewModel(
         val song = _uiState.value.song ?: return
         _lyricsSource.value = _lyricsSource.value.copy(loading = provider, message = null)
         fetchLyrics(song, showSpinner = false) {
-            repository.fetchLyricsFrom(song, provider).also { found ->
-                _lyricsSource.value = _lyricsSource.value.copy(
-                    loading = null,
-                    current = if (found != null) provider else _lyricsSource.value.current,
-                    message = if (found != null) null else "${provider.label} has no lyrics for this song."
-                )
+            val found = try {
+                repository.fetchLyricsFrom(song, provider)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                // Never leave the picker stuck on a spinner.
+                _lyricsSource.value = _lyricsSource.value.copy(loading = null, message = "Couldn't get lyrics from ${provider.label}.")
+                throw e
             }
+            _lyricsSource.value = _lyricsSource.value.copy(
+                loading = null,
+                current = if (found != null) provider else _lyricsSource.value.current,
+                message = if (found != null) null else "${provider.label} has no lyrics for this song."
+            )
+            found
         }
     }
 

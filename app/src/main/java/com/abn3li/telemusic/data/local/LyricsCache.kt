@@ -23,6 +23,9 @@ data class LyricsCacheEntity(
     val fetchedAtMillis: Long
 )
 
+/** A song's name and lyrics, for copying lyrics songs already had into the cache. */
+data class SongLyricsRow(val title: String, val artist: String, val lyricsPlain: String?, val lyricsSynced: String?)
+
 @Dao
 interface LyricsCacheDao {
     @Query("SELECT * FROM lyrics_cache WHERE `key` = :key")

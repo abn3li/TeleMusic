@@ -24,6 +24,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.abn3li.telemusic.data.local.SongEntity
 import com.abn3li.telemusic.repository.LyricsProvider
 import com.abn3li.telemusic.ui.library.AlertAction
 import com.abn3li.telemusic.ui.library.AppAccent
@@ -35,13 +36,15 @@ import com.abn3li.telemusic.ui.library.CalmSpinner
  * source is asked only when tapped, and what it finds replaces the lyrics on screen (and is saved).
  */
 @Composable
-internal fun LyricsSourceDialog(viewModel: NowPlayingViewModel, onDismiss: () -> Unit) {
+internal fun LyricsSourceDialog(viewModel: NowPlayingViewModel, song: SongEntity, onDismiss: () -> Unit) {
     val source by viewModel.lyricsSource.collectAsState()
-    LaunchedEffect(Unit) { viewModel.loadLyricsSource() }
+    // Reloads when the song changes under the open picker (a skip, or the next track starting),
+    // so the tick and every tap are always about the song named here.
+    LaunchedEffect(song.telegramMessageId) { viewModel.loadLyricsSource() }
 
     AppAlert(
         title = "Lyrics Source",
-        message = "Pick another source if these lyrics are wrong or out of sync.",
+        message = "For \"${song.title}\". Pick another source if these lyrics are wrong or out of sync.",
         onDismiss = onDismiss,
         actions = listOf(AlertAction("Done", bold = true, onClick = onDismiss))
     ) {

@@ -96,6 +96,10 @@ class TgMusicApp : Application(), ImageLoaderFactory {
      * imported songs without artwork. This is exactly the failure mode SyncService's own doc
      * describes for channel sync, just for local-import artwork instead.
      */
+    /** Whether the first-start hello screens still need showing: nobody finished them, and
+     * nothing says this is someone who used an older version (see onboardingDone). */
+    fun needsOnboarding(): Boolean = !settingsStore.onboardingDone && !credentialsStore.hasCredentials()
+
     fun enrichLibraryInBackground() {
         appScope.launch { musicRepository.enrichMissingMetadata() }
     }

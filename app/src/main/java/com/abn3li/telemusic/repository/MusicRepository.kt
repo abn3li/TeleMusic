@@ -709,15 +709,17 @@ class MusicRepository(
             if (cached != null) {
                 if (cached.plain != null || cached.synced != null) {
                     songDao.setLyrics(song.telegramMessageId, cached.plain, cached.synced)
-                    return LyricsResult(cached.plain, cached.synced, cached.provider?.let { runCatching { LyricsProvider.valueOf(it) }.getOrNull() })
+                    return LyricsResult(cached.plain, cached.synced, LyricsProvider.fromName(cached.provider))
                 }
                 if (System.currentTimeMillis() - cached.fetchedAtMillis < LYRICS_NOT_FOUND_RETRY_MS) return null
             }
         }
 
-        val lyrics = lyricsRepository.fetchLyrics(query.title, query.artist, query.durationSeconds.takeIf { it > 0 })
-            ?.takeIf { it.plain != null || it.synced != null }
-        saveLyrics(song, keys, lyrics)
+        val search = lyricsRepository.fetchLyrics(query.title, query.artist, query.durationSeconds.takeIf { it > 0 })
+        val lyrics = search.result?.takeIf { it.plain != null || it.synced != null }
+        // "None anywhere" is only remembered when the search really got through - a search made
+        // offline would otherwise hide a song's lyrics for a week.
+        if (lyrics != null || search.reachedLrcLib) saveLyrics(song, keys, lyrics)
         return lyrics
     }
 
@@ -731,8 +733,7 @@ class MusicRepository(
 
     /** Which source the song's current lyrics came from, if the cache knows. */
     suspend fun lyricsProviderFor(song: SongEntity): LyricsProvider? =
-        lyricsCache.get(lyricsRepository.cacheKey(song.title, song.artist))?.provider
-            ?.let { runCatching { LyricsProvider.valueOf(it) }.getOrNull() }
+        LyricsProvider.fromName(lyricsCache.get(lyricsRepository.cacheKey(song.title, song.artist))?.provider)
 
     private suspend fun saveLyrics(song: SongEntity, keys: List<String>, lyrics: LyricsResult?) {
         val now = System.currentTimeMillis()
@@ -750,14 +751,12 @@ class MusicRepository(
     suspend fun backfillLyricsCache() {
         if (settingsStore.lyricsCacheBackfilled) return
         val now = System.currentTimeMillis()
-        val entries = songDao.getSongsWithLyrics().map { song ->
-            LyricsCacheEntity(
-                lyricsRepository.cacheKey(song.title, song.artist),
-                song.lyricsPlain?.takeIf { it.isNotBlank() },
-                song.lyricsSynced?.takeIf { it.isNotBlank() },
-                null,
-                now
-            )
+        val entries = songDao.getLyricsToBackfill().mapNotNull { row ->
+            val plain = row.lyricsPlain?.takeIf { it.isNotBlank() }
+            val synced = row.lyricsSynced?.takeIf { it.isNotBlank() }
+            // Blank text isn't lyrics - it must not become a "none anywhere" entry.
+            if (plain == null && synced == null) return@mapNotNull null
+            LyricsCacheEntity(lyricsRepository.cacheKey(row.title, row.artist), plain, synced, null, now)
         }
         if (entries.isNotEmpty()) lyricsCache.putIfMissing(entries)
         settingsStore.lyricsCacheBackfilled = true
