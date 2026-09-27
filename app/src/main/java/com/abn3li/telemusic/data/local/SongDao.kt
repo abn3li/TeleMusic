@@ -51,6 +51,23 @@ interface SongDao {
     @Query("SELECT * FROM songs WHERE isFavorite = 1")
     fun observeFavorites(): Flow<List<SongEntity>>
 
+    // Single-field updates: a whole-row update from a copy read earlier wrote that copy's stale
+    // fields back - saved lyrics were erased that way every time a stream corrected a duration.
+    @Query("UPDATE songs SET durationSeconds = :seconds WHERE telegramMessageId = :id")
+    suspend fun setDuration(id: Long, seconds: Int)
+
+    @Query("UPDATE songs SET lyricsPlain = :plain, lyricsSynced = :synced WHERE telegramMessageId = :id")
+    suspend fun setLyrics(id: Long, plain: String?, synced: String?)
+
+    @Query("SELECT * FROM songs WHERE (lyricsPlain IS NOT NULL AND lyricsPlain != '') OR (lyricsSynced IS NOT NULL AND lyricsSynced != '')")
+    suspend fun getSongsWithLyrics(): List<SongEntity>
+
+    @Query("UPDATE songs SET telegramFileId = :fileId WHERE telegramMessageId = :id")
+    suspend fun setTelegramFileId(id: Long, fileId: Int)
+
+    @Query("UPDATE songs SET telegramFileId = :fileId, resolvedChatId = :chatId WHERE telegramMessageId = :id")
+    suspend fun setTelegramFile(id: Long, fileId: Int, chatId: Long)
+
     @Query("UPDATE songs SET isFavorite = :isFavorite WHERE telegramMessageId = :id")
     suspend fun setFavorite(id: Long, isFavorite: Boolean)
 

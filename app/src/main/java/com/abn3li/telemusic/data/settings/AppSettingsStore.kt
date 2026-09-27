@@ -136,6 +136,11 @@ class AppSettingsStore(context: Context) {
         get() = prefs.getBoolean(KEY_SINGLE_COPY_DONE, false)
         set(value) = prefs.edit().putBoolean(KEY_SINGLE_COPY_DONE, value).apply()
 
+    /** Lyrics songs already had were copied into the lyrics cache (a one-time step). */
+    var lyricsCacheBackfilled: Boolean
+        get() = prefs.getBoolean(KEY_LYRICS_CACHE_BACKFILLED, false)
+        set(value) = prefs.edit().putBoolean(KEY_LYRICS_CACHE_BACKFILLED, value).apply()
+
     /** The one-time upgrade of saved 120 px YouTube artwork links to the sharp size has run. */
     var youTubeArtworkUpgraded: Boolean
         get() = prefs.getBoolean(KEY_YT_ARTWORK_UPGRADED, false)
@@ -223,6 +228,7 @@ class AppSettingsStore(context: Context) {
         private const val KEY_PERMISSIONS_REQUESTED = "permissions_requested"
         private const val KEY_ONBOARDING_DONE = "onboarding_done"
         private const val KEY_YT_ARTWORK_UPGRADED = "yt_artwork_upgraded"
+        private const val KEY_LYRICS_CACHE_BACKFILLED = "lyrics_cache_backfilled"
         private const val KEY_HIDE_LIKED = "hide_liked_from_tracks"
         private const val KEY_HIDE_TELEGRAM = "hide_telegram_from_tracks"
         private const val KEY_HIDE_DOWNLOADED = "hide_downloaded_from_tracks"

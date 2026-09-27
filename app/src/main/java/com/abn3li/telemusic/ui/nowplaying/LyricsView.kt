@@ -28,6 +28,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -38,6 +39,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.rounded.SwapHoriz
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.FilledTonalButton
@@ -79,6 +81,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -105,6 +108,7 @@ internal fun LyricsPage(
     viewModel: NowPlayingViewModel,
     effects: PlayerEffects,
     onOpenManualSearch: () -> Unit,
+    onOpenLyricsSource: () -> Unit,
     onUserInteraction: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -125,6 +129,7 @@ internal fun LyricsPage(
                 lines = state.lyricLines,
                 viewModel = viewModel,
                 effects = effects,
+                onOpenLyricsSource = onOpenLyricsSource,
                 onUserInteraction = onUserInteraction
             )
 
@@ -143,6 +148,7 @@ internal fun LyricsPage(
                     fontWeight = FontWeight.Bold,
                     lineHeight = 34.sp
                 )
+                LyricsSourceButton(onOpenLyricsSource, Modifier.padding(top = 28.dp))
                 Spacer(Modifier.height(120.dp))
             }
 
@@ -164,7 +170,7 @@ internal fun LyricsPage(
                 Spacer(Modifier.height(18.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     FilledTonalButton(
-                        onClick = { viewModel.fetchLyricsOnDemand() },
+                        onClick = { viewModel.retryLyrics() },
                         colors = ButtonDefaults.filledTonalButtonColors(
                             containerColor = Color.White.copy(alpha = 0.14f),
                             contentColor = Color.White
@@ -221,6 +227,7 @@ private fun SyncedLyrics(
     lines: List<LyricLine>,
     viewModel: NowPlayingViewModel,
     effects: PlayerEffects,
+    onOpenLyricsSource: () -> Unit,
     onUserInteraction: () -> Unit
 ) {
     val progressState = viewModel.playbackProgress.collectAsState()
@@ -340,8 +347,25 @@ private fun SyncedLyrics(
                     }
                 }
             }
+            item(key = "lyrics_source") { LyricsSourceButton(onOpenLyricsSource, Modifier.padding(start = 28.dp, top = 36.dp)) }
             item(key = "lyrics_tail") { Spacer(Modifier.height(maxHeight * 0.8f)) }
         }
+    }
+}
+
+/** "Change lyrics source" at the end of the lyrics - opens the source picker. */
+@Composable
+private fun LyricsSourceButton(onClick: () -> Unit, modifier: Modifier = Modifier) {
+    Row(
+        modifier
+            .clip(RoundedCornerShape(50))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 4.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(Icons.Rounded.SwapHoriz, contentDescription = null, tint = Color.White.copy(alpha = 0.55f), modifier = Modifier.size(18.dp))
+        Spacer(Modifier.width(6.dp))
+        Text("Change lyrics source", color = Color.White.copy(alpha = 0.55f), fontSize = 15.sp, fontWeight = FontWeight.Medium)
     }
 }
 

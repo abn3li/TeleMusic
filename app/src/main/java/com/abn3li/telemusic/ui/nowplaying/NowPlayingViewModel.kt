@@ -14,6 +14,8 @@ import com.abn3li.telemusic.data.local.displayArtwork
 import com.abn3li.telemusic.playback.PlaybackController
 import com.abn3li.telemusic.playback.PlaybackQueue
 import com.abn3li.telemusic.playback.RepeatMode
+import com.abn3li.telemusic.repository.LyricsProvider
+import com.abn3li.telemusic.repository.LyricsResult
 import com.abn3li.telemusic.repository.MusicRepository
 import com.abn3li.telemusic.repository.SortField
 import kotlinx.coroutines.CancellationException
@@ -60,6 +62,14 @@ data class NowPlayingUiState(
     val isShuffleEnabled: Boolean = false,
     val repeatMode: RepeatMode = RepeatMode.OFF,
     val errorMessage: String? = null
+)
+
+/** The Lyrics source picker: where the lyrics on screen came from, which source is being asked
+ * right now, and the outcome of the last ask. */
+data class LyricsSourceState(
+    val current: LyricsProvider? = null,
+    val loading: LyricsProvider? = null,
+    val message: String? = null
 )
 
 class NowPlayingViewModel(
@@ -367,29 +377,66 @@ class NowPlayingViewModel(
         refreshQueue()
     }
 
+    private val _lyricsSource = MutableStateFlow(LyricsSourceState())
+    val lyricsSource: StateFlow<LyricsSourceState> = _lyricsSource
+
+    /** Opening Lyrics: saved lyrics (or a recent "none found") answer without searching. */
     fun fetchLyricsOnDemand() {
         val song = _uiState.value.song ?: return
-        fetchLyrics(song, query = song)
+        fetchLyrics(song) { repository.fetchLyricsForSong(song) }
+    }
+
+    /** The Retry button: searches again even if the last search found nothing. */
+    fun retryLyrics() {
+        val song = _uiState.value.song ?: return
+        fetchLyrics(song) { repository.fetchLyricsForSong(song, force = true) }
     }
 
     fun fetchLyricsCustom(customTitle: String, customArtist: String) {
         val song = _uiState.value.song ?: return
-        fetchLyrics(song, query = song.copy(title = customTitle.trim(), artist = customArtist.trim()))
+        val query = song.copy(title = customTitle.trim(), artist = customArtist.trim())
+        fetchLyrics(song) { repository.fetchLyricsForSong(song, query = query, force = true) }
+    }
+
+    /** Opening the Lyrics source picker: shows which source the current lyrics came from. */
+    fun loadLyricsSource() {
+        val song = _uiState.value.song ?: return
+        _lyricsSource.value = LyricsSourceState()
+        viewModelScope.launch {
+            val current = withContext(Dispatchers.IO) { repository.lyricsProviderFor(song) }
+            _lyricsSource.value = _lyricsSource.value.copy(current = current)
+        }
+    }
+
+    /** Picking a source: asks only it. Found lyrics replace the ones on screen; nothing found
+     * keeps them and says so. */
+    fun changeLyricsSource(provider: LyricsProvider) {
+        val song = _uiState.value.song ?: return
+        _lyricsSource.value = _lyricsSource.value.copy(loading = provider, message = null)
+        fetchLyrics(song, showSpinner = false) {
+            repository.fetchLyricsFrom(song, provider).also { found ->
+                _lyricsSource.value = _lyricsSource.value.copy(
+                    loading = null,
+                    current = if (found != null) provider else _lyricsSource.value.current,
+                    message = if (found != null) null else "${provider.label} has no lyrics for this song."
+                )
+            }
+        }
     }
 
     /**
-     * Searches lyrics for [song] using [query]'s title/artist. One search at a time: a new search
+     * Runs one lyrics [search] for [song] and shows what it found. One search at a time: a new search
      * or a song change (see cancelLyricsFetch) cancels the previous one, and a finished search only
      * applies if [song] is still the one playing - otherwise a slow search for the previous song
      * wrote that song (and its lyrics) back into state after a skip, briefly showing the wrong
      * lyrics until the player resynced.
      */
-    private fun fetchLyrics(song: SongEntity, query: SongEntity) {
+    private fun fetchLyrics(song: SongEntity, showSpinner: Boolean = true, search: suspend () -> LyricsResult?) {
         lyricsJob?.cancel()
         lyricsJob = viewModelScope.launch {
-            _uiState.value = _uiState.value.copy(isFetchingLyrics = true)
+            if (showSpinner) _uiState.value = _uiState.value.copy(isFetchingLyrics = true)
             val result = try {
-                withContext(Dispatchers.IO) { repository.fetchLyricsForSong(query) }
+                withContext(Dispatchers.IO) { search() }
             } catch (e: CancellationException) {
                 throw e
             } catch (_: Exception) {
@@ -397,8 +444,9 @@ class NowPlayingViewModel(
             }
 
             val freshDbSong = withContext(Dispatchers.IO) { repository.getSongById(song.telegramMessageId) }
-            val plain = result?.plain ?: freshDbSong?.lyricsPlain ?: song.lyricsPlain
-            val synced = result?.synced ?: freshDbSong?.lyricsSynced ?: song.lyricsSynced
+            // A find replaces both (a plain-only source must not leave the old synced lyrics on screen).
+            val plain = if (result != null) result.plain else freshDbSong?.lyricsPlain ?: song.lyricsPlain
+            val synced = if (result != null) result.synced else freshDbSong?.lyricsSynced ?: song.lyricsSynced
             val rawLrc = synced.takeIf { !it.isNullOrBlank() }
                 ?: plain.takeIf { !it.isNullOrBlank() && it.contains("[00:") }
             val lines = withContext(Dispatchers.Default) { rawLrc?.let(::parseLrc).orEmpty() }
@@ -418,6 +466,7 @@ class NowPlayingViewModel(
         lyricsJob?.cancel()
         lyricsJob = null
         if (_uiState.value.isFetchingLyrics) _uiState.value = _uiState.value.copy(isFetchingLyrics = false)
+        if (_lyricsSource.value.loading != null) _lyricsSource.value = _lyricsSource.value.copy(loading = null)
     }
 
     /** The end-of-song advance: under Repeat One this replays the same song. */

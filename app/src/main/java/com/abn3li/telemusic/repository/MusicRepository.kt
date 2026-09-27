@@ -11,6 +11,7 @@ import androidx.core.net.toUri
 import com.abn3li.telemusic.data.browse.BrowseTrack
 import com.abn3li.telemusic.data.local.AlbumSummary
 import com.abn3li.telemusic.data.local.ArtistSummary
+import com.abn3li.telemusic.data.local.LyricsCacheEntity
 import com.abn3li.telemusic.data.local.PlaylistDao
 import com.abn3li.telemusic.data.local.PlaylistEntity
 import com.abn3li.telemusic.data.local.PlaylistSongCrossRef
@@ -42,6 +43,9 @@ private const val MAX_CACHE_POLL_ATTEMPTS = 600
 
 // Thumbnails saved per database transaction - see backfillThumbnails.
 private const val THUMBNAIL_BATCH = 25
+
+// A song with no lyrics anywhere is searched again after this long, in case some appear.
+private const val LYRICS_NOT_FOUND_RETRY_MS = 7L * 24 * 60 * 60 * 1000
 
 // Mirrors ytdlp_bridge.py's _ARTIST_SPLIT regex exactly - same separators, same "first segment
 // wins" rule, so a collab credit collapses to the same primary artist regardless of which path
@@ -336,7 +340,7 @@ class MusicRepository(
         val outcome = ytDlpRepository.resolveStreamUrl(videoId, DownloadQuality.BEST.formatSelector)
         val stream = outcome.getOrNull()?.takeIf { it.streamUrl.isNotBlank() } ?: return null
         if (stream.durationSeconds > 0 && song.durationSeconds != stream.durationSeconds) {
-            songDao.update(song.copy(durationSeconds = stream.durationSeconds))
+            songDao.setDuration(song.telegramMessageId, stream.durationSeconds)
         }
         return stream.streamUrl.toUri()
     }
@@ -686,27 +690,77 @@ class MusicRepository(
         }
     }
 
-    /** Fetches lyrics on-demand for a song - only ever called from the user tapping the Lyrics
-     * button in Now Playing, never automatically during sync. See enrichMissingMetadata()
-     * above, which deliberately skips lyrics for exactly that reason. */
-    suspend fun fetchLyricsForSong(song: SongEntity): LyricsResult? {
-        val title = song.title
-        val artist = song.artist
-        if (title.isBlank() || title == "Unknown title") return null
+    private val lyricsCache = database.lyricsCacheDao()
 
-        val lyrics = lyricsRepository.fetchLyrics(
-            title, artist, song.durationSeconds.takeIf { it > 0 }
-        )
+    /**
+     * Lyrics for [song], asked for on demand (opening Lyrics, Retry, a custom search) - never
+     * during sync. The lyrics cache answers first: found lyrics, or "none anywhere" searched
+     * within [LYRICS_NOT_FOUND_RETRY_MS], cost no network at all. Otherwise one search as
+     * [query]'s title/artist (a custom search passes its own), saved to the song and the cache
+     * under both the song's own name and the query's. [force] skips the cache (Retry, custom
+     * search). Null when nothing was found.
+     */
+    suspend fun fetchLyricsForSong(song: SongEntity, query: SongEntity = song, force: Boolean = false): LyricsResult? {
+        if (query.title.isBlank() || query.title == "Unknown title") return null
+        val keys = listOf(lyricsRepository.cacheKey(song.title, song.artist), lyricsRepository.cacheKey(query.title, query.artist)).distinct()
 
-        if (lyrics != null && (lyrics.plain != null || lyrics.synced != null)) {
-            songDao.update(
-                song.copy(
-                    lyricsPlain = lyrics.plain ?: song.lyricsPlain,
-                    lyricsSynced = lyrics.synced ?: song.lyricsSynced
-                )
+        if (!force) {
+            val cached = lyricsCache.get(keys.first())
+            if (cached != null) {
+                if (cached.plain != null || cached.synced != null) {
+                    songDao.setLyrics(song.telegramMessageId, cached.plain, cached.synced)
+                    return LyricsResult(cached.plain, cached.synced, cached.provider?.let { runCatching { LyricsProvider.valueOf(it) }.getOrNull() })
+                }
+                if (System.currentTimeMillis() - cached.fetchedAtMillis < LYRICS_NOT_FOUND_RETRY_MS) return null
+            }
+        }
+
+        val lyrics = lyricsRepository.fetchLyrics(query.title, query.artist, query.durationSeconds.takeIf { it > 0 })
+            ?.takeIf { it.plain != null || it.synced != null }
+        saveLyrics(song, keys, lyrics)
+        return lyrics
+    }
+
+    /** The Lyrics source picker: asks only [provider]. A find replaces the song's lyrics (and its
+     * cache entry); nothing found leaves what's there. */
+    suspend fun fetchLyricsFrom(song: SongEntity, provider: LyricsProvider): LyricsResult? {
+        val lyrics = lyricsRepository.fetchFrom(provider, song.title, song.artist, song.durationSeconds.takeIf { it > 0 }) ?: return null
+        saveLyrics(song, listOf(lyricsRepository.cacheKey(song.title, song.artist)), lyrics)
+        return lyrics
+    }
+
+    /** Which source the song's current lyrics came from, if the cache knows. */
+    suspend fun lyricsProviderFor(song: SongEntity): LyricsProvider? =
+        lyricsCache.get(lyricsRepository.cacheKey(song.title, song.artist))?.provider
+            ?.let { runCatching { LyricsProvider.valueOf(it) }.getOrNull() }
+
+    private suspend fun saveLyrics(song: SongEntity, keys: List<String>, lyrics: LyricsResult?) {
+        val now = System.currentTimeMillis()
+        // Only the lyrics columns: the song may have changed since it was read.
+        if (lyrics != null) songDao.setLyrics(song.telegramMessageId, lyrics.plain, lyrics.synced)
+        for (key in keys) {
+            // A "not found" never replaces lyrics already cached under that name.
+            if (lyrics == null && lyricsCache.get(key)?.let { it.plain != null || it.synced != null } == true) continue
+            lyricsCache.put(LyricsCacheEntity(key, lyrics?.plain, lyrics?.synced, lyrics?.provider?.name, now))
+        }
+    }
+
+    /** One-time: copies lyrics songs already have into the lyrics cache, so they carry over to
+     * the same song from another source and survive a library reset. Runs at startup. */
+    suspend fun backfillLyricsCache() {
+        if (settingsStore.lyricsCacheBackfilled) return
+        val now = System.currentTimeMillis()
+        val entries = songDao.getSongsWithLyrics().map { song ->
+            LyricsCacheEntity(
+                lyricsRepository.cacheKey(song.title, song.artist),
+                song.lyricsPlain?.takeIf { it.isNotBlank() },
+                song.lyricsSynced?.takeIf { it.isNotBlank() },
+                null,
+                now
             )
         }
-        return lyrics
+        if (entries.isNotEmpty()) lyricsCache.putIfMissing(entries)
+        settingsStore.lyricsCacheBackfilled = true
     }
 
     /** EXPLICIT download only - triggered by the download button. Sets isExplicitDownload =
@@ -973,7 +1027,7 @@ class MusicRepository(
             val freshId = tdlibManager.getFreshFileId(resolvedChatId, song.telegramMessageId)
             if (freshId != null) {
                 if (freshId != song.telegramFileId) {
-                    songDao.update(song.copy(telegramFileId = freshId))
+                    songDao.setTelegramFileId(song.telegramMessageId, freshId)
                 }
                 verifiedFreshFileIdThisRun.add(song.telegramMessageId)
                 return freshId
@@ -992,7 +1046,7 @@ class MusicRepository(
         if (channelId != 0L && channelId != song.resolvedChatId) {
             val freshId = tdlibManager.getFreshFileId(channelId, song.telegramMessageId)
             if (freshId != null) {
-                songDao.update(song.copy(telegramFileId = freshId, resolvedChatId = channelId))
+                songDao.setTelegramFile(song.telegramMessageId, freshId, channelId)
                 verifiedFreshFileIdThisRun.add(song.telegramMessageId)
                 return freshId
             }
@@ -1024,7 +1078,7 @@ class MusicRepository(
         if (found != null) {
             val (chatId, freshId) = found
             settingsStore.lastSyncedChatId = chatId
-            songDao.update(song.copy(telegramFileId = freshId!!, resolvedChatId = chatId))
+            songDao.setTelegramFile(song.telegramMessageId, freshId!!, chatId)
             verifiedFreshFileIdThisRun.add(song.telegramMessageId)
             return freshId!!
         }

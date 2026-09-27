@@ -22,6 +22,7 @@ import androidx.compose.material.icons.rounded.CloudDownload
 import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.Lyrics
 import androidx.compose.material.icons.rounded.MusicNote
+import androidx.compose.material.icons.rounded.SwapHoriz
 import androidx.compose.material3.BottomSheetDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
@@ -65,6 +66,7 @@ internal fun NowPlayingOverflowSheet(
     onDownload: () -> Unit,
     onSongInfo: () -> Unit,
     onSearchLyrics: () -> Unit,
+    onLyricsSource: () -> Unit,
     onOpenArtist: (String) -> Unit,
     onOpenAlbum: (String) -> Unit
 ) {
@@ -182,6 +184,8 @@ internal fun NowPlayingOverflowSheet(
                 SheetAction(icon = Icons.Rounded.Info, label = "Song info", onClick = { closeThen(onSongInfo) })
                 HorizontalDivider(color = Color.White.copy(alpha = 0.08f), modifier = Modifier.padding(start = 52.dp))
                 SheetAction(icon = Icons.Rounded.Lyrics, label = "Search lyrics", onClick = { closeThen(onSearchLyrics) })
+                HorizontalDivider(color = Color.White.copy(alpha = 0.08f), modifier = Modifier.padding(start = 52.dp))
+                SheetAction(icon = Icons.Rounded.SwapHoriz, label = "Change lyrics source", onClick = { closeThen(onLyricsSource) })
             }
         }
     }

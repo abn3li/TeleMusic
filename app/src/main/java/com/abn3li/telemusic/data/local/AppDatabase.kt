@@ -8,8 +8,8 @@ import androidx.sqlite.db.SupportSQLiteDatabase
 import androidx.room.migration.Migration
 
 @Database(
-    entities = [SongEntity::class, PlaylistEntity::class, PlaylistSongCrossRef::class, ImportedPlaylistEntity::class, SpotifyLinkEntity::class, SpotifyTrackMapEntity::class],
-    version = 9,
+    entities = [SongEntity::class, PlaylistEntity::class, PlaylistSongCrossRef::class, ImportedPlaylistEntity::class, SpotifyLinkEntity::class, SpotifyTrackMapEntity::class, LyricsCacheEntity::class],
+    version = 10,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -17,6 +17,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun playlistDao(): PlaylistDao
     abstract fun importedPlaylistDao(): ImportedPlaylistDao
     abstract fun spotifyDao(): SpotifyDao
+    abstract fun lyricsCacheDao(): LyricsCacheDao
 
     companion object {
         @Volatile private var INSTANCE: AppDatabase? = null
@@ -105,10 +106,18 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        // The lyrics cache (LyricsCacheEntity) - a new table, nothing existing changes. Lyrics
+        // songs already have are copied in once at startup (MusicRepository.backfillLyricsCache).
+        private val MIGRATION_9_10 = object : Migration(9, 10) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("CREATE TABLE IF NOT EXISTS `lyrics_cache` (`key` TEXT NOT NULL, `plain` TEXT, `synced` TEXT, `provider` TEXT, `fetchedAtMillis` INTEGER NOT NULL, PRIMARY KEY(`key`))")
+            }
+        }
+
         fun get(context: Context): AppDatabase =
             INSTANCE ?: synchronized(this) {
                 INSTANCE ?: Room.databaseBuilder(context.applicationContext, AppDatabase::class.java, "tgmusic.db")
-                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9)
+                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10)
                     .fallbackToDestructiveMigration() // fine during active development, for any version this migration chain doesn't cover
                     .build().also { INSTANCE = it }
             }

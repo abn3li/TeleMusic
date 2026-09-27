@@ -22,7 +22,15 @@ import kotlin.coroutines.resume
 import kotlin.math.abs
 import kotlin.math.min
 
-data class LyricsResult(val plain: String?, val synced: String?)
+data class LyricsResult(val plain: String?, val synced: String?, val provider: LyricsProvider? = null)
+
+/** Where lyrics come from - the Lyrics source picker in Now Playing lists these. */
+enum class LyricsProvider(val label: String, val detail: String) {
+    LRCLIB("LRCLIB", "Synced when available"),
+    KUGOU("KuGou", "Synced"),
+    LYRICS_OVH("lyrics.ovh", "Plain text"),
+    GOOGLE("Google", "Plain text")
+}
 
 /**
  * Lyrics are fetched ONLY when the user explicitly asks for them (the Lyrics button in Now
@@ -76,24 +84,24 @@ class LyricsRepository {
             val lrcLibResult = lrcLibDeferred.await()
             if (lrcLibResult?.synced != null) {
                 Log.d("LyricsRepository", "[LRCLIB] Synced match")
-                return@coroutineScope lrcLibResult
+                return@coroutineScope lrcLibResult.copy(provider = LyricsProvider.LRCLIB)
             }
 
             val kuGouResult = kuGouDeferred.await()
             if (kuGouResult != null) {
                 Log.d("LyricsRepository", "[KuGou] Synced match")
-                return@coroutineScope kuGouResult
+                return@coroutineScope kuGouResult.copy(provider = LyricsProvider.KUGOU)
             }
 
             if (lrcLibResult != null) {
                 Log.d("LyricsRepository", "[LRCLIB] Plain-only match (no synced version found anywhere)")
-                return@coroutineScope lrcLibResult
+                return@coroutineScope lrcLibResult.copy(provider = LyricsProvider.LRCLIB)
             }
 
             val ovhResult = ovhDeferred.await()
             if (ovhResult != null) {
                 Log.d("LyricsRepository", "[lyrics.ovh] Succeeded")
-                return@coroutineScope ovhResult
+                return@coroutineScope ovhResult.copy(provider = LyricsProvider.LYRICS_OVH)
             }
 
             // Not raced with the rest: a plain-text scrape that's rarely reached (only when
@@ -103,7 +111,7 @@ class LyricsRepository {
                 val googleLyrics = fetchGoogleLyrics(cleanTitle, cleanArtist)
                 if (!googleLyrics.isNullOrBlank()) {
                     Log.d("LyricsRepository", "[Google Search] Succeeded")
-                    return@coroutineScope LyricsResult(googleLyrics, null)
+                    return@coroutineScope LyricsResult(googleLyrics, null, LyricsProvider.GOOGLE)
                 }
             } catch (e: Exception) {
                 Log.w("LyricsRepository", "[Google Search] Failed: ${e.message}")
@@ -117,6 +125,32 @@ class LyricsRepository {
             kuGouDeferred.cancel()
             ovhDeferred.cancel()
         }
+    }
+
+    /** Asks only [provider] - the Lyrics source picker, after the automatic search chose one. */
+    suspend fun fetchFrom(provider: LyricsProvider, title: String, artist: String, durationSeconds: Int?): LyricsResult? {
+        val (cleanTitle, cleanArtist) = sanitizeTitleAndArtist(title, artist)
+        val result = try {
+            when (provider) {
+                LyricsProvider.LRCLIB -> fetchLrcLibLyrics(cleanTitle, cleanArtist, durationSeconds)
+                LyricsProvider.KUGOU -> fetchKuGouLyrics(cleanTitle, cleanArtist, durationSeconds)
+                LyricsProvider.LYRICS_OVH -> fetchLyricsOvhLyrics(cleanTitle, cleanArtist)
+                LyricsProvider.GOOGLE -> fetchGoogleLyrics(cleanTitle, cleanArtist)?.takeIf { it.isNotBlank() }?.let { LyricsResult(it, null) }
+            }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Log.w("LyricsRepository", "[${provider.label}] Failed: ${e.message}")
+            null
+        }
+        return result?.takeIf { it.plain != null || it.synced != null }?.copy(provider = provider)
+    }
+
+    /** The key a song's lyrics are cached under (see LyricsCacheEntity): the same cleaned
+     * title/artist the search uses, so one song from Telegram, YouTube or Spotify shares them. */
+    fun cacheKey(title: String, artist: String): String {
+        val (cleanTitle, cleanArtist) = sanitizeTitleAndArtist(title, artist)
+        return "${cleanTitle.trim().lowercase()}|${cleanArtist.trim().lowercase()}"
     }
 
     /** LRCLIB's exact-match endpoint needs a precise title/artist/duration match and 404s

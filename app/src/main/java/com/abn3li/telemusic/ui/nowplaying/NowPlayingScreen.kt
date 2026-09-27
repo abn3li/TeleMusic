@@ -236,6 +236,7 @@ private fun NowPlayingContent(
     var lastInteractionMs by remember { mutableLongStateOf(0L) }
     var showSongInfoDialog by remember { mutableStateOf(false) }
     var showManualLyricsDialog by remember { mutableStateOf(false) }
+    var showLyricsSourceDialog by remember { mutableStateOf(false) }
     var overflowSong by remember { mutableStateOf<SongEntity?>(null) }
 
     val onInteraction: () -> Unit = {
@@ -353,6 +354,7 @@ private fun NowPlayingContent(
                     onInteraction = onInteraction,
                     onOpenOverflow = { overflowSong = state.song },
                     onOpenManualSearch = { showManualLyricsDialog = true },
+                    onOpenLyricsSource = { showLyricsSourceDialog = true },
                     modifier = Modifier.weight(1f).fillMaxWidth()
                 )
 
@@ -401,6 +403,7 @@ private fun NowPlayingContent(
                 onDownload = { (context.applicationContext as TgMusicApp).downloadGate.run { viewModel.downloadCurrentSong() } },
                 onSongInfo = { showSongInfoDialog = true },
                 onSearchLyrics = { showManualLyricsDialog = true },
+                onLyricsSource = { showLyricsSourceDialog = true },
                 onOpenArtist = onOpenArtist,
                 onOpenAlbum = onOpenAlbum
             )
@@ -413,7 +416,7 @@ private fun NowPlayingContent(
 
             AppAlert(
                 title = "Search Lyrics",
-                message = "Type the exact song title and artist to search LRCLIB and lyrics.ovh.",
+                message = "Type the exact song title and artist to search every lyrics source.",
                 onDismiss = { showManualLyricsDialog = false },
                 actions = listOf(
                     AlertAction("Cancel") { showManualLyricsDialog = false },
@@ -427,6 +430,10 @@ private fun NowPlayingContent(
                 Spacer(Modifier.height(8.dp))
                 AlertTextField(customArtist, { customArtist = it }, "Artist")
             }
+        }
+
+        if (showLyricsSourceDialog && state.song != null) {
+            LyricsSourceDialog(viewModel = viewModel, onDismiss = { showLyricsSourceDialog = false })
         }
 
         state.song?.takeIf { showSongInfoDialog }?.let { song ->
@@ -454,6 +461,7 @@ private fun PlayerPageArea(
     onInteraction: () -> Unit,
     onOpenOverflow: () -> Unit,
     onOpenManualSearch: () -> Unit,
+    onOpenLyricsSource: () -> Unit,
     modifier: Modifier = Modifier
     // On the artwork page, a drag anywhere (not just on the cover/title) closes the player, like
     // Apple Music. Lyrics and queue keep only the header, since their lists scroll.
@@ -521,6 +529,7 @@ private fun PlayerPageArea(
                     viewModel = viewModel,
                     effects = effects,
                     onOpenManualSearch = onOpenManualSearch,
+                    onOpenLyricsSource = onOpenLyricsSource,
                     onUserInteraction = onInteraction
                 )
                 PlayerPage.QUEUE -> QueuePage(state = state, viewModel = viewModel)
