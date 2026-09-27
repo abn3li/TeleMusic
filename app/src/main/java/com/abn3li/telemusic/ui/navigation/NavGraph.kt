@@ -163,6 +163,13 @@ fun TgMusicNavGraph(navController: NavHostController = rememberNavController()) 
 
     val playerState by playerViewModel.stableUiState.collectAsState()
 
+    // Lets the loading screen go once Home's library has been read (not while Home would still
+    // flash empty); the hello screens need nothing. Waits for one value, then stops listening.
+    LaunchedEffect(Unit) {
+        if (startDestination == Routes.HOME) libraryViewModel.home.first { it.loaded }
+        app.markFirstScreenReady()
+    }
+
     // "Import and Download All" from Spotify: once the import finishes, queue its songs through
     // the same Download All (and download-location prompt) as the playlist menu.
     val pendingSpotifyDownload by app.spotifyImporter.pendingDownload.collectAsState()

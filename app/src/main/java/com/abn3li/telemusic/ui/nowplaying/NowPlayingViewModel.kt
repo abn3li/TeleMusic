@@ -86,6 +86,7 @@ class NowPlayingViewModel(
     private var loadJob: Job? = null
     private var prefetchJob: Job? = null
     private var lyricsJob: Job? = null
+    private var lyricsSourceJob: Job? = null
     // Set by playEphemeral() for a YouTube "Play" stream, cleared the moment a real song loads -
     // downloadCurrentSong() needs this to actually download the video (see its own doc for why
     // the ordinary downloadExplicitly() path can't: there's no Telegram message behind this row
@@ -402,9 +403,13 @@ class NowPlayingViewModel(
     fun loadLyricsSource() {
         val song = _uiState.value.song ?: return
         _lyricsSource.value = LyricsSourceState()
-        viewModelScope.launch {
+        // Only the latest lookup counts, and only while its song is still the one playing.
+        lyricsSourceJob?.cancel()
+        lyricsSourceJob = viewModelScope.launch {
             val current = withContext(Dispatchers.IO) { repository.lyricsProviderFor(song) }
-            _lyricsSource.value = _lyricsSource.value.copy(current = current)
+            if (_uiState.value.song?.telegramMessageId == song.telegramMessageId) {
+                _lyricsSource.value = _lyricsSource.value.copy(current = current)
+            }
         }
     }
 
@@ -423,11 +428,15 @@ class NowPlayingViewModel(
                 _lyricsSource.value = _lyricsSource.value.copy(loading = null, message = "Couldn't get lyrics from ${provider.label}.")
                 throw e
             }
-            _lyricsSource.value = _lyricsSource.value.copy(
-                loading = null,
-                current = if (found != null) provider else _lyricsSource.value.current,
-                message = if (found != null) null else "${provider.label} has no lyrics for this song."
-            )
+            // The song may have changed while this source was asked; its picker is then showing
+            // the new song, which this answer isn't about.
+            if (_uiState.value.song?.telegramMessageId == song.telegramMessageId) {
+                _lyricsSource.value = _lyricsSource.value.copy(
+                    loading = null,
+                    current = if (found != null) provider else _lyricsSource.value.current,
+                    message = if (found != null) null else "${provider.label} has no lyrics for this song."
+                )
+            }
             found
         }
     }
@@ -693,11 +702,7 @@ class NowPlayingViewModel(
             }
             playbackController.playUri(uri, song.telegramMessageId, song.title, song.artist, song.displayArtwork)
         } else {
-            val reason = when {
-                song.isLocalImport -> "file may have been moved or deleted"
-                song.youtubeVideoId == null && !repository.isTelegramStarted -> "set up Telegram in the Sync tab to play it"
-                else -> "video may be unavailable"
-            }
+            val reason = repository.whyUnplayable(song)
             _uiState.value = _uiState.value.copy(
                 errorMessage = "Couldn't play \"${song.title}\" - $reason",
                 loadingSongId = null

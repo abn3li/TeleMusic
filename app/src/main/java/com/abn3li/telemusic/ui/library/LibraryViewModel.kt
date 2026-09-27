@@ -39,7 +39,10 @@ data class HomeData(
     val recentlyAdded: List<SongEntity> = emptyList(),
     val dailyMix: List<SongEntity> = emptyList(),
     val rediscover: List<SongEntity> = emptyList(),
-    val allIds: List<Long> = emptyList()
+    val allIds: List<Long> = emptyList(),
+    // False only for the placeholder before the library's first read - an empty library is
+    // loaded too. The loading screen waits for this (see TgMusicNavGraph).
+    val loaded: Boolean = false
 )
 
 /** One tile in the Library page's Pinned grid - a real playlist or a smart one. */
@@ -111,7 +114,8 @@ class LibraryViewModel(private val repository: MusicRepository) : ViewModel() {
                 recentlyAdded = songs.sortedByDescending { it.addedAtMillis }.take(15),
                 dailyMix = daily,
                 rediscover = rediscover,
-                allIds = songs.map { it.telegramMessageId }
+                allIds = songs.map { it.telegramMessageId },
+                loaded = true
             )
         }
         .flowOn(kotlinx.coroutines.Dispatchers.Default)

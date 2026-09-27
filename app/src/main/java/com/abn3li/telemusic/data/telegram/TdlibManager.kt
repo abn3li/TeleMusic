@@ -17,6 +17,10 @@ import java.util.concurrent.ConcurrentHashMap
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 
+/** A Telegram call made while Telegram isn't set up (before the Sync tab's setup, or after
+ * Log Out). Its message is what the user sees. */
+class TelegramNotSetUpException : IllegalStateException("Telegram isn't set up - set it up in the Sync tab")
+
 /**
  * Coroutine wrapper around TDLib. Credentials come in at start() time (never baked into the
  * build). TDLib itself comes from a prebuilt JitPack AAR (see app/build.gradle.kts) - no
@@ -24,7 +28,8 @@ import kotlin.coroutines.resumeWithException
  */
 class TdlibManager(private val context: Context) {
 
-    private var client: Client? = null
+    // Volatile: set on the main thread (Telegram setup), read from playback/IO threads.
+    @Volatile private var client: Client? = null
 
     /** Telegram is set up and TDLib is running - false before setup and after Log Out, when
      * Telegram songs can't be streamed or downloaded. */
@@ -591,7 +596,7 @@ class TdlibManager(private val context: Context) {
             client?.send(function) { result ->
                 if (result is TdApi.Error) cont.resumeWithException(RuntimeException("TDLib error ${result.code}: ${result.message}"))
                 else cont.resume(result)
-            } ?: cont.resumeWithException(IllegalStateException("Telegram isn't set up - set it up in the Sync tab"))
+            } ?: cont.resumeWithException(TelegramNotSetUpException())
         }
 
     /**

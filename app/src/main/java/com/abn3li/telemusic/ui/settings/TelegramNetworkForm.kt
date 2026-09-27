@@ -12,6 +12,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.listSaver
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -32,7 +33,8 @@ import com.abn3li.telemusic.ui.library.GroupValue
 /**
  * The DNS and MTProto proxy fields, as typed but not yet saved - shared by Settings and the
  * Sync tab's Telegram setup, which each decide when to save and apply them. Survives switching
- * tabs and rotating (see [rememberTelegramNetworkForm]).
+ * tabs and rotating, but if the other screen saved new values meanwhile, those win (see
+ * [rememberTelegramNetworkForm]) - a stale form must never write old values back.
  */
 @Stable
 internal class TelegramNetworkForm(
@@ -52,7 +54,27 @@ internal class TelegramNetworkForm(
     var proxySecret by mutableStateOf(proxySecret)
     var proxyLinkInput by mutableStateOf("")
 
+    /** The saved settings this form started from (or last saved) - see [snapshot]. */
+    var loadedFrom: String = ""
+
     val proxyPort: Int get() = proxyPortText.toIntOrNull() ?: 443
+
+    /** Starts over from what's saved. */
+    fun reload(store: AppSettingsStore) {
+        val proxy = store.proxySettings
+        dns = store.dnsResolver
+        customDns = store.customDnsIps
+        proxyEnabled = proxy.enabled
+        proxyServer = proxy.server
+        proxyPortText = proxy.port.toString()
+        proxySecret = proxy.secret
+        loadedFrom = snapshot(store)
+    }
+
+    /** Call after saving (all or part) so the form counts as matching the settings again. */
+    fun markSaved(store: AppSettingsStore) {
+        loadedFrom = snapshot(store)
+    }
 
     /** Fills the proxy fields from a t.me/proxy link; false when it isn't one. */
     fun fillFromProxyLink(text: String): Boolean {
@@ -68,28 +90,43 @@ internal class TelegramNetworkForm(
         store.dnsResolver = dns
         store.customDnsIps = customDns
         store.updateProxy(proxyEnabled, proxyServer, proxyPort, proxySecret)
+        markSaved(store)
     }
 
     companion object {
+        /** The saved DNS and proxy settings as one comparable string. */
+        fun snapshot(store: AppSettingsStore): String {
+            val proxy = store.proxySettings
+            return listOf(store.dnsResolver.name, store.customDnsIps, proxy.enabled, proxy.server, proxy.port, proxy.secret).joinToString("\u0001")
+        }
+
         val Saver = listSaver<TelegramNetworkForm, Any>(
-            save = { listOf(it.dns.name, it.customDns, it.proxyEnabled, it.proxyServer, it.proxyPortText, it.proxySecret, it.proxyLinkInput) },
+            save = { listOf(it.dns.name, it.customDns, it.proxyEnabled, it.proxyServer, it.proxyPortText, it.proxySecret, it.proxyLinkInput, it.loadedFrom) },
             restore = {
                 TelegramNetworkForm(
                     DnsResolver.valueOf(it[0] as String), it[1] as String, it[2] as Boolean,
                     it[3] as String, it[4] as String, it[5] as String
-                ).apply { proxyLinkInput = it[6] as String }
+                ).apply {
+                    proxyLinkInput = it[6] as String
+                    loadedFrom = it[7] as String
+                }
             }
         )
     }
 }
 
-/** The saved DNS and proxy settings, as a form to edit. */
+/** The saved DNS and proxy settings, as a form to edit. What was typed survives switching tabs
+ * and rotating - unless the settings were saved elsewhere since, and then it starts over from them. */
 @Composable
-internal fun rememberTelegramNetworkForm(store: AppSettingsStore): TelegramNetworkForm =
-    rememberSaveable(saver = TelegramNetworkForm.Saver) {
-        val proxy = store.proxySettings
-        TelegramNetworkForm(store.dnsResolver, store.customDnsIps, proxy.enabled, proxy.server, proxy.port.toString(), proxy.secret)
+internal fun rememberTelegramNetworkForm(store: AppSettingsStore): TelegramNetworkForm {
+    val form = rememberSaveable(saver = TelegramNetworkForm.Saver) {
+        TelegramNetworkForm(DnsResolver.entries.first(), "", false, "", "443", "").apply { reload(store) }
     }
+    remember(form) {
+        if (form.loadedFrom != TelegramNetworkForm.snapshot(store)) form.reload(store)
+    }
+    return form
+}
 
 /** The DNS resolver row, its options and the custom-servers field - rows for a GroupCard. */
 @Composable

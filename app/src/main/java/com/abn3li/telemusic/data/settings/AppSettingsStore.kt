@@ -228,7 +228,8 @@ class AppSettingsStore(context: Context) {
         private const val KEY_PERMISSIONS_REQUESTED = "permissions_requested"
         private const val KEY_ONBOARDING_DONE = "onboarding_done"
         private const val KEY_YT_ARTWORK_UPGRADED = "yt_artwork_upgraded"
-        private const val KEY_LYRICS_CACHE_BACKFILLED = "lyrics_cache_backfilled"
+        // v2: the first key was too loose (see MusicRepository.backfillLyricsCache).
+        private const val KEY_LYRICS_CACHE_BACKFILLED = "lyrics_cache_backfilled_v2"
         private const val KEY_HIDE_LIKED = "hide_liked_from_tracks"
         private const val KEY_HIDE_TELEGRAM = "hide_telegram_from_tracks"
         private const val KEY_HIDE_DOWNLOADED = "hide_downloaded_from_tracks"

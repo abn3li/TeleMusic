@@ -60,14 +60,32 @@ interface SongDao {
     suspend fun setLyrics(id: Long, plain: String?, synced: String?)
 
     // Only what the lyrics cache needs, not whole rows - see MusicRepository.backfillLyricsCache.
-    @Query("SELECT title, artist, lyricsPlain, lyricsSynced FROM songs WHERE TRIM(COALESCE(lyricsPlain, '')) != '' OR TRIM(COALESCE(lyricsSynced, '')) != ''")
-    suspend fun getLyricsToBackfill(): List<SongLyricsRow>
+    @Query("SELECT title, artist, lyricsPlain, lyricsSynced FROM songs WHERE TRIM(COALESCE(lyricsPlain, '')) != '' OR TRIM(COALESCE(lyricsSynced, '')) != '' ORDER BY telegramMessageId LIMIT :limit OFFSET :offset")
+    suspend fun getLyricsToBackfill(limit: Int, offset: Int): List<SongLyricsRow>
 
     @Query("UPDATE songs SET telegramFileId = :fileId WHERE telegramMessageId = :id")
     suspend fun setTelegramFileId(id: Long, fileId: Int)
 
     @Query("UPDATE songs SET telegramFileId = :fileId, resolvedChatId = :chatId WHERE telegramMessageId = :id")
     suspend fun setTelegramFile(id: Long, fileId: Int, chatId: Long)
+
+    @Query("UPDATE songs SET localFilePath = :path WHERE telegramMessageId = :id")
+    suspend fun setLocalFilePath(id: Long, path: String?)
+
+    /** A finished Telegram download. [exportedUri] null keeps whatever folder copy was recorded. */
+    @Query("UPDATE songs SET telegramFileId = :fileId, localFilePath = :path, isExplicitDownload = 1, exportedFileUri = COALESCE(:exportedUri, exportedFileUri) WHERE telegramMessageId = :id")
+    suspend fun setDownloaded(id: Long, fileId: Int, path: String, exportedUri: String?)
+
+    /** Delete Download on a song that stays in the library (it streams again). */
+    @Query("UPDATE songs SET localFilePath = NULL, isExplicitDownload = 0, exportedFileUri = NULL WHERE telegramMessageId = :id")
+    suspend fun clearDownload(id: Long)
+
+    @Query("UPDATE songs SET metadataEnriched = 1 WHERE telegramMessageId = :id")
+    suspend fun markEnriched(id: Long)
+
+    /** Title/artist/album/artwork from a metadata lookup (or the user's own correction). */
+    @Query("UPDATE songs SET title = :title, artist = :artist, album = :album, albumArtUrl = :albumArtUrl, metadataEnriched = 1 WHERE telegramMessageId = :id")
+    suspend fun setSongInfo(id: Long, title: String, artist: String, album: String?, albumArtUrl: String?)
 
     @Query("UPDATE songs SET isFavorite = :isFavorite WHERE telegramMessageId = :id")
     suspend fun setFavorite(id: Long, isFavorite: Boolean)

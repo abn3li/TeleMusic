@@ -4,6 +4,8 @@ import android.Manifest
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
+import android.os.Process
+import android.os.SystemClock
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
@@ -19,8 +21,19 @@ class MainActivity : ComponentActivity() {
     private val notificationRequest = registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
 
     override fun onCreate(savedInstanceState: Bundle?) {
-        // The loading screen (Theme.TgMusic.Starting) - shown until the first frame is drawn.
-        installSplashScreen()
+        // The loading screen (Theme.TgMusic.Starting). On a cold start it stays until the first
+        // screen has its data, but at least SPLASH_MIN_MS - long enough for the bars to bounce
+        // instead of flashing past - and never more than SPLASH_MAX_MS. When the app was
+        // already running (reopened from recents) it goes as soon as the screen is drawn.
+        val splash = installSplashScreen()
+        val app = application as TgMusicApp
+        val coldStart = SystemClock.uptimeMillis() - Process.getStartUptimeMillis() < COLD_START_WINDOW_MS
+        if (coldStart && savedInstanceState == null) {
+            splash.setKeepOnScreenCondition {
+                val sinceStart = SystemClock.uptimeMillis() - Process.getStartUptimeMillis()
+                sinceStart < SPLASH_MAX_MS && (sinceStart < SPLASH_MIN_MS || !app.firstScreenReady)
+            }
+        }
         super.onCreate(savedInstanceState)
         askOlderUsersForNotifications()
         setContent {
@@ -44,6 +57,14 @@ class MainActivity : ComponentActivity() {
         ) {
             notificationRequest.launch(Manifest.permission.POST_NOTIFICATIONS)
         }
+    }
+
+    private companion object {
+        // Measured from the process start, which is when the loading screen appears.
+        const val SPLASH_MIN_MS = 1000L
+        const val SPLASH_MAX_MS = 2500L
+        // An activity created this soon after its process started is a cold start.
+        const val COLD_START_WINDOW_MS = 5000L
     }
 
     override fun onStart() {

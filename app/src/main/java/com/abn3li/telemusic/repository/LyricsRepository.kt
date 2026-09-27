@@ -39,10 +39,10 @@ enum class LyricsProvider(val label: String, val detail: String) {
     }
 }
 
-/** One automatic search. No [result] with [reachedLrcLib] means no lyrics anywhere; without it
- * the search never got through (offline, say), which says nothing about the song. LRCLIB
- * answers every search, found or not, so it's the one to tell the two apart. */
-data class LyricsSearch(val result: LyricsResult?, val reachedLrcLib: Boolean)
+/** One automatic search. No [result] with [allAnswered] means no lyrics anywhere: LRCLIB, KuGou
+ * and lyrics.ovh each answered "nothing". Without it some source never got through (offline, or
+ * blocked where you are), which says nothing about the song. (Google, a scrape, isn't counted.) */
+data class LyricsSearch(val result: LyricsResult?, val allAnswered: Boolean)
 
 /**
  * Lyrics are fetched ONLY when the user explicitly asks for them (the Lyrics button in Now
@@ -85,18 +85,25 @@ class LyricsRepository {
      * still only ever called from fetchLyricsForSong(), on-demand).
      */
     suspend fun fetchLyrics(title: String, artist: String, durationSeconds: Int?): LyricsSearch {
-        val reachedLrcLib = AtomicBoolean(false)
-        val result = searchAll(title, artist, durationSeconds, reachedLrcLib)
-        return LyricsSearch(result, reachedLrcLib.get())
+        val reached = Reached()
+        val result = searchAll(title, artist, durationSeconds, reached)
+        return LyricsSearch(result, reached.lrcLib.get() && reached.kuGou.get() && reached.ovh.get())
     }
 
-    private suspend fun searchAll(title: String, artist: String, durationSeconds: Int?, reachedLrcLib: AtomicBoolean): LyricsResult? = coroutineScope {
+    /** Which sources actually answered during one search (see LyricsSearch.allAnswered). */
+    private class Reached {
+        val lrcLib = AtomicBoolean(false)
+        val kuGou = AtomicBoolean(false)
+        val ovh = AtomicBoolean(false)
+    }
+
+    private suspend fun searchAll(title: String, artist: String, durationSeconds: Int?, reached: Reached): LyricsResult? = coroutineScope {
         val (cleanTitle, cleanArtist) = sanitizeTitleAndArtist(title, artist)
         Log.d("LyricsRepository", "Searching lyrics for '$cleanTitle' by '$cleanArtist'")
 
-        val lrcLibDeferred = async { fetchLrcLibLyrics(cleanTitle, cleanArtist, durationSeconds, reachedLrcLib) }
-        val kuGouDeferred = async { fetchKuGouLyrics(cleanTitle, cleanArtist, durationSeconds) }
-        val ovhDeferred = async { fetchLyricsOvhLyrics(cleanTitle, cleanArtist) }
+        val lrcLibDeferred = async { fetchLrcLibLyrics(cleanTitle, cleanArtist, durationSeconds, reached.lrcLib) }
+        val kuGouDeferred = async { fetchKuGouLyrics(cleanTitle, cleanArtist, durationSeconds, reached.kuGou) }
+        val ovhDeferred = async { fetchLyricsOvhLyrics(cleanTitle, cleanArtist, reached.ovh) }
 
         try {
             val lrcLibResult = lrcLibDeferred.await()
@@ -164,11 +171,18 @@ class LyricsRepository {
         return result?.takeIf { it.plain != null || it.synced != null }?.copy(provider = provider)
     }
 
-    /** The key a song's lyrics are cached under (see LyricsCacheEntity): the same cleaned
-     * title/artist the search uses, so one song from Telegram, YouTube or Spotify shares them. */
+    /** The key a song's lyrics are cached under (see LyricsCacheEntity): its whole title and
+     * artist, only tidied (case, spacing, a file extension) - so the same song from Telegram,
+     * YouTube or Spotify shares them, but "Hello - Live" and "Someone Like You - Live" never do.
+     * (The search's own cleanup keeps only the part after " - ", too loose for a key.) */
     fun cacheKey(title: String, artist: String): String {
-        val (cleanTitle, cleanArtist) = sanitizeTitleAndArtist(title, artist)
-        return "${cleanTitle.trim().lowercase()}|${cleanArtist.trim().lowercase()}"
+        fun tidy(text: String) = text.trim()
+            .replace(Regex("""(?i)\.(mp3|m4a|flac|ogg|wav|aac|opus|webm)$"""), "")
+            .replace('_', ' ')
+            .replace(Regex("""\s+"""), " ")
+            .trim()
+            .lowercase()
+        return "${tidy(title)}|${tidy(artist)}"
     }
 
     /** LRCLIB's exact-match endpoint needs a precise title/artist/duration match and 404s
@@ -229,13 +243,18 @@ class LyricsRepository {
      * candidates against that hash, then download the winning candidate's LRC file (delivered
      * base64-encoded). A keyword-only lyrics search (skipping the hash) is the fallback for
      * whatever the fingerprint search misses. */
-    private suspend fun fetchKuGouLyrics(title: String, artist: String, durationSeconds: Int?): LyricsResult? =
+    private suspend fun fetchKuGouLyrics(
+        title: String,
+        artist: String,
+        durationSeconds: Int?,
+        reached: AtomicBoolean? = null
+    ): LyricsResult? =
         withContext(Dispatchers.IO) {
             try {
                 val keyword = "${stripParenthetical(title)} - ${stripParenthetical(artist)}"
                 val seconds = durationSeconds ?: -1
 
-                val hashes = kuGouSearchSongHashes(keyword, seconds)
+                val hashes = kuGouSearchSongHashes(keyword, seconds, reached)
                 val candidate = hashes.firstNotNullOfOrNull { hash -> kuGouSearchLyricsCandidates(hash = hash)?.firstOrNull() }
                     ?: kuGouSearchLyricsCandidates(keyword = keyword, seconds = seconds)?.firstOrNull()
                     ?: return@withContext null
@@ -252,7 +271,7 @@ class LyricsRepository {
     /** Song hashes worth trying, restricted to cuts within 8 seconds of the track's own
      * duration - otherwise the first result for a common title is as likely to be a cover or a
      * remix as the right recording - ordered closest match first. */
-    private suspend fun kuGouSearchSongHashes(keyword: String, seconds: Int): List<String> {
+    private suspend fun kuGouSearchSongHashes(keyword: String, seconds: Int, reached: AtomicBoolean? = null): List<String> {
         val url = "https://mobileservice.kugou.com/api/v3/search/song".toHttpUrl().newBuilder()
             .addQueryParameter("version", "9108")
             .addQueryParameter("plat", "0")
@@ -260,7 +279,8 @@ class LyricsRepository {
             .addQueryParameter("showtype", "0")
             .addQueryParameter("keyword", keyword)
             .build()
-        val body = kuGouGet(url.toString()) ?: return emptyList()
+        // Any reply to the song search, even no songs, is KuGou answering.
+        val body = kuGouGet(url.toString())?.also { reached?.set(true) } ?: return emptyList()
         val response = runCatching { gson.fromJson(body, KuGouSearchSongResponse::class.java) }.getOrNull()
         return response?.data?.info.orEmpty()
             .filter { seconds <= 0 || abs(it.duration - seconds) <= 8 }
@@ -360,14 +380,19 @@ class LyricsRepository {
     private data class KuGouCandidate(val id: String, val accesskey: String)
     private data class KuGouDownloadResponse(val content: String = "")
 
-    private suspend fun fetchLyricsOvhLyrics(title: String, artist: String): LyricsResult? =
+    private suspend fun fetchLyricsOvhLyrics(title: String, artist: String, reached: AtomicBoolean? = null): LyricsResult? =
         withContext(Dispatchers.IO) {
             try {
                 val response = NetworkModule.lyricsOvhApi.getLyrics(
                     artist = Uri.encode(artist),
                     title = Uri.encode(title)
                 )
+                reached?.set(true)
                 response.lyrics?.takeIf { it.isNotBlank() }?.let { LyricsResult(it, null) }
+            } catch (e: HttpException) {
+                // lyrics.ovh answers "not found" with a 404.
+                if (e.code() == 404) reached?.set(true)
+                null
             } catch (e: Exception) {
                 Log.w("LyricsRepository", "[lyrics.ovh] Failed: ${e.message}")
                 null

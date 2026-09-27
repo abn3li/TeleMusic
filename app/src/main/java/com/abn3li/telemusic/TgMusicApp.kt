@@ -88,6 +88,19 @@ class TgMusicApp : Application(), ImageLoaderFactory {
         com.abn3li.telemusic.widget.MusicWidgets.refresh(this)
     }
 
+    /** The first screen has what it needs to show (Home's library, or the hello screens) - the
+     * loading screen stays up until then (see MainActivity). Set once per process. */
+    @Volatile var firstScreenReady: Boolean = false
+        private set
+
+    fun markFirstScreenReady() {
+        firstScreenReady = true
+    }
+
+    /** Whether the first-start hello screens still need showing: nobody finished them, and
+     * nothing says this is someone who used an older version (see onboardingDone). */
+    fun needsOnboarding(): Boolean = !settingsStore.onboardingDone && !credentialsStore.hasCredentials()
+
     /**
      * Runs enrichMissingMetadata() on this Application-scoped coroutine rather than whatever
      * screen triggered it - it makes several sequential network calls per unenriched song, and
@@ -96,10 +109,6 @@ class TgMusicApp : Application(), ImageLoaderFactory {
      * imported songs without artwork. This is exactly the failure mode SyncService's own doc
      * describes for channel sync, just for local-import artwork instead.
      */
-    /** Whether the first-start hello screens still need showing: nobody finished them, and
-     * nothing says this is someone who used an older version (see onboardingDone). */
-    fun needsOnboarding(): Boolean = !settingsStore.onboardingDone && !credentialsStore.hasCredentials()
-
     fun enrichLibraryInBackground() {
         appScope.launch { musicRepository.enrichMissingMetadata() }
     }

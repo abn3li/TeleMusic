@@ -282,6 +282,7 @@ fun SettingsScreen(onBack: () -> Unit, onOpenSpotify: () -> Unit, onLoggedOut: (
                 GroupActionRow(if (telegramRunning) "Apply & Restart App" else "Save") {
                     app.settingsStore.dnsResolver = network.dns
                     app.settingsStore.customDnsIps = network.customDns
+                    network.markSaved(app.settingsStore)
                     if (!telegramRunning) {
                         dnsMessage = "Saved. Telegram uses it once you set it up in the Sync tab."
                         return@GroupActionRow
@@ -307,6 +308,7 @@ fun SettingsScreen(onBack: () -> Unit, onOpenSpotify: () -> Unit, onLoggedOut: (
                     val port = network.proxyPort
                     val secret = network.proxySecret
                     app.settingsStore.updateProxy(enabled, server, port, secret)
+                    network.markSaved(app.settingsStore)
                     if (!telegramRunning) {
                         proxyStatusMessage = "Saved. Telegram uses it once you set it up in the Sync tab."
                         return@GroupActionRow

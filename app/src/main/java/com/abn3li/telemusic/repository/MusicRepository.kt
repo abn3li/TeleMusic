@@ -47,6 +47,9 @@ private const val THUMBNAIL_BATCH = 25
 // A song with no lyrics anywhere is searched again after this long, in case some appear.
 private const val LYRICS_NOT_FOUND_RETRY_MS = 7L * 24 * 60 * 60 * 1000
 
+// Songs read per step when copying existing lyrics into the cache - see backfillLyricsCache.
+private const val LYRICS_BACKFILL_PAGE = 200
+
 // Mirrors ytdlp_bridge.py's _ARTIST_SPLIT regex exactly - same separators, same "first segment
 // wins" rule, so a collab credit collapses to the same primary artist regardless of which path
 // (a fresh download vs this cleanup pass) it went through.
@@ -114,9 +117,6 @@ class MusicRepository(
         songDao.observeAll().map { it.sortedByField(sortField, ascending) }
 
     suspend fun getSongById(id: Long): SongEntity? = songDao.getById(id)
-
-    /** Whether Telegram is set up and running - see TdlibManager.isStarted. */
-    val isTelegramStarted: Boolean get() = tdlibManager.isStarted
 
     /** Sets [songId]'s album only if it has none yet (Spotify imports - see SpotifyImporter). */
     suspend fun setAlbumIfMissing(songId: Long, album: String) = songDao.setAlbumIfMissing(songId, album)
@@ -268,7 +268,7 @@ class MusicRepository(
             val local = song.localFilePath ?: continue
             if (!song.isExplicitDownload || local.startsWith("content://")) continue
             if (!isLocalFileValid(exported)) continue
-            songDao.update(song.copy(localFilePath = exported))
+            songDao.setLocalFilePath(song.telegramMessageId, exported)
             if (song.telegramFileId != 0) tdlibManager.deleteDownloadedFile(song.telegramFileId)
             else withContext(Dispatchers.IO) { runCatching { File(local).delete() } }
         }
@@ -285,7 +285,7 @@ class MusicRepository(
         for (song in songDao.observeAll().firstOrNull().orEmpty()) {
             val url = song.albumArtUrl ?: continue
             val upgraded = com.abn3li.telemusic.data.browse.googleArtworkAtSize(url, com.abn3li.telemusic.data.browse.SAVED_ARTWORK_SIZE)
-            if (upgraded != url) songDao.update(song.copy(albumArtUrl = upgraded))
+            if (upgraded != url) songDao.setAlbumArtUrl(song.telegramMessageId, upgraded)
         }
         settingsStore.youTubeArtworkUpgraded = true
     }
@@ -376,6 +376,14 @@ class MusicRepository(
             !tdlibManager.isStarted -> null
             else -> TdlibDataSource.uriFor(getFreshFileIdForSong(song))
         }
+    }
+
+    /** Why [resolvePlaybackUri] found nothing to play for [song] - follows its same order. */
+    fun whyUnplayable(song: SongEntity): String = when {
+        song.isLocalImport -> "file may have been moved or deleted"
+        song.youtubeVideoId != null -> "video may be unavailable"
+        !tdlibManager.isStarted -> "set up Telegram in the Sync tab to play it"
+        else -> "it couldn't be found on Telegram"
     }
 
     private fun isLocalFileValid(path: String): Boolean =
@@ -496,7 +504,7 @@ class MusicRepository(
             val sameMessage = existingById.telegramFileId != 0 &&
                 (existingById.resolvedChatId == null || existingById.resolvedChatId == chatId)
             if (sameMessage && existingById.telegramFileId != msg.fileId) {
-                songDao.update(existingById.copy(telegramFileId = msg.fileId))
+                songDao.setTelegramFileId(existingById.telegramMessageId, msg.fileId)
             }
             return
         }
@@ -580,7 +588,7 @@ class MusicRepository(
                     && hasArtwork
 
             if (alreadyHasGoodInfo) {
-                songDao.update(song.copy(metadataEnriched = true))
+                songDao.markEnriched(song.telegramMessageId)
                 continue
             }
 
@@ -619,15 +627,7 @@ class MusicRepository(
             // ever fetched on-demand, via fetchLyricsForSong() below, when the user taps the
             // Lyrics button for a specific song.
             val finalArtUrl = song.albumArtUrl ?: enriched?.artworkUrl
-            songDao.update(
-                song.copy(
-                    title = finalTitle,
-                    artist = finalArtist,
-                    album = song.album ?: enriched?.album,
-                    albumArtUrl = finalArtUrl,
-                    metadataEnriched = true
-                )
-            )
+            songDao.setSongInfo(song.telegramMessageId, finalTitle, finalArtist, song.album ?: enriched?.album, finalArtUrl)
             if (finalArtUrl != null) ensureThumbnail(song.telegramMessageId, finalArtUrl)
         }
     }
@@ -640,15 +640,7 @@ class MusicRepository(
      * whether artwork was actually found; the title/artist correction is saved either way. */
     suspend fun editSongAndFetchArtwork(song: SongEntity, newTitle: String, newArtist: String): Boolean {
         val enriched = metadataRepository.enrich("$newTitle $newArtist".trim())
-        songDao.update(
-            song.copy(
-                title = newTitle,
-                artist = newArtist,
-                album = enriched?.album ?: song.album,
-                albumArtUrl = enriched?.artworkUrl ?: song.albumArtUrl,
-                metadataEnriched = true
-            )
-        )
+        songDao.setSongInfo(song.telegramMessageId, newTitle, newArtist, enriched?.album ?: song.album, enriched?.artworkUrl ?: song.albumArtUrl)
         val artUrl = enriched?.artworkUrl ?: return false
         ensureThumbnail(song.telegramMessageId, artUrl)
         return true
@@ -702,10 +694,11 @@ class MusicRepository(
      */
     suspend fun fetchLyricsForSong(song: SongEntity, query: SongEntity = song, force: Boolean = false): LyricsResult? {
         if (query.title.isBlank() || query.title == "Unknown title") return null
-        val keys = listOf(lyricsRepository.cacheKey(song.title, song.artist), lyricsRepository.cacheKey(query.title, query.artist)).distinct()
+        val songKey = lyricsRepository.cacheKey(song.title, song.artist)
+        val queryKey = lyricsRepository.cacheKey(query.title, query.artist)
 
         if (!force) {
-            val cached = lyricsCache.get(keys.first())
+            val cached = lyricsCache.get(songKey)
             if (cached != null) {
                 if (cached.plain != null || cached.synced != null) {
                     songDao.setLyrics(song.telegramMessageId, cached.plain, cached.synced)
@@ -717,9 +710,14 @@ class MusicRepository(
 
         val search = lyricsRepository.fetchLyrics(query.title, query.artist, query.durationSeconds.takeIf { it > 0 })
         val lyrics = search.result?.takeIf { it.plain != null || it.synced != null }
-        // "None anywhere" is only remembered when the search really got through - a search made
-        // offline would otherwise hide a song's lyrics for a week.
-        if (lyrics != null || search.reachedLrcLib) saveLyrics(song, keys, lyrics)
+        when {
+            // Found: kept under the song's own name and whatever was searched.
+            lyrics != null -> saveLyrics(song, listOf(songKey, queryKey).distinct(), lyrics)
+            // "None anywhere" only when every source really answered (not offline or blocked),
+            // and only for the name actually searched - a custom search with a typo says
+            // nothing about the song's real title.
+            search.allAnswered -> saveLyrics(song, listOf(queryKey), null)
+        }
         return lyrics
     }
 
@@ -746,19 +744,29 @@ class MusicRepository(
         }
     }
 
-    /** One-time: copies lyrics songs already have into the lyrics cache, so they carry over to
-     * the same song from another source and survive a library reset. Runs at startup. */
+    /** One-time: copies lyrics songs already had into the lyrics cache, so they carry over to
+     * the same song from another source and survive a library reset. Runs at startup, a page at
+     * a time so a big library never holds all its lyrics in memory at once. A test build keyed
+     * the cache too loosely (see LyricsRepository.cacheKey), so anything it cached is dropped
+     * first and rebuilt from the songs. */
     suspend fun backfillLyricsCache() {
         if (settingsStore.lyricsCacheBackfilled) return
+        lyricsCache.clear()
         val now = System.currentTimeMillis()
-        val entries = songDao.getLyricsToBackfill().mapNotNull { row ->
-            val plain = row.lyricsPlain?.takeIf { it.isNotBlank() }
-            val synced = row.lyricsSynced?.takeIf { it.isNotBlank() }
-            // Blank text isn't lyrics - it must not become a "none anywhere" entry.
-            if (plain == null && synced == null) return@mapNotNull null
-            LyricsCacheEntity(lyricsRepository.cacheKey(row.title, row.artist), plain, synced, null, now)
+        var offset = 0
+        while (true) {
+            val page = songDao.getLyricsToBackfill(LYRICS_BACKFILL_PAGE, offset)
+            val entries = page.mapNotNull { row ->
+                val plain = row.lyricsPlain?.takeIf { it.isNotBlank() }
+                val synced = row.lyricsSynced?.takeIf { it.isNotBlank() }
+                // Blank text isn't lyrics - it must not become a "none anywhere" entry.
+                if (plain == null && synced == null) return@mapNotNull null
+                LyricsCacheEntity(lyricsRepository.cacheKey(row.title, row.artist), plain, synced, null, now)
+            }
+            if (entries.isNotEmpty()) lyricsCache.putIfMissing(entries)
+            if (page.size < LYRICS_BACKFILL_PAGE) break
+            offset += LYRICS_BACKFILL_PAGE
         }
-        if (entries.isNotEmpty()) lyricsCache.putIfMissing(entries)
         settingsStore.lyricsCacheBackfilled = true
     }
 
@@ -785,12 +793,8 @@ class MusicRepository(
         // With a download folder, the folder copy is the only copy: it's what plays, and TDLib's
         // own file is removed (and forgotten) so the song isn't stored twice.
         val finalPath = exportedUri?.toString() ?: path
-        songDao.update(
-            song.copy(
-                telegramFileId = freshFileId, localFilePath = finalPath, isExplicitDownload = true,
-                exportedFileUri = exportedUri?.toString() ?: song.exportedFileUri
-            )
-        )
+        // Only the download's own columns: lyrics or a Like saved while it downloaded must stay.
+        songDao.setDownloaded(song.telegramMessageId, freshFileId, finalPath, exportedUri?.toString())
         if (exportedUri != null) {
             // Through TDLib, not File.delete(): TDLib must know the file is gone, or a later
             // re-download (after "Delete Download") gets told it's already complete.
@@ -838,7 +842,7 @@ class MusicRepository(
         song.localFilePath?.takeIf { it != song.exportedFileUri }?.let(::releaseLocalFile)
         song.exportedFileUri?.let { uri -> mediaFolderExporter.delete(android.net.Uri.parse(uri)) }
         if (song.youtubeVideoId != null || song.telegramFileId != 0) {
-            songDao.update(song.copy(localFilePath = null, isExplicitDownload = false, exportedFileUri = null))
+            songDao.clearDownload(song.telegramMessageId)
         } else {
             songDao.delete(song.telegramMessageId)
         }
@@ -867,7 +871,7 @@ class MusicRepository(
                 // that fresh file's real path unrecorded forever - orphaned on disk, invisible to
                 // enforceCacheLimit()'s DB-driven accounting no matter how correctly it ran.
                 if (current.localFilePath != progress.local.path) {
-                    songDao.update(current.copy(localFilePath = progress.local.path))
+                    songDao.setLocalFilePath(current.telegramMessageId, progress.local.path)
                 }
                 enforceCacheLimit(excludeSongId = song.telegramMessageId)
                 return
@@ -905,7 +909,7 @@ class MusicRepository(
                 freed += file.length()
                 file.delete()
             }
-            songDao.update(song.copy(localFilePath = null))
+            songDao.setLocalFilePath(song.telegramMessageId, null)
             tdlibManager.deleteDownloadedFile(song.telegramFileId)
             count++
         }
@@ -1102,7 +1106,7 @@ class MusicRepository(
             val file = File(song.localFilePath!!)
             val size = file.length()
             if (file.exists()) file.delete()
-            songDao.update(song.copy(localFilePath = null))
+            songDao.setLocalFilePath(song.telegramMessageId, null)
             tdlibManager.deleteDownloadedFile(song.telegramFileId)
             totalSize -= size
         }
