@@ -55,6 +55,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -105,30 +106,27 @@ fun OnboardingScreen(onFinished: () -> Unit) {
         Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
             ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
     }
-    var step by rememberSaveable { mutableStateOf(STEP_WELCOME) }
-    val afterFeatures = if (needsNotifications) STEP_NOTIFICATIONS else STEP_DOWNLOADS
+    // The pages this phone shows, in order; back and next just move along this list.
+    val steps = remember {
+        listOfNotNull(STEP_WELCOME, STEP_FEATURES, STEP_NOTIFICATIONS.takeIf { needsNotifications }, STEP_DOWNLOADS)
+    }
+    var index by rememberSaveable { mutableIntStateOf(0) }
+    val next = { index = (index + 1).coerceAtMost(steps.lastIndex) }
+    val back = { index = (index - 1).coerceAtLeast(0) }
 
     fun finish() {
         app.settingsStore.onboardingDone = true
         onFinished()
     }
 
-    BackHandler(enabled = step != STEP_WELCOME) {
-        step = when (step) {
-            STEP_DOWNLOADS -> if (needsNotifications) STEP_NOTIFICATIONS else STEP_FEATURES
-            else -> step - 1
-        }
-    }
+    BackHandler(enabled = index > 0, onBack = back)
 
     Box(Modifier.fillMaxSize().background(Color.Black)) {
-        when (step) {
-            STEP_WELCOME -> WelcomeStep(onNext = { step = STEP_FEATURES })
-            STEP_FEATURES -> FeaturesStep(onBack = { step = STEP_WELCOME }, onNext = { step = afterFeatures })
-            STEP_NOTIFICATIONS -> NotificationsStep(onBack = { step = STEP_FEATURES }, onNext = { step = STEP_DOWNLOADS })
-            else -> DownloadsStep(
-                onBack = { step = if (needsNotifications) STEP_NOTIFICATIONS else STEP_FEATURES },
-                onDone = ::finish
-            )
+        when (steps[index]) {
+            STEP_WELCOME -> WelcomeStep(onNext = next)
+            STEP_FEATURES -> FeaturesStep(onBack = back, onNext = next)
+            STEP_NOTIFICATIONS -> NotificationsStep(onBack = back, onNext = next)
+            else -> DownloadsStep(onBack = back, onDone = ::finish)
         }
     }
 }
@@ -158,11 +156,10 @@ private fun WelcomeStep(onNext: () -> Unit) {
                 )
             }
         ) {
-            Spacer(Modifier.height(24.dp))
             AppIcon()
-            Spacer(Modifier.height(22.dp))
+            Spacer(Modifier.height(18.dp))
             StepTitle("Welcome to TeleMusic", "Your music from Telegram, YouTube and Spotify, together in one player.")
-            Spacer(Modifier.height(30.dp))
+            Spacer(Modifier.height(24.dp))
             Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(GroupCardColor)) {
                 SourceRow(Icons.AutoMirrored.Rounded.Send, "Telegram", "Play songs from your channels and chats")
                 RowDivider()
@@ -220,10 +217,8 @@ private fun NotificationsStep(onBack: () -> Unit, onNext: () -> Unit) {
                 }
                 PrimaryButton("Continue", onNext)
             } else {
-                PrimaryButton("Allow Notifications") {
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) permission.launch(Manifest.permission.POST_NOTIFICATIONS)
-                    else onNext()
-                }
+                // Only shown on Android 13+, where notifications need asking (see needsNotifications).
+                PrimaryButton("Allow Notifications") { permission.launch(Manifest.permission.POST_NOTIFICATIONS) }
                 LinkButton("Not now", onNext)
             }
         }
@@ -253,18 +248,36 @@ private fun NotificationsStep(onBack: () -> Unit, onNext: () -> Unit) {
 private fun DownloadsStep(onBack: () -> Unit, onDone: () -> Unit) {
     val context = LocalContext.current
     val app = context.applicationContext as TgMusicApp
-    var useFolder by rememberSaveable { mutableStateOf(true) }
-    var folder by rememberSaveable { mutableStateOf(app.settingsStore.downloadFolderUri) }
-    var finishAfterPick by remember { mutableStateOf(false) }
+    val settings = app.settingsStore
+    // Starts on what's already chosen, if anything; else on a folder.
+    var useFolder by rememberSaveable { mutableStateOf(!(settings.downloadLocationChosen && settings.downloadFolderUri == null)) }
+    var folder by rememberSaveable { mutableStateOf(settings.downloadFolderUri) }
+    var finishAfterPick by rememberSaveable { mutableStateOf(false) }
+
+    // A folder picked here but not kept gives back the access Android granted for it.
+    fun releaseIfUnsaved(uri: String?) {
+        if (uri == null || uri == settings.downloadFolderUri) return
+        runCatching {
+            context.contentResolver.releasePersistableUriPermission(
+                Uri.parse(uri),
+                Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+            )
+        }
+    }
 
     fun save() {
-        val settings = app.settingsStore
         if (useFolder) {
             settings.downloadFolderUri = folder ?: return
         } else {
+            releaseIfUnsaved(folder)
             settings.downloadFolderUri = null
         }
         settings.downloadLocationChosen = true
+        onDone()
+    }
+
+    fun decideLater() {
+        releaseIfUnsaved(folder)
         onDone()
     }
 
@@ -276,6 +289,7 @@ private fun DownloadsStep(onBack: () -> Unit, onDone: () -> Unit) {
                     Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
                 )
             }
+            if (treeUri.toString() != folder) releaseIfUnsaved(folder)
             folder = treeUri.toString()
             if (finishAfterPick) save()
         }
@@ -294,7 +308,7 @@ private fun DownloadsStep(onBack: () -> Unit, onDone: () -> Unit) {
                 }
             }
             // Leaves the choice open: the first download asks, like before.
-            LinkButton("Decide later", onDone)
+            LinkButton("Decide later", ::decideLater)
         }
     ) {
         StepTitle("Where should downloads go?", "Songs you download play without internet. You can change this later in Settings.")
@@ -371,7 +385,12 @@ private fun StepLayout(
         } else {
             Spacer(Modifier.height(44.dp))
         }
-        Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(top = 8.dp, bottom = 16.dp), content = content)
+        // Each page fits on one screen and stays still; it only scrolls on a phone too short for it.
+        val scroll = rememberScrollState()
+        Column(
+            Modifier.weight(1f).verticalScroll(scroll, enabled = scroll.maxValue > 0).padding(top = 8.dp, bottom = 16.dp),
+            content = content
+        )
         bottom()
     }
 }
@@ -412,11 +431,11 @@ private fun LinkButton(label: String, onClick: () -> Unit) {
  * is the middle 2/3), so it's drawn larger than its slot to line the artwork up with the text. */
 @Composable
 private fun AppIcon() {
-    Box(Modifier.size(84.dp), contentAlignment = Alignment.Center) {
+    Box(Modifier.size(76.dp), contentAlignment = Alignment.Center) {
         Image(
             painterResource(R.drawable.ic_launcher_foreground),
             contentDescription = null,
-            modifier = Modifier.requiredSize(126.dp)
+            modifier = Modifier.requiredSize(114.dp)
         )
     }
 }
@@ -434,7 +453,7 @@ private fun IconTile(icon: ImageVector, size: Dp = 42.dp) {
 
 @Composable
 private fun SourceRow(icon: ImageVector, title: String, desc: String) {
-    Row(Modifier.fillMaxWidth().padding(horizontal = 15.dp, vertical = 13.dp), verticalAlignment = Alignment.CenterVertically) {
+    Row(Modifier.fillMaxWidth().padding(horizontal = 15.dp, vertical = 11.dp), verticalAlignment = Alignment.CenterVertically) {
         IconTile(icon)
         Spacer(Modifier.width(14.dp))
         Column {

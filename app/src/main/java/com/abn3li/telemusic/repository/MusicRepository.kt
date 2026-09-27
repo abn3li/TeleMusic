@@ -111,6 +111,9 @@ class MusicRepository(
 
     suspend fun getSongById(id: Long): SongEntity? = songDao.getById(id)
 
+    /** Whether Telegram is set up and running - see TdlibManager.isStarted. */
+    val isTelegramStarted: Boolean get() = tdlibManager.isStarted
+
     /** Sets [songId]'s album only if it has none yet (Spotify imports - see SpotifyImporter). */
     suspend fun setAlbumIfMissing(songId: Long, album: String) = songDao.setAlbumIfMissing(songId, album)
 
@@ -365,6 +368,8 @@ class MusicRepository(
             localPath != null -> localFileToUri(localPath)
             song.isLocalImport -> null
             song.youtubeVideoId != null -> resolveDirectPlaybackUri(song)
+            // A Telegram song with no copy on the phone needs Telegram (not set up, or logged out).
+            !tdlibManager.isStarted -> null
             else -> TdlibDataSource.uriFor(getFreshFileIdForSong(song))
         }
     }

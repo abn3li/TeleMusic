@@ -148,9 +148,11 @@ class AppSettingsStore(context: Context) {
         set(value) = prefs.edit().putBoolean(KEY_PERMISSIONS_REQUESTED, value).apply()
 
     /** The first-start hello screens (OnboardingScreen) were finished. Anyone who already used
-     * an older version counts as done, so they never see them. */
+     * an older version counts as done, so they never see them: 2.1 set permissionsRequested, and
+     * older versions left a download location or a synced chat behind. (Saved Telegram login
+     * details, kept elsewhere, count too - see TgMusicNavGraph.) */
     var onboardingDone: Boolean
-        get() = prefs.getBoolean(KEY_ONBOARDING_DONE, permissionsRequested)
+        get() = prefs.getBoolean(KEY_ONBOARDING_DONE, permissionsRequested || downloadLocationChosen || lastSyncedChatId != 0L)
         set(value) = prefs.edit().putBoolean(KEY_ONBOARDING_DONE, value).apply()
 
     // The three smart (dynamic) playlists' own "Hide from tracks" button - Liked/Telegram/

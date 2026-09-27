@@ -88,7 +88,6 @@ private val LibraryRoutes = setOf(
 )
 
 object Routes {
-    const val CREDENTIALS = "credentials"
     const val ONBOARDING = "onboarding"
     const val HOME = "home"
     const val LIBRARY = "library"
@@ -126,7 +125,8 @@ fun TgMusicNavGraph(navController: NavHostController = rememberNavController()) 
     val app = LocalContext.current.applicationContext as TgMusicApp
     // The hello screens on the very first start, then always Home. Telegram's API ID/hash are
     // asked for in the Sync tab, only when you use it.
-    val startDestination = if (app.settingsStore.onboardingDone) Routes.HOME else Routes.ONBOARDING
+    val showOnboarding = !app.settingsStore.onboardingDone && !app.credentialsStore.hasCredentials()
+    val startDestination = if (showOnboarding) Routes.ONBOARDING else Routes.HOME
 
     // viewModel() (not remember{}) so this survives a config change (rotation) via the Activity's
     // own ViewModelStore - TgMusicNavGraph is composed directly in MainActivity's setContent, so
@@ -197,13 +197,6 @@ fun TgMusicNavGraph(navController: NavHostController = rememberNavController()) 
                 popEnterTransition = { EnterTransition.None },
                 popExitTransition = { ExitTransition.None }
             ) {
-                // The old first-run Welcome page, now part of the Sync tab. Kept only so a back
-                // stack saved by an older version still restores - it just goes Home.
-                composable(Routes.CREDENTIALS) {
-                    LaunchedEffect(Unit) {
-                        navController.navigate(Routes.HOME) { popUpTo(0) { inclusive = true } }
-                    }
-                }
                 composable(Routes.ONBOARDING) {
                     OnboardingScreen(onFinished = {
                         navController.navigate(Routes.HOME) { popUpTo(Routes.ONBOARDING) { inclusive = true } }

@@ -25,6 +25,10 @@ import kotlin.coroutines.resumeWithException
 class TdlibManager(private val context: Context) {
 
     private var client: Client? = null
+
+    /** Telegram is set up and TDLib is running - false before setup and after Log Out, when
+     * Telegram songs can't be streamed or downloaded. */
+    val isStarted: Boolean get() = client != null
     private val _authState = MutableStateFlow<TelegramAuthState>(TelegramAuthState.LoggedOut)
     val authState: StateFlow<TelegramAuthState> = _authState
 
@@ -587,7 +591,7 @@ class TdlibManager(private val context: Context) {
             client?.send(function) { result ->
                 if (result is TdApi.Error) cont.resumeWithException(RuntimeException("TDLib error ${result.code}: ${result.message}"))
                 else cont.resume(result)
-            } ?: cont.resumeWithException(IllegalStateException("Client not started"))
+            } ?: cont.resumeWithException(IllegalStateException("Telegram isn't set up - set it up in the Sync tab"))
         }
 
     /**

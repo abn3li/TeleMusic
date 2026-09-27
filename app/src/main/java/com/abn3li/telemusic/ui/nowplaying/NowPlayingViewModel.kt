@@ -636,7 +636,11 @@ class NowPlayingViewModel(
             }
             playbackController.playUri(uri, song.telegramMessageId, song.title, song.artist, song.displayArtwork)
         } else {
-            val reason = if (song.isLocalImport) "file may have been moved or deleted" else "video may be unavailable"
+            val reason = when {
+                song.isLocalImport -> "file may have been moved or deleted"
+                song.youtubeVideoId == null && !repository.isTelegramStarted -> "set up Telegram in the Sync tab to play it"
+                else -> "video may be unavailable"
+            }
             _uiState.value = _uiState.value.copy(
                 errorMessage = "Couldn't play \"${song.title}\" - $reason",
                 loadingSongId = null

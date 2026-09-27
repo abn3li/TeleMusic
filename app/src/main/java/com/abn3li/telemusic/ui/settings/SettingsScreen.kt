@@ -7,7 +7,6 @@ import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -20,7 +19,6 @@ import androidx.compose.material.icons.automirrored.rounded.Send
 import androidx.compose.material.icons.rounded.BlurOn
 import androidx.compose.material.icons.rounded.CleaningServices
 import androidx.compose.material.icons.rounded.Code
-import androidx.compose.material.icons.rounded.ContentPaste
 import androidx.compose.material.icons.rounded.Dns
 import androidx.compose.material.icons.rounded.Folder
 import androidx.compose.material.icons.rounded.Groups
@@ -44,15 +42,12 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalUriHandler
-import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.abn3li.telemusic.TgMusicApp
 import com.abn3li.telemusic.data.settings.AppSettingsStore
-import com.abn3li.telemusic.data.settings.DnsResolver
 import com.abn3li.telemusic.data.update.UpdateCheckResult
 import com.abn3li.telemusic.data.update.UpdateChecker
 import com.abn3li.telemusic.repository.LocalAudioFile
@@ -67,7 +62,6 @@ import com.abn3li.telemusic.ui.library.GroupOption
 import com.abn3li.telemusic.ui.library.GroupIcon
 import com.abn3li.telemusic.ui.library.GroupRow
 import com.abn3li.telemusic.ui.library.GroupSwitch
-import com.abn3li.telemusic.ui.library.GroupTextField
 import com.abn3li.telemusic.ui.library.GroupValue
 import com.abn3li.telemusic.ui.library.LargeTitleList
 import kotlinx.coroutines.Dispatchers
@@ -93,7 +87,6 @@ fun SettingsScreen(onBack: () -> Unit, onOpenSpotify: () -> Unit, onLoggedOut: (
     val context = LocalContext.current
     val app = context.applicationContext as TgMusicApp
     val scope = rememberCoroutineScope()
-    val clipboardManager = LocalClipboardManager.current
     val uriHandler = LocalUriHandler.current
 
     var enrichEnabled by remember { mutableStateOf(app.settingsStore.enrichMetadataOnSync) }
@@ -101,16 +94,8 @@ fun SettingsScreen(onBack: () -> Unit, onOpenSpotify: () -> Unit, onLoggedOut: (
     var cacheLimit by remember { mutableStateOf(app.settingsStore.maxCacheSizeBytes) }
     var cacheOptionsOpen by remember { mutableStateOf(false) }
 
-    var selectedDns by remember { mutableStateOf(app.settingsStore.dnsResolver) }
-    var customDnsInput by remember { mutableStateOf(app.settingsStore.customDnsIps) }
-    var dnsOptionsOpen by remember { mutableStateOf(false) }
-
-    val currentProxy = remember { app.settingsStore.proxySettings }
-    var proxyEnabled by remember { mutableStateOf(currentProxy.enabled) }
-    var proxyServer by remember { mutableStateOf(currentProxy.server) }
-    var proxyPortText by remember { mutableStateOf(currentProxy.port.toString()) }
-    var proxySecret by remember { mutableStateOf(currentProxy.secret) }
-    var proxyPasteInput by remember { mutableStateOf("") }
+    // DNS and proxy as typed; each section below saves and applies its own part.
+    val network = rememberTelegramNetworkForm(app.settingsStore)
     var proxyStatusMessage by remember { mutableStateOf<String?>(null) }
     var isApplyingProxy by remember { mutableStateOf(false) }
 
@@ -289,42 +274,12 @@ fun SettingsScreen(onBack: () -> Unit, onOpenSpotify: () -> Unit, onLoggedOut: (
         item("dns") {
             GroupHeader("DNS")
             GroupCard {
-                GroupRow(
-                    title = "Resolver",
-                    icon = { GroupIcon(Icons.Rounded.Dns, TileGreen) },
-                    onClick = { dnsOptionsOpen = !dnsOptionsOpen },
-                    trailing = { GroupValue(selectedDns.displayName.substringBefore(" (")) }
-                )
-                AnimatedVisibility(dnsOptionsOpen) {
-                    Column {
-                        DnsResolver.entries.forEach { resolver ->
-                            GroupDivider(start = 57.dp)
-                            GroupOption(
-                                label = resolver.displayName,
-                                detail = "${resolver.source} · ${resolver.description}",
-                                selected = selectedDns == resolver,
-                                startPadding = 57
-                            ) {
-                                selectedDns = resolver
-                                dnsOptionsOpen = false
-                            }
-                        }
-                    }
-                }
-                if (selectedDns == DnsResolver.CUSTOM) {
-                    GroupDivider()
-                    GroupTextField(
-                        value = customDnsInput,
-                        onValueChange = { customDnsInput = it },
-                        placeholder = "1.1.1.1,8.8.8.8",
-                        label = "Servers"
-                    )
-                }
+                DnsResolverRows(network, icon = { GroupIcon(Icons.Rounded.Dns, TileGreen) })
                 GroupDivider()
                 GroupActionRow("Apply & Restart App") {
-                    app.settingsStore.dnsResolver = selectedDns
-                    app.settingsStore.customDnsIps = customDnsInput
-                    app.tdlibManager.applyDns(selectedDns, customDnsInput)
+                    app.settingsStore.dnsResolver = network.dns
+                    app.settingsStore.customDnsIps = network.customDns
+                    app.tdlibManager.applyDns(network.dns, network.customDns)
                     // Restart the process so TDLib starts fresh with the new DNS.
                     val intent = context.packageManager.getLaunchIntentForPackage(context.packageName)
                     context.startActivity(Intent.makeRestartActivityTask(intent?.component))
@@ -337,62 +292,21 @@ fun SettingsScreen(onBack: () -> Unit, onOpenSpotify: () -> Unit, onLoggedOut: (
         item("proxy") {
             GroupHeader("MTProto Proxy")
             GroupCard {
-                GroupRow(
-                    title = "Use Proxy",
-                    icon = { GroupIcon(Icons.Rounded.VpnKey, TileIndigo) },
-                    trailing = { GroupSwitch(proxyEnabled, { proxyEnabled = it }) }
-                )
-                if (proxyEnabled) {
-                    GroupDivider()
-                    GroupTextField(
-                        value = proxyPasteInput,
-                        onValueChange = { proxyPasteInput = it },
-                        placeholder = "Paste a t.me/proxy link",
-                        trailing = {
-                            Icon(
-                                Icons.Rounded.ContentPaste,
-                                contentDescription = "Fill from link or clipboard",
-                                tint = AppAccent,
-                                modifier = Modifier.size(22.dp).clickable {
-                                    val clipText = clipboardManager.getText()?.text
-                                    val textToParse = if (!clipText.isNullOrBlank()) clipText else proxyPasteInput
-                                    val parsed = AppSettingsStore.parseTelegramProxyUrl(textToParse)
-                                    if (parsed != null) {
-                                        proxyServer = parsed.server
-                                        proxyPortText = parsed.port.toString()
-                                        proxySecret = parsed.secret
-                                        proxyStatusMessage = "Filled in from the proxy link."
-                                    } else {
-                                        proxyStatusMessage = "That isn't a valid Telegram proxy link."
-                                    }
-                                }
-                            )
-                        }
-                    )
-                    GroupDivider()
-                    GroupTextField(value = proxyServer, onValueChange = { proxyServer = it }, placeholder = "Hostname or IP", label = "Server")
-                    GroupDivider()
-                    GroupTextField(
-                        value = proxyPortText,
-                        onValueChange = { proxyPortText = it.filter { c -> c.isDigit() } },
-                        placeholder = "443",
-                        label = "Port",
-                        keyboardType = KeyboardType.Number
-                    )
-                    GroupDivider()
-                    GroupTextField(value = proxySecret, onValueChange = { proxySecret = it }, placeholder = "Hex secret", label = "Secret")
-                }
+                ProxyRows(network, onMessage = { proxyStatusMessage = it }, icon = { GroupIcon(Icons.Rounded.VpnKey, TileIndigo) })
                 GroupDivider()
                 GroupActionRow("Save & Connect", loading = isApplyingProxy) {
-                    val port = proxyPortText.toIntOrNull() ?: 443
-                    app.settingsStore.updateProxy(proxyEnabled, proxyServer, port, proxySecret)
+                    val enabled = network.proxyEnabled
+                    val server = network.proxyServer
+                    val port = network.proxyPort
+                    val secret = network.proxySecret
+                    app.settingsStore.updateProxy(enabled, server, port, secret)
                     scope.launch {
                         isApplyingProxy = true
                         proxyStatusMessage = "Connecting…"
-                        val success = app.tdlibManager.applyProxy(proxyEnabled, proxyServer, port, proxySecret)
+                        val success = app.tdlibManager.applyProxy(enabled, server, port, secret)
                         isApplyingProxy = false
                         proxyStatusMessage = when {
-                            !proxyEnabled -> "Using a direct connection."
+                            !enabled -> "Using a direct connection."
                             success -> "Proxy connected."
                             else -> "Couldn't connect to the proxy."
                         }
