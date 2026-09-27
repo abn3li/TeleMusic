@@ -285,7 +285,7 @@ class MusicRepository(
         for (song in songDao.observeAll().firstOrNull().orEmpty()) {
             val url = song.albumArtUrl ?: continue
             val upgraded = com.abn3li.telemusic.data.browse.googleArtworkAtSize(url, com.abn3li.telemusic.data.browse.SAVED_ARTWORK_SIZE)
-            if (upgraded != url) songDao.setAlbumArtUrl(song.telegramMessageId, upgraded)
+            if (upgraded != null && upgraded != url) songDao.setAlbumArtUrl(song.telegramMessageId, upgraded)
         }
         settingsStore.youTubeArtworkUpgraded = true
     }
