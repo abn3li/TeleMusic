@@ -27,7 +27,7 @@ import java.security.SecureRandom
 import java.util.concurrent.TimeUnit
 
 /** One Spotify track, from your account or from a public link. */
-data class SpotifyTrack(val id: String, val title: String, val artists: String, val durationMs: Long)
+data class SpotifyTrack(val id: String, val title: String, val artists: String, val durationMs: Long, val album: String? = null)
 
 /** A playlist in your Spotify library. */
 data class SpotifyPlaylist(val id: String, val name: String, val imageUrl: String?, val total: Int, val owner: String?)
@@ -220,7 +220,8 @@ class SpotifyAccount(context: Context, private val scope: CoroutineScope) {
                 val artists = t.optJSONArray("artists")?.let { a ->
                     (0 until a.length()).mapNotNull { a.optJSONObject(it)?.optString("name")?.takeIf { n -> n.isNotBlank() } }
                 }.orEmpty().joinToString(", ")
-                tracks += SpotifyTrack(t.optString("id"), title, artists, t.optLong("duration_ms"))
+                val album = t.optJSONObject("album")?.optString("name")?.takeIf { it.isNotBlank() }
+                tracks += SpotifyTrack(t.optString("id"), title, artists, t.optLong("duration_ms"), album)
             }
             url = page.optString("next").takeIf { it.isNotBlank() && it != "null" }
         }

@@ -110,6 +110,10 @@ class MusicRepository(
         songDao.observeAll().map { it.sortedByField(sortField, ascending) }
 
     suspend fun getSongById(id: Long): SongEntity? = songDao.getById(id)
+
+    /** Sets [songId]'s album only if it has none yet (Spotify imports - see SpotifyImporter). */
+    suspend fun setAlbumIfMissing(songId: Long, album: String) = songDao.setAlbumIfMissing(songId, album)
+
     fun search(query: String): Flow<List<SongEntity>> = songDao.search(query)
 
     /** Android Auto's "Recently Played" browse category - see MusicService's MediaLibrarySession. */
@@ -294,14 +298,21 @@ class MusicRepository(
      * YouTube video instead of a Telegram message. Idempotent: re-importing a playlist that
      * shares a track with one already in the library returns the existing row untouched instead
      * of overwriting it (which would have wiped a real download back down to a bare stream). */
-    suspend fun importPlaylistTrackAsStreamable(track: BrowseTrack): SongEntity {
+    suspend fun importPlaylistTrackAsStreamable(track: BrowseTrack, album: String? = null): SongEntity {
         val songId = ytDlpStableSongId(track.videoId)
-        songDao.getById(songId)?.let { return it }
+        songDao.getById(songId)?.let { existing ->
+            if (!album.isNullOrBlank() && existing.album.isNullOrBlank()) {
+                songDao.setAlbumIfMissing(songId, album)
+                return existing.copy(album = album)
+            }
+            return existing
+        }
         val song = SongEntity(
             telegramMessageId = songId,
             telegramFileId = 0,
             title = track.title,
             artist = track.artist,
+            album = album?.takeIf { it.isNotBlank() },
             durationSeconds = track.durationSeconds,
             albumArtUrl = com.abn3li.telemusic.data.browse.googleArtworkAtSize(track.thumbnailUrl, com.abn3li.telemusic.data.browse.SAVED_ARTWORK_SIZE),
             youtubeVideoId = track.videoId,

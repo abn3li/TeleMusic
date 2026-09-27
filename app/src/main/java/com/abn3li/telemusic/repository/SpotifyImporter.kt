@@ -183,7 +183,10 @@ class SpotifyImporter(
                     if (pending.isEmpty()) return
                     musicRepository.inTransaction {
                         for (p in pending) {
-                            val songId = p.knownSongId ?: musicRepository.importPlaylistTrackAsStreamable(p.found!!).telegramMessageId.also { id ->
+                            val songId = p.knownSongId?.also { id ->
+                                // Songs imported before albums were saved get theirs on the next update.
+                                if (!p.album.isNullOrBlank()) musicRepository.setAlbumIfMissing(id, p.album)
+                            } ?: musicRepository.importPlaylistTrackAsStreamable(p.found!!, p.album).telegramMessageId.also { id ->
                                 if (p.spotifyId.isNotBlank()) dao.saveMatch(SpotifyTrackMapEntity(p.spotifyId, id))
                             }
                             if (inPlaylist.add(songId)) {
@@ -200,7 +203,7 @@ class SpotifyImporter(
                         ?.takeIf { musicRepository.getSongById(it) != null }
                     if (knownId != null) {
                         matched++
-                        pending += PendingTrack(index, track.id, knownId, null)
+                        pending += PendingTrack(index, track.id, knownId, null, track.album)
                     } else {
                         var found = runCatching { matchOnYouTubeMusic(track) }.getOrNull()
                         if (found == null && odesliAllowed) {
@@ -210,7 +213,7 @@ class SpotifyImporter(
                         }
                         if (found != null) {
                             matched++
-                            pending += PendingTrack(index, track.id, null, found)
+                            pending += PendingTrack(index, track.id, null, found, track.album)
                         }
                     }
                     if (pending.size >= WRITE_BATCH) flush()
@@ -266,6 +269,9 @@ class SpotifyImporter(
         val entity = JSONObject(json).optJSONObject("props")?.optJSONObject("pageProps")?.optJSONObject("state")
             ?.optJSONObject("data")?.optJSONObject("entity") ?: return@withContext null
         val list = entity.optJSONArray("trackList") ?: return@withContext null
+        val name = entity.optString("name").ifBlank { entity.optString("title") }.ifBlank { "Spotify Playlist" }
+        // An album link's songs all belong to that album; a playlist's embed doesn't say.
+        val album = name.takeIf { type == "album" }
         val tracks = (0 until list.length()).mapNotNull { i ->
             val t = list.optJSONObject(i) ?: return@mapNotNull null
             val title = t.optString("title").takeIf { it.isNotBlank() } ?: return@mapNotNull null
@@ -273,10 +279,10 @@ class SpotifyImporter(
                 id = t.optString("uri").substringAfterLast(':'),
                 title = title,
                 artists = t.optString("subtitle"),
-                durationMs = t.optLong("duration")
+                durationMs = t.optLong("duration"),
+                album = album
             )
         }
-        val name = entity.optString("name").ifBlank { entity.optString("title") }.ifBlank { "Spotify Playlist" }
         name to tracks
     }
 
@@ -311,7 +317,7 @@ class SpotifyImporter(
     }
 
     /** A matched track waiting for the next batched write: an already-known song, or a new match. */
-    private class PendingTrack(val index: Int, val spotifyId: String, val knownSongId: Long?, val found: BrowseTrack?)
+    private class PendingTrack(val index: Int, val spotifyId: String, val knownSongId: Long?, val found: BrowseTrack?, val album: String?)
 
     private sealed interface OdesliResult {
         data class Found(val track: BrowseTrack) : OdesliResult

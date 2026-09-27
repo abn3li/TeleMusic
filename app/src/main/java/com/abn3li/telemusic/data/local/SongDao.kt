@@ -41,6 +41,10 @@ interface SongDao {
     @Query("UPDATE songs SET albumArtUrl = :path WHERE telegramMessageId = :id")
     suspend fun setAlbumArtUrl(id: Long, path: String)
 
+    // Fills in an album only where none is known yet, so a tag or a rename is never overwritten.
+    @Query("UPDATE songs SET album = :album WHERE telegramMessageId = :id AND (album IS NULL OR album = '')")
+    suspend fun setAlbumIfMissing(id: Long, album: String)
+
     @Query("SELECT * FROM songs WHERE title LIKE '%' || :query || '%' OR artist LIKE '%' || :query || '%'")
     fun search(query: String): Flow<List<SongEntity>>
 
