@@ -1,5 +1,8 @@
 package com.abn3li.telemusic.data.settings
 
+import android.content.ContentResolver
+import android.content.Intent
+import android.net.Uri
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.getAndUpdate
@@ -23,6 +26,14 @@ class DownloadLocationGate(private val settings: AppSettingsStore) {
         finish()
     }
 
+    /** A folder just picked with the system folder picker becomes the download folder: keeps
+     * access to it, saves it, and lets a waiting download go on. The one way every screen
+     * (Settings, the first-download prompt, the hello screens) sets the folder. */
+    fun useFolder(resolver: ContentResolver, treeUri: Uri) {
+        takeFolderAccess(resolver, treeUri)
+        chooseFolder(treeUri.toString())
+    }
+
     fun chooseFolder(treeUri: String) {
         settings.downloadFolderUri = treeUri
         finish()
@@ -37,3 +48,16 @@ class DownloadLocationGate(private val settings: AppSettingsStore) {
         _pending.getAndUpdate { null }?.invoke()
     }
 }
+
+/** Keeps read/write access to a folder the user picked, across restarts. */
+fun takeFolderAccess(resolver: ContentResolver, treeUri: Uri) {
+    runCatching { resolver.takePersistableUriPermission(treeUri, FOLDER_ACCESS) }
+}
+
+/** Gives back access to a folder that was picked but not kept. Never call it for the saved
+ * download folder: songs already downloaded there play straight from it. */
+fun releaseFolderAccess(resolver: ContentResolver, treeUri: Uri) {
+    runCatching { resolver.releasePersistableUriPermission(treeUri, FOLDER_ACCESS) }
+}
+
+private const val FOLDER_ACCESS = Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION

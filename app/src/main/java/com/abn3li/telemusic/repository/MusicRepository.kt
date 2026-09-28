@@ -44,6 +44,13 @@ private const val MAX_CACHE_POLL_ATTEMPTS = 600
 // Thumbnails saved per database transaction - see backfillThumbnails.
 private const val THUMBNAIL_BATCH = 25
 
+/** What playing a song resolves to - see MusicRepository.resolvePlayback. */
+sealed interface PlaybackResolution {
+    data class Playable(val uri: Uri) : PlaybackResolution
+    /** [reason] finishes "Couldn't play …" - e.g. "video may be unavailable". */
+    data class Unplayable(val reason: String) : PlaybackResolution
+}
+
 // A song with no lyrics anywhere is searched again after this long, in case some appear.
 private const val LYRICS_NOT_FOUND_RETRY_MS = 7L * 24 * 60 * 60 * 1000
 
@@ -362,28 +369,26 @@ class MusicRepository(
      * can be either a real path or a content:// reference, and why only the latter has nowhere
      * else to fall back to).
      */
-    suspend fun resolvePlaybackUri(song: SongEntity): Uri? {
+    suspend fun resolvePlaybackUri(song: SongEntity): Uri? =
+        (resolvePlayback(song) as? PlaybackResolution.Playable)?.uri
+
+    /** The same resolution, with the reason when there's nothing to play - each reason decided
+     * by the very branch that found nothing, so the message can't drift from the logic. */
+    suspend fun resolvePlayback(song: SongEntity): PlaybackResolution {
         var localPath = song.localFilePath
         if (localPath != null && !isLocalFileValid(localPath)) {
             clearStaleLocalPath(song.telegramMessageId)
             localPath = null
         }
         return when {
-            localPath != null -> localFileToUri(localPath)
-            song.isLocalImport -> null
-            song.youtubeVideoId != null -> resolveDirectPlaybackUri(song)
+            localPath != null -> PlaybackResolution.Playable(localFileToUri(localPath))
+            song.isLocalImport -> PlaybackResolution.Unplayable("file may have been moved or deleted")
+            song.youtubeVideoId != null -> resolveDirectPlaybackUri(song)?.let { PlaybackResolution.Playable(it) }
+                ?: PlaybackResolution.Unplayable("video may be unavailable")
             // A Telegram song with no copy on the phone needs Telegram (not set up, or logged out).
-            !tdlibManager.isStarted -> null
-            else -> TdlibDataSource.uriFor(getFreshFileIdForSong(song))
+            !tdlibManager.isStarted -> PlaybackResolution.Unplayable("set up Telegram in the Sync tab to play it")
+            else -> PlaybackResolution.Playable(TdlibDataSource.uriFor(getFreshFileIdForSong(song)))
         }
-    }
-
-    /** Why [resolvePlaybackUri] found nothing to play for [song] - follows its same order. */
-    fun whyUnplayable(song: SongEntity): String = when {
-        song.isLocalImport -> "file may have been moved or deleted"
-        song.youtubeVideoId != null -> "video may be unavailable"
-        !tdlibManager.isStarted -> "set up Telegram in the Sync tab to play it"
-        else -> "it couldn't be found on Telegram"
     }
 
     private fun isLocalFileValid(path: String): Boolean =
@@ -723,10 +728,10 @@ class MusicRepository(
 
     /** The Lyrics source picker: asks only [provider]. A find replaces the song's lyrics (and its
      * cache entry); nothing found leaves what's there. */
-    suspend fun fetchLyricsFrom(song: SongEntity, provider: LyricsProvider): LyricsResult? {
-        val lyrics = lyricsRepository.fetchFrom(provider, song.title, song.artist, song.durationSeconds.takeIf { it > 0 }) ?: return null
-        saveLyrics(song, listOf(lyricsRepository.cacheKey(song.title, song.artist)), lyrics)
-        return lyrics
+    suspend fun fetchLyricsFrom(song: SongEntity, provider: LyricsProvider): LyricsSearch {
+        val search = lyricsRepository.fetchFrom(provider, song.title, song.artist, song.durationSeconds.takeIf { it > 0 })
+        search.result?.let { saveLyrics(song, listOf(lyricsRepository.cacheKey(song.title, song.artist)), it) }
+        return search
     }
 
     /** Which source the song's current lyrics came from, if the cache knows. */
@@ -746,16 +751,19 @@ class MusicRepository(
 
     /** One-time: copies lyrics songs already had into the lyrics cache, so they carry over to
      * the same song from another source and survive a library reset. Runs at startup, a page at
-     * a time so a big library never holds all its lyrics in memory at once. A test build keyed
-     * the cache too loosely (see LyricsRepository.cacheKey), so anything it cached is dropped
-     * first and rebuilt from the songs. */
+     * a time (by song id, so songs deleted meanwhile can't make it skip any) so a big library
+     * never holds all its lyrics in memory at once. A test build keyed the cache too loosely
+     * (see LyricsRepository.cacheKey), so what it cached is dropped first - only entries older
+     * than this run, never a lookup made while it runs - and rebuilt from the songs. */
     suspend fun backfillLyricsCache() {
         if (settingsStore.lyricsCacheBackfilled) return
-        lyricsCache.clear()
         val now = System.currentTimeMillis()
-        var offset = 0
+        lyricsCache.deleteOlderThan(now)
+        var afterId = Long.MIN_VALUE
         while (true) {
-            val page = songDao.getLyricsToBackfill(LYRICS_BACKFILL_PAGE, offset)
+            val page = songDao.getLyricsToBackfill(afterId, LYRICS_BACKFILL_PAGE)
+            if (page.isEmpty()) break
+            afterId = page.last().telegramMessageId
             val entries = page.mapNotNull { row ->
                 val plain = row.lyricsPlain?.takeIf { it.isNotBlank() }
                 val synced = row.lyricsSynced?.takeIf { it.isNotBlank() }
@@ -765,7 +773,6 @@ class MusicRepository(
             }
             if (entries.isNotEmpty()) lyricsCache.putIfMissing(entries)
             if (page.size < LYRICS_BACKFILL_PAGE) break
-            offset += LYRICS_BACKFILL_PAGE
         }
         settingsStore.lyricsCacheBackfilled = true
     }

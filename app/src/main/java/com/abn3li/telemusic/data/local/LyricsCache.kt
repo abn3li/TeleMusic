@@ -24,7 +24,7 @@ data class LyricsCacheEntity(
 )
 
 /** A song's name and lyrics, for copying lyrics songs already had into the cache. */
-data class SongLyricsRow(val title: String, val artist: String, val lyricsPlain: String?, val lyricsSynced: String?)
+data class SongLyricsRow(val telegramMessageId: Long, val title: String, val artist: String, val lyricsPlain: String?, val lyricsSynced: String?)
 
 @Dao
 interface LyricsCacheDao {
@@ -34,8 +34,8 @@ interface LyricsCacheDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun put(entry: LyricsCacheEntity)
 
-    @Query("DELETE FROM lyrics_cache")
-    suspend fun clear()
+    @Query("DELETE FROM lyrics_cache WHERE fetchedAtMillis < :before")
+    suspend fun deleteOlderThan(before: Long)
 
     /** Keeps an entry that's already there - for copying lyrics songs already had. */
     @Insert(onConflict = OnConflictStrategy.IGNORE)

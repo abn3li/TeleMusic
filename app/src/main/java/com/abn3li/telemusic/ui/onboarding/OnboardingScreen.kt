@@ -1,7 +1,6 @@
 package com.abn3li.telemusic.ui.onboarding
 
 import android.Manifest
-import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
@@ -59,6 +58,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -81,6 +81,8 @@ import com.abn3li.telemusic.ui.library.AppAccent
 import com.abn3li.telemusic.ui.library.GroupCardColor
 import com.abn3li.telemusic.ui.library.GroupLabelColor
 import com.abn3li.telemusic.ui.library.LibraryTileColor
+import com.abn3li.telemusic.data.settings.releaseFolderAccess
+import com.abn3li.telemusic.data.settings.takeFolderAccess
 import com.abn3li.telemusic.ui.settings.readableFolderName
 
 private const val STEP_WELCOME = 0
@@ -125,12 +127,19 @@ fun OnboardingScreen(onFinished: () -> Unit) {
 
     BackHandler(enabled = index > 0, onBack = back)
 
+    // Each page keeps its own state while you go Back and forward again: the folder picked on
+    // Downloads (and the access Android granted for it) and Notifications' "allowed" aren't lost
+    // just because another page was showing.
+    val pageStates = rememberSaveableStateHolder()
+    val step = steps[index.coerceIn(0, steps.lastIndex)]
     Box(Modifier.fillMaxSize().background(Color.Black)) {
-        when (steps[index.coerceIn(0, steps.lastIndex)]) {
-            STEP_WELCOME -> WelcomeStep(onNext = next)
-            STEP_FEATURES -> FeaturesStep(onBack = back, onNext = next)
-            STEP_NOTIFICATIONS -> NotificationsStep(onBack = back, onNext = next)
-            else -> DownloadsStep(onBack = back, onDone = ::finish)
+        pageStates.SaveableStateProvider(step) {
+            when (step) {
+                STEP_WELCOME -> WelcomeStep(onNext = next)
+                STEP_FEATURES -> FeaturesStep(onBack = back, onNext = next)
+                STEP_NOTIFICATIONS -> NotificationsStep(onBack = back, onNext = next)
+                else -> DownloadsStep(onBack = back, onDone = ::finish)
+            }
         }
     }
 }
@@ -261,22 +270,16 @@ private fun DownloadsStep(onBack: () -> Unit, onDone: () -> Unit) {
     // A folder picked here but not kept gives back the access Android granted for it.
     fun releaseIfUnsaved(uri: String?) {
         if (uri == null || uri == settings.downloadFolderUri) return
-        runCatching {
-            context.contentResolver.releasePersistableUriPermission(
-                Uri.parse(uri),
-                Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
-            )
-        }
+        releaseFolderAccess(context.contentResolver, Uri.parse(uri))
     }
 
     fun save() {
         if (useFolder) {
-            settings.downloadFolderUri = folder ?: return
+            app.downloadGate.chooseFolder(folder ?: return)
         } else {
             releaseIfUnsaved(folder)
-            settings.downloadFolderUri = null
+            app.downloadGate.chooseAppStorage()
         }
-        settings.downloadLocationChosen = true
         onDone()
     }
 
@@ -287,12 +290,8 @@ private fun DownloadsStep(onBack: () -> Unit, onDone: () -> Unit) {
 
     val folderPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { treeUri ->
         if (treeUri != null) {
-            runCatching {
-                context.contentResolver.takePersistableUriPermission(
-                    treeUri,
-                    Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
-                )
-            }
+            // Access is kept now; it's only saved as the download folder on Start Listening.
+            takeFolderAccess(context.contentResolver, treeUri)
             if (treeUri.toString() != folder) releaseIfUnsaved(folder)
             folder = treeUri.toString()
             if (finishAfterPick) save()

@@ -5,7 +5,6 @@ import com.abn3li.telemusic.ui.library.HomeScreen
 import androidx.compose.material.icons.filled.Home
 import com.abn3li.telemusic.ui.library.AlertAction
 import com.abn3li.telemusic.ui.library.AppAlert
-import android.content.Intent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.compose.rememberLauncherForActivityResult
 import android.net.Uri
@@ -466,13 +465,7 @@ private fun DownloadLocationPrompt(app: TgMusicApp) {
         if (treeUri == null) {
             gate.cancel()
         } else {
-            runCatching {
-                app.contentResolver.takePersistableUriPermission(
-                    treeUri,
-                    Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
-                )
-            }
-            gate.chooseFolder(treeUri.toString())
+            gate.useFolder(app.contentResolver, treeUri)
         }
     }
     if (pending != null) {

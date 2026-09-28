@@ -60,8 +60,10 @@ interface SongDao {
     suspend fun setLyrics(id: Long, plain: String?, synced: String?)
 
     // Only what the lyrics cache needs, not whole rows - see MusicRepository.backfillLyricsCache.
-    @Query("SELECT title, artist, lyricsPlain, lyricsSynced FROM songs WHERE TRIM(COALESCE(lyricsPlain, '')) != '' OR TRIM(COALESCE(lyricsSynced, '')) != '' ORDER BY telegramMessageId LIMIT :limit OFFSET :offset")
-    suspend fun getLyricsToBackfill(limit: Int, offset: Int): List<SongLyricsRow>
+    // Paged by id ("after the last one seen"), not OFFSET: each page is a direct index jump, and
+    // a song deleted meanwhile can't shift the rest and make a page skip one.
+    @Query("SELECT telegramMessageId, title, artist, lyricsPlain, lyricsSynced FROM songs WHERE telegramMessageId > :afterId AND (TRIM(COALESCE(lyricsPlain, '')) != '' OR TRIM(COALESCE(lyricsSynced, '')) != '') ORDER BY telegramMessageId LIMIT :limit")
+    suspend fun getLyricsToBackfill(afterId: Long, limit: Int): List<SongLyricsRow>
 
     @Query("UPDATE songs SET telegramFileId = :fileId WHERE telegramMessageId = :id")
     suspend fun setTelegramFileId(id: Long, fileId: Int)

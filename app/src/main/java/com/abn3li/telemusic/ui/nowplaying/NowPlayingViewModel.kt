@@ -17,6 +17,7 @@ import com.abn3li.telemusic.playback.RepeatMode
 import com.abn3li.telemusic.repository.LyricsProvider
 import com.abn3li.telemusic.repository.LyricsResult
 import com.abn3li.telemusic.repository.MusicRepository
+import com.abn3li.telemusic.repository.PlaybackResolution
 import com.abn3li.telemusic.repository.SortField
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -402,7 +403,9 @@ class NowPlayingViewModel(
     /** Opening the Lyrics source picker: shows which source the current lyrics came from. */
     fun loadLyricsSource() {
         val song = _uiState.value.song ?: return
-        _lyricsSource.value = LyricsSourceState()
+        // A source still being asked stays marked (its spinner, rows locked): reopening the
+        // picker mustn't let a second tap cancel it. A song change clears it (cancelLyricsFetch).
+        _lyricsSource.value = LyricsSourceState(loading = _lyricsSource.value.loading)
         // Only the latest lookup counts, and only while its song is still the one playing.
         lyricsSourceJob?.cancel()
         lyricsSourceJob = viewModelScope.launch {
@@ -419,7 +422,7 @@ class NowPlayingViewModel(
         val song = _uiState.value.song ?: return
         _lyricsSource.value = _lyricsSource.value.copy(loading = provider, message = null)
         fetchLyrics(song, showSpinner = false) {
-            val found = try {
+            val search = try {
                 repository.fetchLyricsFrom(song, provider)
             } catch (e: CancellationException) {
                 throw e
@@ -430,11 +433,16 @@ class NowPlayingViewModel(
             }
             // The song may have changed while this source was asked; its picker is then showing
             // the new song, which this answer isn't about.
+            val found = search.result
             if (_uiState.value.song?.telegramMessageId == song.telegramMessageId) {
                 _lyricsSource.value = _lyricsSource.value.copy(
                     loading = null,
                     current = if (found != null) provider else _lyricsSource.value.current,
-                    message = if (found != null) null else "${provider.label} has no lyrics for this song."
+                    message = when {
+                        found != null -> null
+                        search.allAnswered -> "${provider.label} has no lyrics for this song."
+                        else -> "Couldn't reach ${provider.label}. Check your connection and try again."
+                    }
                 )
             }
             found
@@ -688,7 +696,8 @@ class NowPlayingViewModel(
         // longer risks going stale from it the way a separate copy already has once - see
         // SongEntity.isLocalImport's own doc for why a plain File(path) check specifically would
         // silently break a referenced, not copied, local import).
-        val uri = withContext(Dispatchers.IO) { repository.resolvePlaybackUri(song) }
+        val resolution = withContext(Dispatchers.IO) { repository.resolvePlayback(song) }
+        val uri = (resolution as? PlaybackResolution.Playable)?.uri
         if (uri != null) {
             // A real library row backed by a YouTube video that had no local/cached copy - this
             // is the one case where a fresh resolve can also learn a corrected duration, so pull
@@ -702,7 +711,7 @@ class NowPlayingViewModel(
             }
             playbackController.playUri(uri, song.telegramMessageId, song.title, song.artist, song.displayArtwork)
         } else {
-            val reason = repository.whyUnplayable(song)
+            val reason = (resolution as? PlaybackResolution.Unplayable)?.reason ?: "it isn't available"
             _uiState.value = _uiState.value.copy(
                 errorMessage = "Couldn't play \"${song.title}\" - $reason",
                 loadingSongId = null
