@@ -97,6 +97,11 @@ class NowPlayingViewModel(
     // recomposes on a real queue change, never on the 300ms position tick.
     private val _queueState = MutableStateFlow(QueueUiState())
     val queueState: StateFlow<QueueUiState> = _queueState
+
+    // The list the queue was started from (see PlaybackQueue.sourceIds): a playlist or album
+    // page lights up its Shuffle and Play buttons only when it's the one playing.
+    private val _playingFrom = MutableStateFlow<List<Long>>(emptyList())
+    val playingFrom: StateFlow<List<Long>> = _playingFrom
     private var queueRefreshJob: Job? = null
 
     private fun refreshQueue() {
@@ -104,6 +109,7 @@ class NowPlayingViewModel(
         com.abn3li.telemusic.widget.MusicWidgets.refresh(context)
         val nextIds = queue.nextInQueueIds()
         val upNextIds = queue.upNextIds()
+        _playingFrom.value = queue.sourceIds
         _uiState.value = _uiState.value.copy(hasNext = queue.hasNext(), hasPrevious = queue.hasPrevious())
         queueRefreshJob?.cancel()
         queueRefreshJob = viewModelScope.launch {

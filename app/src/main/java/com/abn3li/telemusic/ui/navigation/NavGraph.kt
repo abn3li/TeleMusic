@@ -75,6 +75,8 @@ import com.abn3li.telemusic.ui.library.SmartPlaylistDetailScreen
 import com.abn3li.telemusic.ui.library.SmartPlaylistKind
 import com.abn3li.telemusic.ui.nowplaying.LocalMiniPlayerInset
 import com.abn3li.telemusic.ui.nowplaying.LocalPlayNext
+import com.abn3li.telemusic.ui.library.CollectionPlayback
+import com.abn3li.telemusic.ui.library.LocalCollectionPlayback
 import com.abn3li.telemusic.ui.nowplaying.MiniPlayerHeight
 import com.abn3li.telemusic.ui.nowplaying.NowPlayingViewModel
 import com.abn3li.telemusic.ui.nowplaying.PlayerSheetOverlay
@@ -156,11 +158,21 @@ fun TgMusicNavGraph(navController: NavHostController = rememberNavController()) 
             onPlayNext = { id -> playerViewModel.playNext(id) },
             onOpenArtist = { artist -> navController.navigate(Routes.artist(artist)) },
             onOpenAlbum = { album -> navController.navigate(Routes.album(album)) },
-            onOpenArtistSongs = { artist -> navController.navigate(Routes.artistSongs(artist)) }
+            onOpenArtistSongs = { artist -> navController.navigate(Routes.artistSongs(artist)) },
+            onToggleShuffle = { playerViewModel.toggleShuffle() },
+            onTogglePlayPause = { playerViewModel.togglePlayPause() }
         )
     }
 
     val playerState by playerViewModel.stableUiState.collectAsState()
+    val playingFrom by playerViewModel.playingFrom.collectAsState()
+    val collectionPlayback = remember(playingFrom, playerState.song, playerState.isPlaying, playerState.isShuffleEnabled) {
+        CollectionPlayback(
+            sourceIds = if (playerState.song != null) playingFrom else emptyList(),
+            isPlaying = playerState.isPlaying,
+            isShuffled = playerState.isShuffleEnabled
+        )
+    }
 
     // Lets the loading screen go once Home's library has been read (not while Home would still
     // flash empty); the hello screens need nothing. Waits for one value, then stops listening.
@@ -193,7 +205,8 @@ fun TgMusicNavGraph(navController: NavHostController = rememberNavController()) 
         Scaffold { innerPadding ->
             CompositionLocalProvider(
                 LocalMiniPlayerInset provides miniPlayerInset,
-                LocalPlayNext provides playNext
+                LocalPlayNext provides playNext,
+                LocalCollectionPlayback provides collectionPlayback
             ) {
             NavHost(
                 navController = navController,

@@ -51,6 +51,10 @@ import androidx.compose.material.icons.rounded.ArrowUpward
 import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material.icons.rounded.MoreHoriz
 import androidx.compose.material.icons.rounded.PlayArrow
+import androidx.compose.material.icons.rounded.Pause
+import androidx.compose.material.icons.rounded.GraphicEq
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.material.icons.rounded.QueuePlayNext
 import androidx.compose.material.icons.rounded.Schedule
 import androidx.compose.material.icons.rounded.Search
@@ -109,8 +113,18 @@ class LibraryCallbacks(
     val onPlayNext: (Long) -> Unit,
     val onOpenArtist: (String) -> Unit,
     val onOpenAlbum: (String) -> Unit,
-    val onOpenArtistSongs: (String) -> Unit
+    val onOpenArtistSongs: (String) -> Unit,
+    // For a page whose own list is the one playing: flip shuffle / play-pause without
+    // starting the list over.
+    val onToggleShuffle: () -> Unit = {},
+    val onTogglePlayPause: () -> Unit = {}
 )
+
+/** What's playing, for a collection page's Shuffle and Play buttons: the list the queue was
+ * started from (PlaybackQueue.sourceIds), and whether it's playing and shuffled. */
+class CollectionPlayback(val sourceIds: List<Long>, val isPlaying: Boolean, val isShuffled: Boolean)
+
+val LocalCollectionPlayback = compositionLocalOf { CollectionPlayback(emptyList(), isPlaying = false, isShuffled = false) }
 
 @Composable
 fun AlbumDetailScreen(album: String, viewModel: LibraryViewModel, callbacks: LibraryCallbacks) {
@@ -589,17 +603,39 @@ private fun CollectionDetailPage(
                                 maxLines = 2
                             )
                             Spacer(Modifier.height(28.dp))
+                            // This page's own list is the one playing (in any order - the page
+                            // may be sorted differently from when it was started): Shuffle and
+                            // Play then show and change the current playback instead of
+                            // starting the list over.
+                            val playback = LocalCollectionPlayback.current
+                            val isThisPlaying = remember(playback.sourceIds, ids) {
+                                ids.isNotEmpty() && playback.sourceIds.size == ids.size && playback.sourceIds.toSet() == ids.toSet()
+                            }
+                            val shuffleOn = isThisPlaying && playback.isShuffled
+                            val playingNow = isThisPlaying && playback.isPlaying
                             Row(
                                 Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.spacedBy(14.dp, Alignment.CenterHorizontally),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                HeroButton(Icons.Rounded.Shuffle, "Shuffle", enabled = songs.isNotEmpty()) { callbacks.onPlayCollection(ids, true) }
-                                HeroButton(Icons.Rounded.PlayArrow, "Play", enabled = songs.isNotEmpty()) { callbacks.onPlayCollection(ids, false) }
+                                HeroButton(Icons.Rounded.Shuffle, if (shuffleOn) "Shuffle on" else "Shuffle", enabled = songs.isNotEmpty(), active = shuffleOn) {
+                                    if (isThisPlaying) callbacks.onToggleShuffle() else callbacks.onPlayCollection(ids, true)
+                                }
+                                HeroButton(
+                                    if (playingNow) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
+                                    if (playingNow) "Pause" else "Play",
+                                    enabled = songs.isNotEmpty()
+                                ) {
+                                    if (isThisPlaying) callbacks.onTogglePlayPause() else callbacks.onPlayCollection(ids, false)
+                                }
                                 HeroButton(Icons.Rounded.Search, "Search", enabled = songs.isNotEmpty()) {
                                     searching = true
                                     scope.launch { listState.scrollToItem(0) }
                                 }
+                            }
+                            // Always takes its room, so the title doesn't jump when it appears.
+                            Box(Modifier.fillMaxWidth().height(30.dp), contentAlignment = Alignment.BottomCenter) {
+                                if (isThisPlaying) PlaybackStatusLine(playing = playingNow, shuffled = shuffleOn)
                             }
                         }
                     }
@@ -662,13 +698,20 @@ private fun CollectionDetailPage(
 }
 
 @Composable
-private fun HeroButton(icon: ImageVector, description: String, enabled: Boolean, onClick: () -> Unit) {
+private fun HeroButton(icon: ImageVector, description: String, enabled: Boolean, active: Boolean = false, onClick: () -> Unit) {
     val haptics = LocalHapticFeedback.current
+    // [active] (Shuffle while it's on): filled with the accent, so the state reads at a glance.
+    val fill by animateColorAsState(
+        if (active) AppAccent else Color.Transparent,
+        tween(200),
+        label = "heroButtonFill"
+    )
     Box(
         Modifier
             .alpha(if (enabled) 1f else 0.42f)
             .size(56.dp)
             .clip(CircleShape)
+            .background(fill)
             .clickable(
                 enabled = enabled,
                 interactionSource = remember { MutableInteractionSource() },
@@ -679,7 +722,23 @@ private fun HeroButton(icon: ImageVector, description: String, enabled: Boolean,
             },
         contentAlignment = Alignment.Center
     ) {
-        Icon(icon, description, tint = Color.White, modifier = Modifier.size(36.dp))
+        Icon(icon, description, tint = Color.White, modifier = Modifier.size(if (active) 30.dp else 36.dp))
+    }
+}
+
+/** "Playing · Shuffled" under the buttons of the list that's playing - pink while shuffled. A
+ * still icon, not moving bars: an endless animation would keep the screen redrawing. */
+@Composable
+private fun PlaybackStatusLine(playing: Boolean, shuffled: Boolean) {
+    val color = if (shuffled) AppAccent else Color.White.copy(alpha = 0.75f)
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        Icon(Icons.Rounded.GraphicEq, contentDescription = null, tint = color, modifier = Modifier.size(16.dp))
+        Text(
+            (if (playing) "Playing" else "Paused") + (if (shuffled) " · Shuffled" else " · In order"),
+            color = color,
+            fontSize = 13.5.sp,
+            fontWeight = FontWeight.SemiBold
+        )
     }
 }
 

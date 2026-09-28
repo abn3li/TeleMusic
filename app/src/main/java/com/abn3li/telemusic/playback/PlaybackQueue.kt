@@ -22,12 +22,19 @@ class PlaybackQueue {
     var isShuffleEnabled: Boolean = false
         private set
 
+    /** The list this queue was started from (a playlist, an album...), as it was given. Kept
+     * through shuffle, Play Next and removals, so that list's page can tell it's the one
+     * playing. */
+    var sourceIds: List<Long> = emptyList()
+        private set
+
     var repeatMode: RepeatMode = RepeatMode.OFF
         private set
 
     fun setQueue(ids: List<Long>, startIndex: Int) {
         nextInQueue.clear()
         originalSongIds = ids.toMutableList()
+        sourceIds = ids.toList()
         if (ids.isEmpty()) {
             base = mutableListOf()
             baseIndex = -1
@@ -46,7 +53,7 @@ class PlaybackQueue {
     fun currentSongId(): Long? = base.getOrNull(baseIndex)
 
     /** Where the queue is now, to go back to with [restore]. */
-    fun snapshot(): Snapshot = Snapshot(originalSongIds.toList(), base.toList(), baseIndex, nextInQueue.toList())
+    fun snapshot(): Snapshot = Snapshot(originalSongIds.toList(), base.toList(), baseIndex, nextInQueue.toList(), sourceIds)
 
     /** Puts the queue back where [snapshot] was taken - used when moving on played nothing. */
     fun restore(snapshot: Snapshot) {
@@ -55,9 +62,10 @@ class PlaybackQueue {
         baseIndex = snapshot.baseIndex
         nextInQueue.clear()
         nextInQueue.addAll(snapshot.nextInQueue)
+        sourceIds = snapshot.sourceIds
     }
 
-    class Snapshot(val originalSongIds: List<Long>, val base: List<Long>, val baseIndex: Int, val nextInQueue: List<Long>)
+    class Snapshot(val originalSongIds: List<Long>, val base: List<Long>, val baseIndex: Int, val nextInQueue: List<Long>, val sourceIds: List<Long>)
 
     fun nextInQueueIds(): List<Long> = nextInQueue.toList()
 
@@ -133,6 +141,7 @@ class PlaybackQueue {
      * of any queue (an ephemeral YouTube stream), so Next/Previous can't fall back to an old one. */
     fun clear() {
         originalSongIds = mutableListOf()
+        sourceIds = emptyList()
         base = mutableListOf()
         baseIndex = -1
         nextInQueue.clear()
