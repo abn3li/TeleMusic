@@ -98,6 +98,12 @@ class NowPlayingViewModel(
     private val _queueState = MutableStateFlow(QueueUiState())
     val queueState: StateFlow<QueueUiState> = _queueState
 
+    // Declared above init{}: init can already reach it (a song still playing when this is
+    // created runs resyncToExternallyChangedSong -> cancelLyricsFetch), and properties below
+    // init aren't set yet at that point - it crashed reopening the app while music played.
+    private val _lyricsSource = MutableStateFlow(LyricsSourceState())
+    val lyricsSource: StateFlow<LyricsSourceState> = _lyricsSource
+
     // The list the queue was started from (see PlaybackQueue.sourceIds): a playlist or album
     // page lights up its Shuffle and Play buttons only when it's the one playing.
     private val _playingFrom = MutableStateFlow<List<Long>>(emptyList())
@@ -380,9 +386,6 @@ class NowPlayingViewModel(
         playbackController.playUri(streamUri, song.telegramMessageId, song.title, song.artist, song.displayArtwork, youtubeVideoId = videoId)
         refreshQueue()
     }
-
-    private val _lyricsSource = MutableStateFlow(LyricsSourceState())
-    val lyricsSource: StateFlow<LyricsSourceState> = _lyricsSource
 
     /** Opening Lyrics: saved lyrics (or a recent "none found") answer without searching. */
     fun fetchLyricsOnDemand() {
