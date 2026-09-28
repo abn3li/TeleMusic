@@ -12,6 +12,7 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import okhttp3.Call
 import okhttp3.Callback
 import okhttp3.Request
@@ -28,6 +29,7 @@ data class LyricsResult(val plain: String?, val synced: String?, val provider: L
 
 /** Where lyrics come from - the Lyrics source picker in Now Playing lists these. */
 enum class LyricsProvider(val label: String, val detail: String) {
+    BINI_LYRICS("BiniLyrics", "Word by word when available"),
     LRCLIB("LRCLIB", "Synced when available"),
     KUGOU("KuGou", "Synced"),
     LYRICS_OVH("lyrics.ovh", "Plain text"),
@@ -39,8 +41,8 @@ enum class LyricsProvider(val label: String, val detail: String) {
     }
 }
 
-/** One automatic search. No [result] with [allAnswered] means no lyrics anywhere: LRCLIB, KuGou
- * and lyrics.ovh each answered "nothing". Without it some source never got through (offline, or
+/** One automatic search. No [result] with [allAnswered] means no lyrics anywhere: BiniLyrics,
+ * LRCLIB, KuGou and lyrics.ovh each answered "nothing". Without it some source never got through (offline, or
  * blocked where you are), which says nothing about the song. (Google, a scrape, isn't counted.) */
 data class LyricsSearch(val result: LyricsResult?, val allAnswered: Boolean)
 
@@ -51,6 +53,12 @@ data class LyricsSearch(val result: LyricsResult?, val allAnswered: Boolean)
  *
  * Providers are tried in this order, each one free and requiring no API key - and, unlike
  * what was here before, each one actually verified reachable (via curl) before being wired in:
+ * 0. BiniLyrics (lyrics-api.binimum.org, now served from lrc.red) - community lyrics as TTML,
+ *    many timed word by word, Arabic included. Its word-timed lyrics win over everything, since
+ *    only those let the Now Playing sweep follow the singing exactly. Its line-timed ones rank
+ *    right after LRCLIB's. New searches there sometimes fail (503) or hang, so it gets a short
+ *    time budget and the others run meanwhile. (Better Lyrics, the other word-synced API
+ *    checked, answers only songs it already has cached without an API key - left out.)
  * 1. LRCLIB (lrclib.net) - open community database, line-synced (LRC) capable.
  * 2. KuGou (kugou.com) - a Chinese catalogue that nonetheless carries a large amount of
  *    English/Western music LRCLIB doesn't have. Also line-synced, so it's tried before any
@@ -74,6 +82,11 @@ data class LyricsSearch(val result: LyricsResult?, val allAnswered: Boolean)
 private val AUDIO_EXTENSION = Regex("""(?i)\.(mp3|m4a|flac|ogg|wav|aac|opus|webm)$""")
 private val WHITESPACE = Regex("""\s+""")
 
+private const val BINI_SEARCH_URL = "https://lyrics-api.binimum.org/"
+// BiniLyrics sometimes hangs on a new search; past this the others' answer is used.
+private const val BINI_BUDGET_MS = 6_000L
+private const val BINI_DURATION_SLACK_S = 5
+
 class LyricsRepository {
 
     private val gson = Gson()
@@ -91,11 +104,12 @@ class LyricsRepository {
     suspend fun fetchLyrics(title: String, artist: String, durationSeconds: Int?): LyricsSearch {
         val reached = Reached()
         val result = searchAll(title, artist, durationSeconds, reached)
-        return LyricsSearch(result, reached.lrcLib.get() && reached.kuGou.get() && reached.ovh.get())
+        return LyricsSearch(result, reached.bini.get() && reached.lrcLib.get() && reached.kuGou.get() && reached.ovh.get())
     }
 
     /** Which sources actually answered during one search (see LyricsSearch.allAnswered). */
     private class Reached {
+        val bini = AtomicBoolean(false)
         val lrcLib = AtomicBoolean(false)
         val kuGou = AtomicBoolean(false)
         val ovh = AtomicBoolean(false)
@@ -105,15 +119,27 @@ class LyricsRepository {
         val (cleanTitle, cleanArtist) = sanitizeTitleAndArtist(title, artist)
         Log.d("LyricsRepository", "Searching lyrics for '$cleanTitle' by '$cleanArtist'")
 
+        val biniDeferred = async { fetchBiniLyrics(cleanTitle, cleanArtist, durationSeconds, reached.bini) }
         val lrcLibDeferred = async { fetchLrcLibLyrics(cleanTitle, cleanArtist, durationSeconds, reached.lrcLib) }
         val kuGouDeferred = async { fetchKuGouLyrics(cleanTitle, cleanArtist, durationSeconds, reached.kuGou) }
         val ovhDeferred = async { fetchLyricsOvhLyrics(cleanTitle, cleanArtist, reached.ovh) }
 
         try {
+            val biniResult = biniDeferred.await()
+            if (biniResult?.synced != null && hasWordTiming(biniResult.synced)) {
+                Log.d("LyricsRepository", "[BiniLyrics] Word-synced match")
+                return@coroutineScope biniResult.copy(provider = LyricsProvider.BINI_LYRICS)
+            }
+
             val lrcLibResult = lrcLibDeferred.await()
             if (lrcLibResult?.synced != null) {
                 Log.d("LyricsRepository", "[LRCLIB] Synced match")
                 return@coroutineScope lrcLibResult.copy(provider = LyricsProvider.LRCLIB)
+            }
+
+            if (biniResult?.synced != null) {
+                Log.d("LyricsRepository", "[BiniLyrics] Line-synced match")
+                return@coroutineScope biniResult.copy(provider = LyricsProvider.BINI_LYRICS)
             }
 
             val kuGouResult = kuGouDeferred.await()
@@ -125,6 +151,11 @@ class LyricsRepository {
             if (lrcLibResult != null) {
                 Log.d("LyricsRepository", "[LRCLIB] Plain-only match (no synced version found anywhere)")
                 return@coroutineScope lrcLibResult.copy(provider = LyricsProvider.LRCLIB)
+            }
+
+            if (biniResult != null) {
+                Log.d("LyricsRepository", "[BiniLyrics] Plain-only match")
+                return@coroutineScope biniResult.copy(provider = LyricsProvider.BINI_LYRICS)
             }
 
             val ovhResult = ovhDeferred.await()
@@ -150,13 +181,13 @@ class LyricsRepository {
         } finally {
             // Whichever of these lost the race is no longer worth waiting on, and
             // coroutineScope will not return while they're still running.
+            biniDeferred.cancel()
             lrcLibDeferred.cancel()
             kuGouDeferred.cancel()
             ovhDeferred.cancel()
         }
     }
 
-    /** Asks only [provider] - the Lyrics source picker, after the automatic search chose one. */
     /** Asks only [provider] - the Lyrics source picker. [LyricsSearch.allAnswered] tells a real
      * "it has none" apart from "couldn't reach it" when nothing is found. */
     suspend fun fetchFrom(provider: LyricsProvider, title: String, artist: String, durationSeconds: Int?): LyricsSearch {
@@ -164,6 +195,7 @@ class LyricsRepository {
         val reached = AtomicBoolean(false)
         val result = try {
             when (provider) {
+                LyricsProvider.BINI_LYRICS -> fetchBiniLyrics(cleanTitle, cleanArtist, durationSeconds, reached)
                 LyricsProvider.LRCLIB -> fetchLrcLibLyrics(cleanTitle, cleanArtist, durationSeconds, reached)
                 LyricsProvider.KUGOU -> fetchKuGouLyrics(cleanTitle, cleanArtist, durationSeconds, reached)
                 LyricsProvider.LYRICS_OVH -> fetchLyricsOvhLyrics(cleanTitle, cleanArtist, reached)
@@ -192,6 +224,72 @@ class LyricsRepository {
             .lowercase()
         return "${tidy(title)}|${tidy(artist)}"
     }
+
+    /**
+     * BiniLyrics: search by title and artist, pick the best entry, download its TTML. Entries
+     * with no timing are skipped (they're DJ mixes and the like), as is any cut more than
+     * [BINI_DURATION_SLACK_S] seconds off the track's own length - the search lists remixes and
+     * live versions too. Among the rest, a word-timed one wins over a line-timed one only when
+     * the length says it's the same recording; without a length, the search's own order does.
+     */
+    private suspend fun fetchBiniLyrics(
+        title: String,
+        artist: String,
+        durationSeconds: Int?,
+        reached: AtomicBoolean? = null
+    ): LyricsResult? = withContext(Dispatchers.IO) {
+        withTimeoutOrNull(BINI_BUDGET_MS) { fetchBiniLyricsNow(title, artist, durationSeconds, reached) }
+    }
+
+    private suspend fun fetchBiniLyricsNow(
+        title: String,
+        artist: String,
+        durationSeconds: Int?,
+        reached: AtomicBoolean?
+    ): LyricsResult? = run {
+        try {
+            val url = BINI_SEARCH_URL.toHttpUrl().newBuilder()
+                .addQueryParameter("track", title)
+                .addQueryParameter("artist", artist)
+                .build()
+            val body = httpGet(url.toString()) ?: return@run null
+            val response = runCatching { gson.fromJson(body, BiniSearchResponse::class.java) }.getOrNull()
+                ?: return@run null
+            reached?.set(true)
+            val seconds = durationSeconds ?: -1
+            val usable = response.results.orEmpty()
+                .filter { it.timing_type == "word" || it.timing_type == "line" }
+                .filter { it.lyricsUrl?.startsWith("https://") == true }
+                .filter { seconds <= 0 || it.duration <= 0 || abs(it.duration - seconds) <= BINI_DURATION_SLACK_S }
+            val pick = (if (seconds > 0) usable.firstOrNull { it.timing_type == "word" } else null)
+                ?: usable.firstOrNull()
+                ?: return@run null
+            val ttml = httpGet(pick.lyricsUrl!!)
+            if (ttml == null) {
+                // Found but not downloaded: says nothing about whether it has the lyrics.
+                reached?.set(false)
+                return@run null
+            }
+            val converted = TtmlLyrics.convert(ttml) ?: return@run null
+            LyricsResult(plain = converted.plain.takeIf { it.isNotBlank() }, synced = converted.synced)
+                .takeIf { it.plain != null || it.synced != null }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Log.w("LyricsRepository", "[BiniLyrics] Failed: ${e.message}")
+            null
+        }
+    }
+
+    private fun hasWordTiming(synced: String): Boolean = synced.contains("]<")
+
+    private data class BiniSearchResponse(val results: List<BiniEntry>? = null)
+    @Suppress("PropertyName")
+    private data class BiniEntry(
+        val duration: Int = -1,
+        val timing_type: String? = null,
+        val lyricsUrl: String? = null
+    )
 
     /** LRCLIB's exact-match endpoint needs a precise title/artist/duration match and 404s
      * otherwise (routine, not an error worth logging loudly) - falls back to its fuzzier
@@ -299,7 +397,7 @@ class LyricsRepository {
             .addQueryParameter("showtype", "0")
             .addQueryParameter("keyword", keyword)
             .build()
-        val body = kuGouGet(url.toString()) ?: return null
+        val body = httpGet(url.toString()) ?: return null
         val response = runCatching { gson.fromJson(body, KuGouSearchSongResponse::class.java) }.getOrNull() ?: return null
         return response.data?.info.orEmpty()
             .filter { seconds <= 0 || abs(it.duration - seconds) <= 8 }
@@ -320,7 +418,7 @@ class LyricsRepository {
             }
             else -> return null
         }
-        val body = kuGouGet(builder.build().toString()) ?: return null
+        val body = httpGet(builder.build().toString()) ?: return null
         val response = runCatching { gson.fromJson(body, KuGouSearchLyricsResponse::class.java) }.getOrNull()
         return response?.candidates
     }
@@ -334,17 +432,17 @@ class LyricsRepository {
             .addQueryParameter("id", id)
             .addQueryParameter("accesskey", accessKey)
             .build()
-        val body = kuGouGet(url.toString()) ?: return null
+        val body = httpGet(url.toString()) ?: return null
         val response = runCatching { gson.fromJson(body, KuGouDownloadResponse::class.java) }.getOrNull() ?: return null
         return runCatching {
             String(Base64.decode(response.content, Base64.DEFAULT), Charsets.UTF_8)
         }.getOrNull()
     }
 
-    /** Cancellable: when a faster provider already answered, fetchLyrics cancels KuGou, and
-     * that now aborts the request in flight. A blocking execute() ignored the cancel, so the
+    /** Cancellable: when a faster provider already answered, fetchLyrics cancels KuGou (or
+     * BiniLyrics), and that now aborts the request in flight. A blocking execute() ignored the cancel, so the
      * lyrics waited for KuGou's whole chain of up to ten requests before showing. */
-    private suspend fun kuGouGet(url: String): String? = try {
+    private suspend fun httpGet(url: String): String? = try {
         val request = Request.Builder()
             .url(url)
             .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36")

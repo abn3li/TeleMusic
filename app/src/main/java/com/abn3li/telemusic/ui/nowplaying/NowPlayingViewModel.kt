@@ -29,8 +29,6 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
 
-data class LyricLine(val timeMs: Long, val text: String)
-
 /**
  * The fields the position ticker updates every tick. Split out of [NowPlayingUiState] into its
  * own flow (see [NowPlayingViewModel.playbackProgress]) so only the scrubber and the lyrics'
@@ -826,16 +824,6 @@ class NowPlayingViewModel(
             repository.setFavorite(song, newFav)
             _uiState.value = _uiState.value.copy(song = song.copy(isFavorite = newFav))
         }
-    }
-
-    private fun parseLrc(lrc: String): List<LyricLine> {
-        val regex = Regex("""\[(\d{2}):(\d{2})[.:](\d{2,3})]\s*(.*)""")
-        return lrc.lines().mapNotNull { line ->
-            val match = regex.find(line) ?: return@mapNotNull null
-            val (min, sec, ms, text) = match.destructured
-            val millis = min.toLong() * 60_000 + sec.toLong() * 1000 + ms.padEnd(3, '0').take(3).toLong()
-            LyricLine(millis, text)
-        }.sortedBy { it.timeMs }
     }
 
     override fun onCleared() {

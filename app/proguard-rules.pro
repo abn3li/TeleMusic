@@ -10,7 +10,7 @@
 # drops every field (nulls everywhere) instead of crashing.
 -keep class com.abn3li.telemusic.data.remote.** { *; }
 
-# Same reasoning as above, for KuGou's response models - these are private data classes
+# Same reasoning as above, for KuGou's (and BiniLyrics') response models - private data classes
 # nested inside LyricsRepository (parsed via a raw gson.fromJson(), not Retrofit) rather
 # than living under data.remote, so the keep rule above doesn't reach them. Without this,
 # every KuGou field comes back null in release builds only - which silently kills synced
