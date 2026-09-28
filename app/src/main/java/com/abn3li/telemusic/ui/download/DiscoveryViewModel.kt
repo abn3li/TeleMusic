@@ -7,6 +7,7 @@ import com.abn3li.telemusic.data.browse.HomeSection
 import com.abn3li.telemusic.data.download.YtDlpRepository
 import com.abn3li.telemusic.data.local.ImportedPlaylistEntity
 import com.abn3li.telemusic.repository.DiscoveryRepository
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -33,20 +34,34 @@ class DiscoveryViewModel(
 ) : ViewModel() {
     private val _uiState = MutableStateFlow(DiscoveryUiState())
     val uiState: StateFlow<DiscoveryUiState> = _uiState
+    // Above init: init starts the first load, and a later initializer would wipe this back to null.
+    private var loadJob: Job? = null
 
     init {
+        load()
         viewModelScope.launch {
+            discoveryRepository.observeImportedPlaylists().collect { imported ->
+                _uiState.update { it.copy(importedPlaylists = imported) }
+            }
+        }
+    }
+
+    /** Fetches the feed and genres. Home keeps this ViewModel for the whole session, so a start
+     * without a connection is retried from the error message ([reload]), not by reopening. */
+    private fun load() {
+        loadJob = viewModelScope.launch {
+            _uiState.update { it.copy(isLoading = true) }
             coroutineScope {
                 val sections = async { discoveryRepository.homeFeed() }
                 val genres = async { discoveryRepository.genres() }
                 _uiState.update { it.copy(isLoading = false, sections = sections.await(), genres = genres.await()) }
             }
         }
-        viewModelScope.launch {
-            discoveryRepository.observeImportedPlaylists().collect { imported ->
-                _uiState.update { it.copy(importedPlaylists = imported) }
-            }
-        }
+    }
+
+    fun reload() {
+        if (loadJob?.isActive == true) return
+        load()
     }
 
     /** Resolves a pasted playlist URL (via yt-dlp - see fetch_playlist_metadata's own doc) and

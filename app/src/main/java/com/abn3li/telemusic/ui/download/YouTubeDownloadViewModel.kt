@@ -43,6 +43,9 @@ data class YouTubeDownloadUiState(
     val artists: List<BrowseCollection> = emptyList(),
     val playlists: List<BrowseCollection> = emptyList(),
     val errorMessage: String? = null,
+    // Why the last Play or Download failed - kept apart from the search's own message, so it
+    // shows in every tab rather than only when the Songs list is empty.
+    val actionError: String? = null,
     // Both keyed by videoId - a result mid-download shows a spinner in place of its download
     // icon, and a finished one shows a checkmark instead, without needing a full re-search.
     val downloadingIds: Set<String> = emptySet(),
@@ -144,7 +147,7 @@ class YouTubeDownloadViewModel(
     fun onPlayClick(result: YtDlpSearchResult) {
         if (result.videoId in _uiState.value.loadingStreamIds) return
         viewModelScope.launch {
-            _uiState.update { it.copy(loadingStreamIds = it.loadingStreamIds + result.videoId, errorMessage = null) }
+            _uiState.update { it.copy(loadingStreamIds = it.loadingStreamIds + result.videoId, actionError = null) }
             val outcome = ytDlpRepository.resolveStreamUrl(result.videoId, DownloadQuality.BEST.formatSelector)
             val stream = outcome.getOrNull()?.takeIf { it.streamUrl.isNotBlank() }
             if (stream != null) {
@@ -168,10 +171,10 @@ class YouTubeDownloadViewModel(
             _uiState.update {
                 it.copy(
                     loadingStreamIds = it.loadingStreamIds - result.videoId,
-                    errorMessage = if (stream == null) {
+                    actionError = if (stream == null) {
                         "Couldn't play \"${result.title}\": ${outcome.exceptionOrNull()?.message ?: "no stream found"}"
                     } else {
-                        it.errorMessage
+                        it.actionError
                     }
                 )
             }
@@ -204,7 +207,7 @@ class YouTubeDownloadViewModel(
                 it.copy(
                     downloadingIds = it.downloadingIds - result.videoId,
                     downloadedIds = if (outcome.isSuccess) it.downloadedIds + result.videoId else it.downloadedIds,
-                    errorMessage = outcome.exceptionOrNull()?.let { e -> "Couldn't download \"${result.title}\": ${e.message}" }
+                    actionError = outcome.exceptionOrNull()?.let { e -> "Couldn't download \"${result.title}\": ${e.message}" } ?: it.actionError
                 )
             }
         }

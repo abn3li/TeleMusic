@@ -190,7 +190,8 @@ fun HomeScreen(
             state = youTube,
             onOpenCollection = onOpenYouTubeCollection,
             onImportPlaylistClick = { showImport = true },
-            onRemoveImportedPlaylist = discovery::removeImportedPlaylist
+            onRemoveImportedPlaylist = discovery::removeImportedPlaylist,
+            onRetry = discovery::reload
         )
         item("end") { Spacer(Modifier.height(8.dp)) }
     }

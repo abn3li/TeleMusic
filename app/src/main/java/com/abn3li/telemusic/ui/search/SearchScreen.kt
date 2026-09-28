@@ -59,6 +59,7 @@ import com.abn3li.telemusic.ui.download.YouTubeDownloadUiState
 import com.abn3li.telemusic.ui.download.YouTubeDownloadViewModel
 import com.abn3li.telemusic.ui.library.ArtistAvatar
 import com.abn3li.telemusic.ui.library.CoverTile
+import com.abn3li.telemusic.ui.library.DestructiveRed
 import com.abn3li.telemusic.ui.library.FilterPill
 import com.abn3li.telemusic.ui.library.GroupLabelColor
 import com.abn3li.telemusic.ui.library.LargeTitleList
@@ -213,6 +214,11 @@ fun SearchScreen(
             return@LargeTitleList
         }
         item("yt_title") { SourceHeader("From YouTube") }
+        state.actionError?.let { message ->
+            item("yt_action_error") {
+                Text(message, color = DestructiveRed, fontSize = 14.sp, modifier = Modifier.padding(horizontal = 18.dp, vertical = 6.dp))
+            }
+        }
         if (youTubeLoading) {
             item("yt_loading") { CenteredSpinner() }
             return@LargeTitleList
@@ -312,7 +318,8 @@ private fun LazyListScope.libraryResults(
     }
     if (songs.isNotEmpty()) {
         if (labelled) item("lib_songs_label") { KindLabel("Songs") }
-        val ids = songs.map { it.telegramMessageId }
+        // The whole match list is the queue, even when All shows only its first few.
+        val ids = library.songs.map { it.telegramMessageId }
         itemsIndexed(songs, key = { _, s -> "lib_song_${s.telegramMessageId}" }, contentType = { _, _ -> "lib_song" }) { index, song ->
             LibrarySongRow(
                 song = song,

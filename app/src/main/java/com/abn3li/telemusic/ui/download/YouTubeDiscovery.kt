@@ -97,7 +97,8 @@ internal fun LazyListScope.youTubeDiscovery(
     state: DiscoveryUiState,
     onOpenCollection: (BrowseCollection) -> Unit,
     onImportPlaylistClick: () -> Unit,
-    onRemoveImportedPlaylist: (ImportedPlaylistEntity) -> Unit
+    onRemoveImportedPlaylist: (ImportedPlaylistEntity) -> Unit,
+    onRetry: () -> Unit
 ) = discovery(
     isLoading = state.isLoading,
     sections = state.sections,
@@ -105,7 +106,8 @@ internal fun LazyListScope.youTubeDiscovery(
     importedPlaylists = state.importedPlaylists,
     onOpenCollection = onOpenCollection,
     onImportPlaylistClick = onImportPlaylistClick,
-    onRemoveImportedPlaylist = onRemoveImportedPlaylist
+    onRemoveImportedPlaylist = onRemoveImportedPlaylist,
+    onRetry = onRetry
 )
 
 private fun LazyListScope.discovery(
@@ -115,7 +117,8 @@ private fun LazyListScope.discovery(
     importedPlaylists: List<ImportedPlaylistEntity>,
     onOpenCollection: (BrowseCollection) -> Unit,
     onImportPlaylistClick: () -> Unit,
-    onRemoveImportedPlaylist: (ImportedPlaylistEntity) -> Unit
+    onRemoveImportedPlaylist: (ImportedPlaylistEntity) -> Unit,
+    onRetry: () -> Unit
 ) {
     item("imported_header") {
         ShelfHeader("Imported Playlists") {
@@ -165,7 +168,9 @@ private fun LazyListScope.discovery(
     when {
         isLoading -> item("discovery_loading") { CenteredSpinner() }
         sections.isEmpty() && genres.isEmpty() -> item("discovery_error") {
-            CenteredMessage("Couldn't load Discovery. Check your connection.")
+            Box(Modifier.fillMaxWidth().clickable(onClick = onRetry)) {
+                CenteredMessage("Couldn't load YouTube Music. Tap to try again.")
+            }
         }
         else -> {
             if (genres.isNotEmpty()) {
