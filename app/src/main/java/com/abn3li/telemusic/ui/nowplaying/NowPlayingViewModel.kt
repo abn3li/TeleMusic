@@ -420,8 +420,7 @@ class NowPlayingViewModel(
      * keeps them and says so. */
     fun changeLyricsSource(provider: LyricsProvider) {
         val song = _uiState.value.song ?: return
-        _lyricsSource.value = _lyricsSource.value.copy(loading = provider, message = null)
-        fetchLyrics(song, showSpinner = false) {
+        fetchLyrics(song, showSpinner = false, askingSource = provider) {
             val search = try {
                 repository.fetchLyricsFrom(song, provider)
             } catch (e: CancellationException) {
@@ -456,8 +455,20 @@ class NowPlayingViewModel(
      * wrote that song (and its lyrics) back into state after a skip, briefly showing the wrong
      * lyrics until the player resynced.
      */
-    private fun fetchLyrics(song: SongEntity, showSpinner: Boolean = true, search: suspend () -> LyricsResult?) {
+    private fun fetchLyrics(
+        song: SongEntity,
+        showSpinner: Boolean = true,
+        askingSource: LyricsProvider? = null,
+        search: suspend () -> LyricsResult?
+    ) {
         lyricsJob?.cancel()
+        // The picker's "asking this source" mark belongs to exactly one search: this one when
+        // it's a source pick, else none - a Retry or custom search cancelling a source pick
+        // must not leave the picker stuck on its spinner.
+        _lyricsSource.value = _lyricsSource.value.copy(
+            loading = askingSource,
+            message = if (askingSource != null) null else _lyricsSource.value.message
+        )
         lyricsJob = viewModelScope.launch {
             if (showSpinner) _uiState.value = _uiState.value.copy(isFetchingLyrics = true)
             val result = try {
