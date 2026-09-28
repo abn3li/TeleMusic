@@ -577,6 +577,9 @@ internal fun <T> DetailPageScaffold(
     menu: (@Composable ColumnScope.(close: () -> Unit) -> Unit)? = null,
     indexKey: ((T) -> String)? = null,
     emptyText: String = "No songs here yet",
+    // False when the page has other content below (an artist's album shelves): no empty-list
+    // message over it. An in-page search with no matches still says "No results".
+    showEmptyText: Boolean = true,
     body: LazyListScope.(shown: List<T>, searching: Boolean) -> Unit
 ) {
     val listState = rememberLazyListState()
@@ -697,7 +700,7 @@ internal fun <T> DetailPageScaffold(
                     }
                 }
             }
-            if (loaded && shown.isEmpty()) {
+            if (loaded && shown.isEmpty() && (searching || showEmptyText)) {
                 item("empty") {
                     Text(
                         if (searching) "No results" else emptyText,

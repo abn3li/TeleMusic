@@ -23,6 +23,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import java.io.File
 
@@ -112,10 +113,15 @@ class YouTubeDownloadViewModel(
      * parallel, so switching tabs afterwards is instant. Songs come from YouTube Music's own
      * Songs tab (one request, square album art); if that finds nothing, the older yt-dlp search
      * is tried instead. */
+    // The search in flight: a new one cancels it, so an older, slower search can't finish last
+    // and put its results under the newer query.
+    private var searchJob: Job? = null
+
     fun search() {
         val query = _uiState.value.query.trim()
         if (query.isEmpty()) return
-        viewModelScope.launch {
+        searchJob?.cancel()
+        searchJob = viewModelScope.launch {
             _uiState.update {
                 it.copy(isSearching = true, errorMessage = null, results = emptyList(), albums = emptyList(), artists = emptyList(), playlists = emptyList())
             }

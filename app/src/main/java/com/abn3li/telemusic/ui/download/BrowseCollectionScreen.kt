@@ -178,8 +178,9 @@ private fun ArtistPageContent(
         detailLine = artist.subtitle.orEmpty(),
         hero = { HeroImage(artist.thumbnailUrl, Icons.Rounded.Person) },
         items = artist.topSongs,
+        loaded = true,
         // Some artists have no song shelf, only albums: no "nothing here" above those.
-        loaded = artist.shelves.isEmpty(),
+        showEmptyText = artist.shelves.isEmpty(),
         onBack = onBack,
         matches = { track, query -> track.title.contains(query, true) || track.artist.contains(query, true) },
         emptyText = "Nothing here",
