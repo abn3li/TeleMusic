@@ -64,15 +64,13 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.BlurredEdgeTreatment
 import androidx.compose.ui.draw.blur
-import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.text.style.ResolvedTextDirection
 import androidx.compose.ui.text.TextLayoutResult
-import androidx.compose.ui.graphics.drawscope.ContentDrawScope
+import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.graphics.drawscope.translate
 import androidx.compose.ui.geometry.Size
 import androidx.compose.runtime.mutableFloatStateOf
-import androidx.compose.ui.geometry.Rect
-import androidx.compose.ui.graphics.Paint
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Shadow
 import androidx.compose.material3.LocalTextStyle
@@ -144,7 +142,7 @@ internal fun LyricsPage(
             !song?.lyricsPlain.isNullOrBlank() -> Column(
                 Modifier
                     .fillMaxSize()
-                    .lyricsLayer(effects.lyricsGlow)
+                    .lyricsLayer()
                     .verticalScroll(rememberScrollState())
                     .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onUserInteraction)
                     .padding(horizontal = 28.dp, vertical = 36.dp)
@@ -308,7 +306,7 @@ private fun SyncedLyrics(
             state = listState,
             modifier = Modifier
                 .fillMaxSize()
-                .lyricsLayer(effects.lyricsGlow)
+                .lyricsLayer()
                 .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onUserInteraction)
         ) {
             item(key = "lyrics_intro") {
@@ -405,8 +403,9 @@ private data class SweepTiming(val points: List<WordMark>) {
     }
 }
 
-private const val SWEEP_STEP_MS = 25L
 private val GLOW_ROOM = 24.dp
+private val LINE_PADDING_H = 28.dp
+private val LINE_PADDING_V = 11.dp
 
 /**
  * Lets what follows (laid out [room] taller than the line, on both ends) reach [room] past the
@@ -457,7 +456,7 @@ private fun sweepTiming(line: LyricLine, next: LyricLine?): SweepTiming {
  * is drawn with the text, so the mask fades it the same way and it follows the sweep. Right-to-
  * left lines (Arabic) sweep from the right.
  */
-private fun ContentDrawScope.maskUnsung(layout: TextLayoutResult, sungChars: Float) {
+private fun DrawScope.maskUnsung(layout: TextLayoutResult, sungChars: Float) {
     val dim = Color.White.copy(alpha = UNSUNG_ALPHA)
     val lastLine = layout.lineCount - 1
     for (line in 0..lastLine) {
@@ -564,10 +563,6 @@ private fun LyricLineText(
                     shownMs = if (estimate < shownMs && shownMs - estimate < 400) shownMs else estimate
                     update(shownMs)
                 }
-                // Each step redraws the whole lyrics list's layers, so the sweep steps about 30
-                // times a second rather than at the screen's 60-120: its soft edge hides the
-                // difference, the phone's GPU (and battery, and warmth) doesn't.
-                if (sungChars < length) delay(SWEEP_STEP_MS)
                 // Done sweeping: stop asking for frames until the position jumps (a seek back
                 // into this line); the next line restarts this effect anyway.
                 if (sungChars >= length) {
@@ -598,33 +593,36 @@ private fun LyricLineText(
         modifier = Modifier
             .fillMaxWidth()
             .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onClick)
-            // The line being sung gets its own layer, so the mask below fades only its letters -
-            // with room above and below for the glow, which a layer cuts off at its edges.
+            // The layers below reach GLOW_ROOM past the line's top and bottom, without taking
+            // that space, so they're big enough for the glow (a layer cuts off what's outside it).
+            .glowRoom(GLOW_ROOM)
+            // The line being sung: a layer where the sweep's mask fades the letters not sung
+            // yet. Only this mask is redrawn as the sweep moves - the letters and glow under it
+            // are the cached image below.
             .then(
-                if (sweep != null) {
-                    Modifier
-                        .glowRoom(GLOW_ROOM)
-                        .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
-                        .padding(vertical = GLOW_ROOM)
-                } else Modifier
-            )
-            .padding(horizontal = 28.dp, vertical = 11.dp)
-            .then(
-                if (sweep != null) Modifier.drawWithContent {
-                    drawContent()
-                    layout?.let { maskUnsung(it, sungChars) }
-                } else Modifier
+                if (sweep != null) Modifier
+                    .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
+                    .drawWithContent {
+                        drawContent()
+                        layout?.let { textLayout ->
+                            translate(LINE_PADDING_H.toPx(), (GLOW_ROOM + LINE_PADDING_V).toPx()) {
+                                maskUnsung(textLayout, sungChars)
+                            }
+                        }
+                    }
+                else Modifier
             )
             .graphicsLayer {
-                // ModulateAlpha fades each draw call directly instead of rendering into an
-                // offscreen buffer the size of the line - that buffer clipped the halo into a
-                // visible rectangle while the line faded in/out.
-                compositingStrategy = CompositingStrategy.ModulateAlpha
+                // Every line is its own cached image: letters, glow and blur are drawn into it
+                // once, and fading, scaling or gliding it only moves that image - cheap enough
+                // for 120 fps. (Redrawn only while the glow fades in/out or the blur changes.)
+                compositingStrategy = CompositingStrategy.Offscreen
                 this.alpha = alpha
                 scaleX = scale
                 scaleY = scale
                 transformOrigin = TransformOrigin(0f, 0.5f)
             }
+            .padding(horizontal = LINE_PADDING_H, vertical = GLOW_ROOM + LINE_PADDING_V)
             .then(if (blurRadius > 0.2.dp) Modifier.blur(blurRadius, BlurredEdgeTreatment.Unbounded) else Modifier)
     )
 }
@@ -668,23 +666,14 @@ private fun CountdownDots(
 }
 
 /**
- * The lyrics sit in their own cached offscreen layer (edges faded). With [glow], that layer is
- * composited onto the artwork with an additive (Plus) blend so the text brightens the colours
- * under it - per frame this is just the cached layer drawn through one blend pass; the lyrics
- * themselves aren't re-rendered while only the background moves.
+ * The lyrics sit in their own offscreen layer, its top and bottom edges faded.
+ *
+ * No additive (Plus) blend over the artwork any more: that wrapped this whole screen-sized layer
+ * in a second one, redrawn on every frame the lyrics changed - the sweep and the line glide make
+ * that most frames - which tripled the GPU time per frame (measured: ~9 ms with it, ~2.3 without).
+ * The glow is the halo on the line being sung (LyricLineText), cached with that line.
  */
-private fun Modifier.lyricsLayer(glow: Boolean): Modifier = this
-    .then(
-        if (glow) Modifier.drawWithCache {
-            val plus = Paint().apply { blendMode = BlendMode.Plus }
-            val bounds = Rect(Offset.Zero, size)
-            onDrawWithContent {
-                drawContext.canvas.saveLayer(bounds, plus)
-                drawContent()
-                drawContext.canvas.restore()
-            }
-        } else Modifier
-    )
+private fun Modifier.lyricsLayer(): Modifier = this
     .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
     .drawWithContent {
         drawContent()
