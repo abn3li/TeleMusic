@@ -209,9 +209,9 @@ class MusicService : MediaLibraryService() {
             for (attempt in 0 until MAX_UNPLAYABLE_SKIPS) {
                 val nextId = queue.next(auto = true) ?: break
                 lastTried = nextId
-                if (playAdjacentSong(nextId)) return@launch
+                if (playAdjacentSong(nextId)) return@startSongChange
                 // Not played because the user moved on meanwhile: leave the queue where they put it.
-                if (queue.currentSongId() != nextId) return@launch
+                if (queue.currentSongId() != nextId) return@startSongChange
             }
             // Nothing could be played: put the queue back on the song that ended, so the app
             // (still showing that song) and the queue agree, and say why the music stopped.
