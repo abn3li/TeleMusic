@@ -66,6 +66,11 @@ import androidx.compose.ui.draw.BlurredEdgeTreatment
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.text.style.ResolvedTextDirection
+import androidx.compose.ui.text.TextLayoutResult
+import androidx.compose.ui.graphics.drawscope.ContentDrawScope
+import androidx.compose.ui.geometry.Size
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Paint
 import androidx.compose.ui.geometry.Offset
@@ -231,6 +236,9 @@ private fun SyncedLyrics(
     onUserInteraction: () -> Unit
 ) {
     val progressState = viewModel.playbackProgress.collectAsState()
+    // The letter-by-letter sweep runs smoothly between the player's position updates only while
+    // the music plays; paused, it holds still.
+    val isPlaying = viewModel.stableUiState.collectAsState().value.isPlaying
     val activeIndex by remember(lines) {
         derivedStateOf {
             val position = progressState.value.currentPositionMs
@@ -332,6 +340,9 @@ private fun SyncedLyrics(
                     } else {
                         LyricLineText(
                             text = line.text,
+                            sweep = if (isActive) sweepTiming(line, lines.getOrNull(index + 1)) else null,
+                            progressState = progressState,
+                            isPlaying = isPlaying,
                             isActive = isActive,
                             distance = distance,
                             justPassed = activeIndex >= 0 && index == activeIndex - 1,
@@ -369,9 +380,76 @@ private fun LyricsSourceButton(onClick: () -> Unit, modifier: Modifier = Modifie
     }
 }
 
+/** When the active line is sung, start to end, for its letter-by-letter sweep. */
+private class SweepTiming(val startMs: Long, val endMs: Long)
+
+// How unsung letters of the line being sung look: dim, like the lines around it.
+private const val UNSUNG_ALPHA = 0.35f
+// Width of the soft edge where sung turns into unsung, in px.
+private const val SWEEP_EDGE_PX = 36f
+
+/**
+ * Most lyrics only say when each LINE starts, not each word, so the sweep spreads the line's
+ * time over its letters: from the line's start to the next line's, but no longer than a normal
+ * singing pace for its length (a line followed by a long instrumental gap mustn't crawl), and a
+ * little before the next line so it always finishes.
+ */
+private fun sweepTiming(line: LyricLine, next: LyricLine?): SweepTiming {
+    val paced = (line.text.length * 80L).coerceAtLeast(1_200L)
+    val gap = (next?.timeMs ?: (line.timeMs + paced)) - line.timeMs - 150L
+    return SweepTiming(line.timeMs, line.timeMs + paced.coerceAtMost(gap).coerceAtLeast(300L))
+}
+
+/**
+ * Dims what isn't sung yet: every letter is drawn white, then each wrapped line is masked -
+ * sung part kept, the rest faded to [UNSUNG_ALPHA] - with a soft edge at [sungChars]. The glow
+ * is drawn with the text, so the mask fades it the same way and it follows the sweep. Right-to-
+ * left lines (Arabic) sweep from the right.
+ */
+private fun ContentDrawScope.maskUnsung(layout: TextLayoutResult, sungChars: Float) {
+    val dim = Color.White.copy(alpha = UNSUNG_ALPHA)
+    val lastLine = layout.lineCount - 1
+    for (line in 0..lastLine) {
+        val start = layout.getLineStart(line)
+        val end = layout.getLineEnd(line)
+        if (sungChars >= end) continue
+        // Reaches past the line's own box (and the whole box above/below the first/last line)
+        // so the glow around unsung letters is faded too.
+        val top = if (line == 0) -size.height else layout.getLineTop(line)
+        val bottom = if (line == lastLine) size.height * 2 else layout.getLineBottom(line)
+        val area = Size(size.width + 2 * size.width, bottom - top)
+        val topLeft = Offset(-size.width, top)
+        if (sungChars <= start) {
+            drawRect(dim, topLeft, area, blendMode = BlendMode.DstIn)
+            continue
+        }
+        val index = sungChars.toInt().coerceIn(start, end - 1)
+        val rtl = layout.getParagraphDirection(index) == ResolvedTextDirection.Rtl
+        val x0 = layout.getHorizontalPosition(index, usePrimaryDirection = true)
+        // The offset at a wrapped line's end belongs to the next line (its x is that line's
+        // start), so the last letter ends at the line's own edge instead.
+        val x1 = if (index + 1 >= end) {
+            if (rtl) layout.getLineLeft(line) else layout.getLineRight(line)
+        } else {
+            layout.getHorizontalPosition(index + 1, usePrimaryDirection = true)
+        }
+        val x = x0 + (x1 - x0) * (sungChars - index)
+        val edge = if (rtl) -SWEEP_EDGE_PX else SWEEP_EDGE_PX
+        val brush = Brush.horizontalGradient(
+            listOf(Color.White, dim),
+            startX = x - edge / 2,
+            endX = x + edge / 2
+        )
+        drawRect(brush, topLeft, area, blendMode = BlendMode.DstIn)
+    }
+}
+
 @Composable
 private fun LyricLineText(
     text: String,
+    sweep: SweepTiming?,
+    progressState: State<PlaybackProgress>,
+    isPlaying: Boolean,
     isActive: Boolean,
     distance: Int,
     justPassed: Boolean,
@@ -402,8 +480,56 @@ private fun LyricLineText(
     // change. The line just sung waits until it has scrolled away before blurring.
     val blurRadius by animateDpAsState(blurTarget, snap(delayMillis = if (justPassed) 260 else 0), label = "lyricBlur")
 
+    // How many letters are sung, updated every frame from the player's position (which only
+    // arrives a few times a second) while it plays. Read only while drawing, so a frame's change
+    // redraws the line without recomposing anything.
+    var sungChars by remember { mutableFloatStateOf(0f) }
+    var layout by remember { mutableStateOf<TextLayoutResult?>(null) }
+    if (sweep != null) {
+        LaunchedEffect(sweep.startMs, sweep.endMs, isPlaying) {
+            val length = text.length.toFloat()
+            fun update(positionMs: Long) {
+                sungChars = ((positionMs - sweep.startMs).toFloat() / (sweep.endMs - sweep.startMs)).coerceIn(0f, 1f) * length
+            }
+            if (!isPlaying) {
+                // Paused: hold still, but follow a seek.
+                snapshotFlow { progressState.value.currentPositionMs }.collect { update(it) }
+                return@LaunchedEffect
+            }
+            var anchorMs = progressState.value.currentPositionMs
+            var anchorNanos = System.nanoTime()
+            var shownMs = anchorMs
+            update(anchorMs)
+            while (true) {
+                withFrameNanos { now ->
+                    val reported = progressState.value.currentPositionMs
+                    if (reported != anchorMs) {
+                        anchorMs = reported
+                        anchorNanos = now
+                    }
+                    val estimate = anchorMs + (now - anchorNanos) / 1_000_000
+                    // A position report slightly behind the guess mustn't pull letters back;
+                    // a real seek back does.
+                    shownMs = if (estimate < shownMs && shownMs - estimate < 400) shownMs else estimate
+                    update(shownMs)
+                }
+                // Done sweeping: stop asking for frames until the position jumps (a seek back
+                // into this line); the next line restarts this effect anyway.
+                if (sungChars >= length) {
+                    val doneAt = progressState.value.currentPositionMs
+                    snapshotFlow { progressState.value.currentPositionMs }.first { it < doneAt }
+                    anchorMs = progressState.value.currentPositionMs
+                    anchorNanos = System.nanoTime()
+                    shownMs = anchorMs
+                    update(anchorMs)
+                }
+            }
+        }
+    }
+
     Text(
         text = text,
+        onTextLayout = { layout = it },
         color = Color.White,
         fontSize = 30.sp,
         fontWeight = FontWeight.Bold,
@@ -417,7 +543,15 @@ private fun LyricLineText(
         modifier = Modifier
             .fillMaxWidth()
             .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onClick)
+            // The line being sung gets its own layer, so the mask below fades only its letters.
+            .then(if (sweep != null) Modifier.graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen } else Modifier)
             .padding(horizontal = 28.dp, vertical = 11.dp)
+            .then(
+                if (sweep != null) Modifier.drawWithContent {
+                    drawContent()
+                    layout?.let { maskUnsung(it, sungChars) }
+                } else Modifier
+            )
             .graphicsLayer {
                 // ModulateAlpha fades each draw call directly instead of rendering into an
                 // offscreen buffer the size of the line - that buffer clipped the halo into a
