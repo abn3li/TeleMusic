@@ -138,6 +138,8 @@ class PlaybackController(context: Context) {
      * "the old song won't stop" rather than "the new one is still loading". */
     fun stop() { controller?.stop() }
 
+    fun pause() { controller?.pause() }
+
     fun togglePlayPause() { controller?.let { if (it.isPlaying) it.pause() else it.play() } }
 
     /** True once the controller is connected and a song is loaded in the player. */

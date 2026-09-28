@@ -609,22 +609,25 @@ class NowPlayingViewModel(
         loadJob?.cancel()
         cancelLyricsFetch()
         pendingEphemeralVideoId = null
-        // Unconditionally stop whatever was playing right now, before any slow async work
-        // (YouTube stream resolution or Telegram prebuffer wait) begins - this immediately
-        // moves ExoPlayer out of STATE_ENDED into STATE_IDLE so duplicate auto-advance events
-        // cannot trigger during the network resolution wait.
-        playbackController.stop()
+        // Silence whatever was playing right away, before any slow work (YouTube stream
+        // resolution, Telegram prebuffer wait). Pause, not stop: a stopped (idle) player makes
+        // Media3 take the system notification down until the next song starts.
+        playbackController.pause()
 
         // The song being navigated AWAY from - if it was still mid-stream (no localFilePath yet,
         // so markStreamedFileCached's poll never caught it finishing), tell TDLib to actually
         // stop downloading it. Our own poll coroutine dying (it's a child of the loadJob just
         // cancelled above) doesn't do this on its own - see MusicRepository
-        // .cancelStreamingDownload's own doc for why that mattered for storage.
-        val outgoingSong = _uiState.value.song
-        if (outgoingSong != null && !outgoingSong.isLocalImport && outgoingSong.youtubeVideoId == null &&
-            !outgoingSong.isExplicitDownload && outgoingSong.localFilePath == null
-        ) {
-            viewModelScope.launch(Dispatchers.IO) { repository.cancelStreamingDownload(outgoingSong.telegramFileId) }
+        // .cancelStreamingDownload's own doc for why that mattered for storage. Done when this
+        // load ends (the new song is in the player by then): cancelling while the old song is
+        // still loaded, only paused, could fail its source and stop the player.
+        val outgoingSong = _uiState.value.song?.takeIf {
+            !it.isLocalImport && it.youtubeVideoId == null && !it.isExplicitDownload && it.localFilePath == null
+        }
+        fun cancelOutgoingDownload() {
+            if (outgoingSong != null) {
+                viewModelScope.launch(Dispatchers.IO) { repository.cancelStreamingDownload(outgoingSong.telegramFileId) }
+            }
         }
 
         loadJob = viewModelScope.launch {
@@ -695,6 +698,11 @@ class NowPlayingViewModel(
             if (!song.isLocalImport && song.youtubeVideoId == null && song.localFilePath == null) {
                 launch(Dispatchers.IO) { repository.markStreamedFileCached(song) }
             }
+        }
+        // Finished or cut short by the next skip: either way the old song is done with - unless
+        // it's the very song now showing (a replay), whose download must keep going.
+        loadJob?.invokeOnCompletion {
+            if (outgoingSong?.telegramMessageId != _uiState.value.song?.telegramMessageId) cancelOutgoingDownload()
         }
     }
 

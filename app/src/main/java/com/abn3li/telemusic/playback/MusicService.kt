@@ -158,6 +158,29 @@ class MusicService : MediaLibraryService() {
     // cancels the previous one's resolve, so two quick taps can't finish out of order and leave
     // the player on a different song than the queue.
     private var skipJob: Job? = null
+
+    // True while a song change started here is getting the next song ready (see
+    // onUpdateNotification). The player sits paused or ended meanwhile, which would otherwise
+    // drop the service out of the foreground - and from the background (screen off) Android
+    // doesn't let it back in, so the next song played with no notification, or didn't start.
+    @Volatile
+    private var changingSong = false
+
+    /** Runs a song change as the one current [skipJob], keeping the service in the foreground
+     * until it's done. */
+    private fun startSongChange(block: suspend () -> Unit) {
+        skipJob?.cancel()
+        changingSong = true
+        val job = serviceScope.launch { block() }
+        skipJob = job
+        job.invokeOnCompletion { if (skipJob === job) changingSong = false }
+    }
+
+    @OptIn(UnstableApi::class)
+    override fun onUpdateNotification(session: MediaSession, startInForegroundRequired: Boolean) {
+        super.onUpdateNotification(session, startInForegroundRequired || changingSong)
+    }
+
     // Background "did this stream finish?" poll for the song a skip started - same auto-cache
     // bookkeeping NowPlayingViewModel does for in-app plays, replaced on every skip.
     private var cacheJob: Job? = null
@@ -168,8 +191,7 @@ class MusicService : MediaLibraryService() {
 
     private fun skipTo(songId: Long?) {
         if (songId == null) return
-        skipJob?.cancel()
-        skipJob = serviceScope.launch { playAdjacentSong(songId) }
+        startSongChange { playAdjacentSong(songId) }
     }
 
     /** A song finished on its own: play the queue's next one (Repeat One replays it; Repeat off
@@ -181,8 +203,7 @@ class MusicService : MediaLibraryService() {
         // played from search (the queue is empty then) or an item already replaced.
         val endedId = player.currentMediaItem?.mediaId?.toLongOrNull() ?: return
         if (endedId != queue.currentSongId()) return
-        skipJob?.cancel()
-        skipJob = serviceScope.launch {
+        startSongChange {
             val before = queue.snapshot()
             var lastTried: Long? = null
             for (attempt in 0 until MAX_UNPLAYABLE_SKIPS) {
@@ -206,19 +227,13 @@ class MusicService : MediaLibraryService() {
         val app = application as TgMusicApp
         val repository = app.musicRepository
 
-        // Stop the old song and its background download right away, like the in-app path:
-        // otherwise every skipped-past stream kept downloading to completion, untracked.
+        // Pause, not stop: a stopped (idle) player makes Media3 take the notification down until
+        // the next song starts, which flickered it on every change - and with the screen off it
+        // never came back (see changingSong). The old song stays loaded until the new one
+        // replaces it below.
         val outgoingId = player.currentMediaItem?.mediaId?.toLongOrNull()
-        player.stop()
+        player.pause()
         cacheJob?.cancel()
-        if (outgoingId != null && outgoingId != songId) {
-            val outgoing = withContext(Dispatchers.IO) { repository.getSongById(outgoingId) }
-            if (outgoing != null && !outgoing.isLocalImport && outgoing.youtubeVideoId == null &&
-                !outgoing.isExplicitDownload && outgoing.localFilePath == null && outgoing.telegramFileId != 0
-            ) {
-                serviceScope.launch(Dispatchers.IO) { repository.cancelStreamingDownload(outgoing.telegramFileId) }
-            }
-        }
 
         val song = withContext(Dispatchers.IO) { repository.getSongById(songId) } ?: return false
         val uri = withContext(Dispatchers.IO) { repository.resolvePlaybackUri(song) } ?: return false
@@ -238,6 +253,18 @@ class MusicService : MediaLibraryService() {
         player.setMediaItem(item, true)
         player.prepare()
         player.play()
+
+        // The old song's background download stops only now that it's out of the player:
+        // cancelling it while still loaded could fail its source and stop the player anyway.
+        // (Otherwise every skipped-past stream kept downloading to completion, untracked.)
+        if (outgoingId != null && outgoingId != songId) {
+            val outgoing = withContext(Dispatchers.IO) { repository.getSongById(outgoingId) }
+            if (outgoing != null && !outgoing.isLocalImport && outgoing.youtubeVideoId == null &&
+                !outgoing.isExplicitDownload && outgoing.localFilePath == null && outgoing.telegramFileId != 0
+            ) {
+                serviceScope.launch(Dispatchers.IO) { repository.cancelStreamingDownload(outgoing.telegramFileId) }
+            }
+        }
 
         withContext(Dispatchers.IO) { repository.stampLastPlayed(song) }
         if (!song.isLocalImport && song.youtubeVideoId == null && song.localFilePath == null) {
