@@ -43,16 +43,43 @@ class InnertubeBrowseClient {
      * Innertube's own convention for paging any shelf, not something specific to this client). */
     /** YouTube Music search restricted to the "Songs" shelf (real audio tracks, not videos) -
      * one request; each result's title / artist / duration / thumbnail is right in the response. */
-    fun searchSongs(query: String): JSONObject =
+    fun searchSongs(query: String): JSONObject = search(query, SearchFilter.SONGS)
+
+    /** YouTube Music search restricted to one tab ([filter]): songs, albums, artists or
+     * playlists - the same filters the site's own search chips use. */
+    fun search(query: String, filter: SearchFilter): JSONObject =
         post("search", JSONObject().apply {
             put("query", query)
-            put("params", SONGS_FILTER)
+            put("params", filter.params)
         })
 
     fun browseContinuation(continuation: String): JSONObject =
         post("browse", JSONObject().apply { put("continuation", continuation) })
 
+    // An anonymous visitor id, like the one the website gets on its first visit. Sent with
+    // every request, it makes these look like one returning visitor instead of a stranger each
+    // time - fewer "are you a bot" refusals. Minted once per run; kept from any response too.
+    @Volatile private var visitorData: String? = null
+
+    private fun visitorId(): String? {
+        visitorData?.let { return it }
+        val minted = runCatching {
+            val request = Request.Builder()
+                .url("https://www.youtube.com/sw.js_data")
+                .header("User-Agent", WEB_USER_AGENT)
+                .build()
+            client.newCall(request).execute().use { response ->
+                // A short anti-hijacking prefix, then nested arrays; the id is the one string
+                // shaped like a visitor id.
+                VISITOR_DATA.find(response.body?.string().orEmpty())?.groupValues?.get(1)
+            }
+        }.onFailure { android.util.Log.w("InnertubeBrowse", "Couldn't get a visitor id: ${it.message}") }.getOrNull()
+        if (minted != null) visitorData = minted
+        return minted
+    }
+
     private fun post(endpoint: String, extra: JSONObject): JSONObject {
+        val visitor = visitorId()
         val body = JSONObject().apply {
             put("context", JSONObject().apply {
                 put("client", JSONObject().apply {
@@ -60,23 +87,31 @@ class InnertubeBrowseClient {
                     put("clientVersion", CLIENT_VERSION)
                     put("hl", "en")
                     put("gl", "US")
+                    if (visitor != null) put("visitorData", visitor)
                 })
             })
             extra.keys().forEach { key -> put(key, extra.get(key)) }
         }
 
         val request = Request.Builder()
-            .url("https://music.youtube.com/youtubei/v1/$endpoint?key=$FALLBACK_API_KEY")
+            .url("https://music.youtube.com/youtubei/v1/$endpoint?key=$FALLBACK_API_KEY&prettyPrint=false")
             .addHeader("Content-Type", "application/json")
             .addHeader("X-YouTube-Client-Name", "67")
             .addHeader("X-YouTube-Client-Version", CLIENT_VERSION)
+            .addHeader("User-Agent", WEB_USER_AGENT)
+            .addHeader("Origin", "https://music.youtube.com")
+            .apply { if (visitor != null) addHeader("X-Goog-Visitor-Id", visitor) }
             .post(body.toString().toRequestBody("application/json".toMediaType()))
             .build()
 
         client.newCall(request).execute().use { response ->
             val responseBody = response.body?.string().orEmpty()
             check(response.isSuccessful) { "Innertube $endpoint failed: HTTP ${response.code}" }
-            return JSONObject(responseBody)
+            return JSONObject(responseBody).also { json ->
+                if (visitorData == null) {
+                    json.optJSONObject("responseContext")?.optString("visitorData")?.takeIf { it.isNotBlank() }?.let { visitorData = it }
+                }
+            }
         }
     }
 
@@ -90,9 +125,10 @@ class InnertubeBrowseClient {
         // own browseId+params (FEmusic_moods_and_genres_category) opens a real page of playlists
         // for that genre, same as any other browse card (see BrowseParser.parseGenreChips).
         const val GENRES_BROWSE_ID = "FEmusic_moods_and_genres"
-        private const val CLIENT_VERSION = "1.20240101.01.00"
-        // YouTube Music's own "Songs" search filter.
-        private const val SONGS_FILTER = "EgWKAQIIAWoKEAkQBRAKEAMQBA%3D%3D"
+        private const val CLIENT_VERSION = "1.20250101.01.00"
+        private const val WEB_USER_AGENT =
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"
+        private val VISITOR_DATA = Regex(""""(Cg[A-Za-z0-9_%-]{40,})"""")
         private const val FALLBACK_API_KEY = "AIzaSyC9XL3ZjWddXya6X74dJoCTL-WEYFDNX30"
     }
 }

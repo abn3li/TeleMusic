@@ -25,6 +25,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
@@ -444,7 +445,7 @@ private fun songCountLine(songs: List<SongEntity>): String {
 }
 
 @Composable
-private fun BoxScope.HeroImage(url: String?, placeholder: ImageVector) {
+internal fun BoxScope.HeroImage(url: String?, placeholder: ImageVector) {
     Box(Modifier.matchParentSize().background(Color(0xFF2A2A2E)), contentAlignment = Alignment.Center) {
         Icon(placeholder, null, tint = Color.White.copy(alpha = 0.25f), modifier = Modifier.size(120.dp))
     }
@@ -454,7 +455,7 @@ private fun BoxScope.HeroImage(url: String?, placeholder: ImageVector) {
 }
 
 @Composable
-private fun SectionHeader(title: String, onMore: (() -> Unit)?) {
+internal fun SectionHeader(title: String, onMore: (() -> Unit)?) {
     Row(
         Modifier.fillMaxWidth().padding(horizontal = 18.dp).padding(top = 20.dp, bottom = 10.dp),
         verticalAlignment = Alignment.CenterVertically
@@ -496,6 +497,87 @@ private fun CollectionDetailPage(
     // Set to show the A–Z strip (only for a title-sorted list): which text of a song it indexes.
     indexKey: ((SongEntity) -> String)? = null,
     body: LazyListScope.(shown: List<SongEntity>, searching: Boolean) -> Unit
+) = DetailPageScaffold(
+    title = title,
+    subtitle = subtitle,
+    onSubtitleClick = onSubtitleClick,
+    detailLine = detailLine,
+    hero = hero,
+    items = songs,
+    loaded = loaded,
+    onBack = callbacks.onBack,
+    matches = { song, query -> song.title.contains(query, true) || song.artist.contains(query, true) || song.album.orEmpty().contains(query, true) },
+    favorite = favorite,
+    onFavorite = onFavorite,
+    menu = menu,
+    indexKey = indexKey,
+    heroActions = { shown, openSearch ->
+        val ids = remember(shown) { shown.map { it.telegramMessageId } }
+        // This page's own list is the one playing (in any order - the page may be sorted
+        // differently from when it was started): Shuffle and Play then show and change the
+        // current playback instead of starting the list over.
+        val playback = LocalCollectionPlayback.current
+        val isThisPlaying = remember(playback.sourceIds, ids) {
+            ids.isNotEmpty() && playback.sourceIds.size == ids.size && playback.sourceIds.toSet() == ids.toSet()
+        }
+        val shuffleOn = isThisPlaying && playback.isShuffled
+        val playingNow = isThisPlaying && playback.isPlaying
+        HeroButtonRow {
+            HeroButton(Icons.Rounded.Shuffle, if (shuffleOn) "Shuffle on" else "Shuffle", enabled = songs.isNotEmpty(), active = shuffleOn) {
+                if (isThisPlaying) callbacks.onToggleShuffle() else callbacks.onPlayCollection(ids, true)
+            }
+            HeroButton(
+                if (playingNow) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
+                if (playingNow) "Pause" else "Play",
+                enabled = songs.isNotEmpty()
+            ) {
+                if (isThisPlaying) callbacks.onTogglePlayPause() else callbacks.onPlayCollection(ids, false)
+            }
+            HeroButton(Icons.Rounded.Search, "Search", enabled = songs.isNotEmpty(), onClick = openSearch)
+        }
+        // Always takes its room, so the title doesn't jump when it appears.
+        Box(Modifier.fillMaxWidth().height(30.dp), contentAlignment = Alignment.BottomCenter) {
+            if (isThisPlaying) PlaybackStatusLine(playing = playingNow, shuffled = shuffleOn)
+        }
+    },
+    body = body
+)
+
+/** The Shuffle / Play / Search row under a detail page's title. */
+@Composable
+internal fun HeroButtonRow(content: @Composable RowScope.() -> Unit) {
+    Row(
+        Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(14.dp, Alignment.CenterHorizontally),
+        verticalAlignment = Alignment.CenterVertically,
+        content = content
+    )
+}
+
+/**
+ * The layout every album / artist / playlist page shares, library or YouTube alike: the hero
+ * (artwork fading into black, title, [subtitle], [detailLine], then [heroActions] - its buttons),
+ * the rows from [body], the top bar that turns solid as the hero scrolls away, and in-page
+ * search ([matches] decides which [items] a query keeps; [heroActions] gets openSearch).
+ */
+@Composable
+internal fun <T> DetailPageScaffold(
+    title: String,
+    subtitle: String?,
+    onSubtitleClick: (() -> Unit)?,
+    detailLine: String,
+    hero: @Composable BoxScope.() -> Unit,
+    items: List<T>,
+    loaded: Boolean,
+    onBack: () -> Unit,
+    matches: (T, String) -> Boolean,
+    heroActions: @Composable ColumnScope.(shown: List<T>, openSearch: () -> Unit) -> Unit,
+    favorite: Boolean? = null,
+    onFavorite: () -> Unit = {},
+    menu: (@Composable ColumnScope.(close: () -> Unit) -> Unit)? = null,
+    indexKey: ((T) -> String)? = null,
+    emptyText: String = "No songs here yet",
+    body: LazyListScope.(shown: List<T>, searching: Boolean) -> Unit
 ) {
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
@@ -508,11 +590,9 @@ private fun CollectionDetailPage(
         if (searchText.isNotBlank()) delay(150)
         value = searchText
     }
-    val shown = remember(songs, query) {
-        if (query.isBlank()) songs
-        else songs.filter { it.title.contains(query, true) || it.artist.contains(query, true) || it.album.orEmpty().contains(query, true) }
+    val shown = remember(items, query) {
+        if (query.isBlank()) items else items.filter { matches(it, query) }
     }
-    val ids = remember(shown) { shown.map { it.telegramMessageId } }
     val collapse by remember(searching) {
         derivedStateOf {
             when {
@@ -603,39 +683,9 @@ private fun CollectionDetailPage(
                                 maxLines = 2
                             )
                             Spacer(Modifier.height(28.dp))
-                            // This page's own list is the one playing (in any order - the page
-                            // may be sorted differently from when it was started): Shuffle and
-                            // Play then show and change the current playback instead of
-                            // starting the list over.
-                            val playback = LocalCollectionPlayback.current
-                            val isThisPlaying = remember(playback.sourceIds, ids) {
-                                ids.isNotEmpty() && playback.sourceIds.size == ids.size && playback.sourceIds.toSet() == ids.toSet()
-                            }
-                            val shuffleOn = isThisPlaying && playback.isShuffled
-                            val playingNow = isThisPlaying && playback.isPlaying
-                            Row(
-                                Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(14.dp, Alignment.CenterHorizontally),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                HeroButton(Icons.Rounded.Shuffle, if (shuffleOn) "Shuffle on" else "Shuffle", enabled = songs.isNotEmpty(), active = shuffleOn) {
-                                    if (isThisPlaying) callbacks.onToggleShuffle() else callbacks.onPlayCollection(ids, true)
-                                }
-                                HeroButton(
-                                    if (playingNow) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
-                                    if (playingNow) "Pause" else "Play",
-                                    enabled = songs.isNotEmpty()
-                                ) {
-                                    if (isThisPlaying) callbacks.onTogglePlayPause() else callbacks.onPlayCollection(ids, false)
-                                }
-                                HeroButton(Icons.Rounded.Search, "Search", enabled = songs.isNotEmpty()) {
-                                    searching = true
-                                    scope.launch { listState.scrollToItem(0) }
-                                }
-                            }
-                            // Always takes its room, so the title doesn't jump when it appears.
-                            Box(Modifier.fillMaxWidth().height(30.dp), contentAlignment = Alignment.BottomCenter) {
-                                if (isThisPlaying) PlaybackStatusLine(playing = playingNow, shuffled = shuffleOn)
+                            heroActions(shown) {
+                                searching = true
+                                scope.launch { listState.scrollToItem(0) }
                             }
                         }
                     }
@@ -650,7 +700,7 @@ private fun CollectionDetailPage(
             if (loaded && shown.isEmpty()) {
                 item("empty") {
                     Text(
-                        if (searching) "No results" else "No songs here yet",
+                        if (searching) "No results" else emptyText,
                         color = Color.White.copy(alpha = 0.55f),
                         fontSize = 15.sp,
                         modifier = Modifier.padding(horizontal = 20.dp, vertical = 18.dp)
@@ -688,7 +738,7 @@ private fun CollectionDetailPage(
         DetailTopBar(
             title = title,
             collapse = { collapse },
-            onBack = if (searching) { { closeSearch(); Unit } } else callbacks.onBack,
+            onBack = if (searching) { { closeSearch(); Unit } } else onBack,
             favorite = favorite,
             onFavorite = onFavorite,
             menu = menu,
@@ -698,7 +748,7 @@ private fun CollectionDetailPage(
 }
 
 @Composable
-private fun HeroButton(icon: ImageVector, description: String, enabled: Boolean, active: Boolean = false, onClick: () -> Unit) {
+internal fun HeroButton(icon: ImageVector, description: String, enabled: Boolean, active: Boolean = false, onClick: () -> Unit) {
     val haptics = LocalHapticFeedback.current
     // [active] (Shuffle while it's on): filled with the accent, so the state reads at a glance.
     val fill by animateColorAsState(

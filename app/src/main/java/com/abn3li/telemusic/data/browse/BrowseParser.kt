@@ -145,7 +145,7 @@ object BrowseParser {
         trackRenderers.forEach { renderer ->
             parseTrackRow(renderer)?.let { tracks[it.videoId] = it }
         }
-        if (tracks.isNotEmpty()) return BrowseContent(tracks = tracks.values.toList())
+        if (tracks.isNotEmpty()) return BrowseContent(tracks = tracks.values.toList(), header = parseCollectionHeader(response))
 
         if (trackRenderers.isNotEmpty()) {
             // Real renderers were found (an actual JSONObject walk, not a text search) but none
@@ -162,7 +162,165 @@ object BrowseParser {
         collectRenderers(response, "musicTwoRowItemRenderer").forEach { renderer ->
             parseTwoRowCollection(renderer)?.let { collections.putIfAbsent(it.browseId, it) }
         }
-        return BrowseContent(collections = collections.values.toList())
+        return BrowseContent(collections = collections.values.toList(), header = parseCollectionHeader(response))
+    }
+
+    /**
+     * Albums, artists or playlists from a filtered search (see SearchFilter): each result row
+     * that opens a page rather than playing. Podcasts, episodes and profiles are left out -
+     * only what this app can open and play.
+     */
+    fun parseSearchCollections(response: JSONObject): List<BrowseCollection> {
+        val out = LinkedHashMap<String, BrowseCollection>()
+        collectRenderers(response, "musicResponsiveListItemRenderer").forEach { renderer ->
+            val endpoint = renderer.opt("navigationEndpoint").obj()?.opt("browseEndpoint").obj() ?: return@forEach
+            val browseId = endpoint.optString("browseId").takeIf { it.isNotBlank() } ?: return@forEach
+            val kind = kindOf(endpoint) ?: return@forEach
+            val flexColumns = renderer.opt("flexColumns").arr()
+            val title = flexColumns?.optJSONObject(0)?.opt("musicResponsiveListItemFlexColumnRenderer").obj()
+                ?.opt("text").obj()?.runs().orEmpty()
+            if (title.isBlank()) return@forEach
+            val subtitle = flexColumns?.optJSONObject(1)?.opt("musicResponsiveListItemFlexColumnRenderer").obj()
+                ?.opt("text").obj()?.runs()?.trim()?.takeIf { it.isNotBlank() }
+            val thumbnails = renderer.opt("thumbnail").obj()?.opt("musicThumbnailRenderer").obj()
+                ?.opt("thumbnail").obj()?.opt("thumbnails").arr()
+            out.putIfAbsent(
+                browseId,
+                BrowseCollection(
+                    browseId = browseId,
+                    params = endpoint.optString("params").takeIf { it.isNotBlank() },
+                    title = title,
+                    subtitle = subtitle,
+                    thumbnailUrl = thumbnails.best(),
+                    kind = kind
+                )
+            )
+        }
+        return out.values.toList()
+    }
+
+    /** Songs from a filtered "Songs" search: the same rows an album's track list has. */
+    fun parseSearchSongs(response: JSONObject): List<BrowseTrack> {
+        val tracks = LinkedHashMap<String, BrowseTrack>()
+        collectRenderers(response, "musicResponsiveListItemRenderer").forEach { renderer ->
+            parseTrackRow(renderer)?.let { tracks.putIfAbsent(it.videoId, it) }
+        }
+        return tracks.values.toList()
+    }
+
+    private fun kindOf(endpoint: JSONObject): BrowseKind? {
+        val pageType = endpoint.opt("browseEndpointContextSupportedConfigs").obj()
+            ?.opt("browseEndpointContextMusicConfig").obj()?.optString("pageType").orEmpty()
+        return when {
+            "USER_CHANNEL" in pageType || "PODCAST" in pageType || "EPISODE" in pageType -> null
+            "ARTIST" in pageType -> BrowseKind.ARTIST
+            "ALBUM" in pageType -> BrowseKind.ALBUM
+            "PLAYLIST" in pageType -> BrowseKind.PLAYLIST
+            else -> null
+        }
+    }
+
+    /**
+     * An album's or playlist's own title block. Newer pages use musicResponsiveHeaderRenderer
+     * (title, "Album • 2024", the artist in straplineTextOne, "10 songs • 38 minutes"); older
+     * ones musicDetailHeaderRenderer, with the artist inside the subtitle ("Album • Artist •
+     * 2024"). Null when the page has neither.
+     */
+    fun parseCollectionHeader(response: JSONObject): CollectionHeader? {
+        val header = collectRenderers(response, "musicResponsiveHeaderRenderer").firstOrNull()
+            ?: collectRenderers(response, "musicDetailHeaderRenderer").firstOrNull()
+            ?: return null
+        val title = header.opt("title").obj()?.runs().orEmpty()
+        if (title.isBlank()) return null
+        val subtitleRuns = header.opt("subtitle").obj()?.runsArr()
+        val strapline = header.opt("straplineTextOne").obj()
+        // The artist: the strapline (newer pages), else the subtitle part that links to one.
+        var artist = strapline?.runs()?.takeIf { it.isNotBlank() }
+        var artistBrowseId = strapline?.runsArr()?.let { firstArtistBrowseId(it) }
+        if (artist == null && subtitleRuns != null) {
+            for (i in 0 until subtitleRuns.length()) {
+                val run = subtitleRuns.optJSONObject(i) ?: continue
+                val endpoint = run.opt("navigationEndpoint").obj()?.opt("browseEndpoint").obj() ?: continue
+                if (kindOf(endpoint) == BrowseKind.ARTIST) {
+                    artist = run.optString("text").takeIf { it.isNotBlank() }
+                    artistBrowseId = endpoint.optString("browseId").takeIf { it.isNotBlank() }
+                    break
+                }
+            }
+        }
+        // "Album • Kaya Moon • 2024" -> "Album • 2024": the artist has a line of its own.
+        val subtitle = header.opt("subtitle").obj()?.runs()?.split(" • ")
+            ?.map { it.trim() }?.filter { it.isNotBlank() && it != artist }?.joinToString(" • ")
+            ?.takeIf { it.isNotBlank() }
+        val thumbnails = header.opt("thumbnail").obj()?.let { collectArrays(it, "thumbnails").firstOrNull() }
+        return CollectionHeader(
+            title = title,
+            subtitle = subtitle,
+            artist = artist,
+            artistBrowseId = artistBrowseId,
+            detail = header.opt("secondSubtitle").obj()?.runs()?.takeIf { it.isNotBlank() },
+            thumbnailUrl = googleArtworkAtSize(thumbnails.largestUrl(), FULL_ARTWORK_SIZE)
+        )
+    }
+
+    private fun firstArtistBrowseId(runs: JSONArray): String? {
+        for (i in 0 until runs.length()) {
+            val endpoint = runs.optJSONObject(i)?.opt("navigationEndpoint").obj()?.opt("browseEndpoint").obj() ?: continue
+            if (kindOf(endpoint) == BrowseKind.ARTIST) return endpoint.optString("browseId").takeIf { it.isNotBlank() }
+        }
+        return null
+    }
+
+    /**
+     * An artist's page, or null when [response] isn't one. Top songs come from its song shelf
+     * (whose title links to the full list); every carousel after it (Albums, Singles & EPs,
+     * Playlists, Fans might also like) becomes a shelf of cards - video carousels drop out on
+     * their own, since video-shaped cards are skipped (see parseTwoRowCollection).
+     */
+    fun parseArtistPage(response: JSONObject): ArtistPage? {
+        val header = collectRenderers(response, "musicImmersiveHeaderRenderer").firstOrNull()
+            ?: collectRenderers(response, "musicVisualHeaderRenderer").firstOrNull()
+            ?: return null
+        val name = header.opt("title").obj()?.runs().orEmpty()
+        if (name.isBlank()) return null
+        val subtitle = header.opt("monthlyListenerCount").obj()?.runs()?.takeIf { it.isNotBlank() }
+            ?: header.opt("subscriptionButton").obj()?.opt("subscribeButtonRenderer").obj()
+                ?.opt("subscriberCountText").obj()?.runs()?.takeIf { it.isNotBlank() }?.let { "$it subscribers" }
+        val picture = header.opt("thumbnail").obj()?.let { collectArrays(it, "thumbnails").firstOrNull() }.largestUrl()
+
+        var topSongs = emptyList<BrowseTrack>()
+        var allSongsBrowseId: String? = null
+        var allSongsParams: String? = null
+        collectRenderers(response, "musicShelfRenderer").firstOrNull()?.let { shelf ->
+            val songs = LinkedHashMap<String, BrowseTrack>()
+            shelf.opt("contents").arr()?.let { rows ->
+                for (i in 0 until rows.length()) {
+                    rows.optJSONObject(i)?.opt("musicResponsiveListItemRenderer").obj()
+                        ?.let { parseTrackRow(it) }?.let { songs.putIfAbsent(it.videoId, it) }
+                }
+            }
+            topSongs = songs.values.toList()
+            val more = shelf.opt("title").obj()?.runsArr()?.optJSONObject(0)?.opt("navigationEndpoint").obj()
+                ?.opt("browseEndpoint").obj()
+                ?: shelf.opt("bottomEndpoint").obj()?.opt("browseEndpoint").obj()
+            allSongsBrowseId = more?.optString("browseId")?.takeIf { it.isNotBlank() }
+            allSongsParams = more?.optString("params")?.takeIf { it.isNotBlank() }
+        }
+
+        val shelves = mutableListOf<HomeSection>()
+        collectRenderers(response, "musicCarouselShelfRenderer").forEach { carousel ->
+            val title = carousel.opt("header").obj()?.opt("musicCarouselShelfBasicHeaderRenderer").obj()
+                ?.opt("title").obj()?.runs().orEmpty()
+            val items = mutableListOf<BrowseCollection>()
+            carousel.opt("contents").arr()?.let { cards ->
+                for (i in 0 until cards.length()) {
+                    cards.optJSONObject(i)?.opt("musicTwoRowItemRenderer").obj()
+                        ?.let { parseTwoRowCollection(it) }?.let { items.add(it) }
+                }
+            }
+            if (title.isNotBlank() && items.isNotEmpty()) shelves.add(HomeSection(title, items))
+        }
+        return ArtistPage(name, subtitle, picture, topSongs, allSongsBrowseId, allSongsParams, shelves)
     }
 
     /** One playable row - null for a video-shaped one (see this file's own top-level doc: this
@@ -297,6 +455,29 @@ object BrowseParser {
     }
 
     private fun JSONObject.runsArr(): JSONArray? = opt("runs").arr()
+
+    /** Every array named [name] under [root], in document order. */
+    private fun collectArrays(root: Any?, name: String): List<JSONArray> {
+        val out = mutableListOf<JSONArray>()
+        fun walk(node: Any?) {
+            when (node) {
+                is JSONObject -> {
+                    (node.opt(name) as? JSONArray)?.let(out::add)
+                    node.keys().forEach { key -> walk(node.opt(key)) }
+                }
+                is JSONArray -> for (i in 0 until node.length()) walk(node.opt(i))
+            }
+        }
+        walk(root)
+        return out
+    }
+
+    /** The largest thumbnail's own link, as served - for a hero picture, which may be wide
+     * (an artist's banner) and must keep its shape, unlike [best]'s square cover size. */
+    private fun JSONArray?.largestUrl(): String? {
+        if (this == null || length() == 0) return null
+        return optJSONObject(length() - 1)?.optString("url")?.takeIf { it.isNotBlank() }
+    }
 
     /** Real, non-empty thumbnails only - the same list of increasingly larger sizes Innertube
      * always returns, so the last one is the highest resolution available. */

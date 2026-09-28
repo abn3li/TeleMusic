@@ -3,6 +3,8 @@ package com.abn3li.telemusic.repository
 import com.abn3li.telemusic.data.browse.BrowseCollection
 import com.abn3li.telemusic.data.browse.BrowseContent
 import com.abn3li.telemusic.data.browse.BrowseParser
+import com.abn3li.telemusic.data.browse.BrowseTrack
+import com.abn3li.telemusic.data.browse.SearchFilter
 import com.abn3li.telemusic.data.browse.HomeSection
 import com.abn3li.telemusic.data.browse.InnertubeBrowseClient
 import com.abn3li.telemusic.data.local.ImportedPlaylistDao
@@ -70,9 +72,27 @@ class DiscoveryRepository(
         }
     }
 
+    /** Songs for a search, from YouTube Music's own Songs tab - one request. */
+    suspend fun searchSongs(query: String): List<BrowseTrack> = withContext(Dispatchers.IO) {
+        runCatching { BrowseParser.parseSearchSongs(client.search(query, SearchFilter.SONGS)) }
+            .onFailure { e -> android.util.Log.e("DiscoveryRepo", "searchSongs(\"$query\") failed", e) }
+            .getOrElse { emptyList() }
+    }
+
+    /** Albums, artists or playlists for a search ([filter]). Logged with its count, so an
+     * empty tab on some phone (YouTube shapes results by region) can be traced. */
+    suspend fun searchCollections(query: String, filter: SearchFilter): List<BrowseCollection> = withContext(Dispatchers.IO) {
+        runCatching { BrowseParser.parseSearchCollections(client.search(query, filter)) }
+            .onFailure { e -> android.util.Log.e("DiscoveryRepo", "search(\"$query\", $filter) failed", e) }
+            .getOrElse { emptyList() }
+            .also { android.util.Log.d("DiscoveryRepo", "search(\"$query\", $filter): ${it.size} results") }
+    }
+
     suspend fun browse(browseId: String, params: String?): BrowseContent = withContext(Dispatchers.IO) {
         runCatching {
             val raw = client.browse(browseId, params)
+            // An artist's page is its own shape: top songs plus shelves, no track list to page.
+            BrowseParser.parseArtistPage(raw)?.let { artist -> return@runCatching BrowseContent(artist = artist) }
             var content = BrowseParser.parseBrowseContent(raw)
             if (content.tracks.isEmpty() && content.collections.isEmpty()) {
                 // A real HTTP 200 with a page shape the parser doesn't recognize looks identical
@@ -114,7 +134,7 @@ class DiscoveryRepository(
         }
             .onFailure { e -> android.util.Log.e("DiscoveryRepo", "browse(browseId=$browseId, params=$params) failed", e) }
             .getOrElse { BrowseContent() }
-            .also { android.util.Log.d("DiscoveryRepo", "browse(browseId=$browseId): ${it.tracks.size} tracks, ${it.collections.size} collections") }
+            .also { android.util.Log.d("DiscoveryRepo", "browse(browseId=$browseId): ${it.tracks.size} tracks, ${it.collections.size} collections, artist=${it.artist != null}") }
     }
 
     fun observeImportedPlaylists(): Flow<List<ImportedPlaylistEntity>> = importedPlaylistDao.observeAll()

@@ -7,6 +7,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.abn3li.telemusic.data.browse.BrowseCollection
 import com.abn3li.telemusic.data.browse.HomeSection
+import com.abn3li.telemusic.data.browse.SearchFilter
 import com.abn3li.telemusic.data.download.DownloadQuality
 import com.abn3li.telemusic.data.download.YtDlpRepository
 import com.abn3li.telemusic.data.download.YtDlpSearchResult
@@ -25,10 +26,18 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 import java.io.File
 
+/** The search result tabs: everything, or one kind. */
+enum class SearchTab(val label: String) { ALL("All"), SONGS("Songs"), ALBUMS("Albums"), ARTISTS("Artists"), PLAYLISTS("Playlists") }
+
 data class YouTubeDownloadUiState(
     val query: String = "",
     val isSearching: Boolean = false,
+    val tab: SearchTab = SearchTab.ALL,
     val results: List<YtDlpSearchResult> = emptyList(),
+    // The other tabs' results for the same search - pages to open, not songs.
+    val albums: List<BrowseCollection> = emptyList(),
+    val artists: List<BrowseCollection> = emptyList(),
+    val playlists: List<BrowseCollection> = emptyList(),
     val errorMessage: String? = null,
     // Both keyed by videoId - a result mid-download shows a spinner in place of its download
     // icon, and a finished one shows a checkmark instead, without needing a full re-search.
@@ -95,18 +104,41 @@ class YouTubeDownloadViewModel(
         _uiState.update { it.copy(query = query) }
     }
 
+    fun selectTab(tab: SearchTab) {
+        _uiState.update { it.copy(tab = tab) }
+    }
+
+    /** One search fills every tab at once - songs, albums, artists and playlists are asked in
+     * parallel, so switching tabs afterwards is instant. Songs come from YouTube Music's own
+     * Songs tab (one request, square album art); if that finds nothing, the older yt-dlp search
+     * is tried instead. */
     fun search() {
         val query = _uiState.value.query.trim()
         if (query.isEmpty()) return
         viewModelScope.launch {
-            _uiState.update { it.copy(isSearching = true, errorMessage = null, results = emptyList()) }
-            val songs = ytDlpRepository.search(query)
             _uiState.update {
-                it.copy(
-                    isSearching = false,
-                    results = songs,
-                    errorMessage = if (songs.isEmpty()) "No songs found" else null
-                )
+                it.copy(isSearching = true, errorMessage = null, results = emptyList(), albums = emptyList(), artists = emptyList(), playlists = emptyList())
+            }
+            coroutineScope {
+                val songs = async {
+                    discoveryRepository.searchSongs(query)
+                        .map { YtDlpSearchResult(it.videoId, it.title, it.artist, it.durationSeconds, it.thumbnailUrl) }
+                        .ifEmpty { ytDlpRepository.search(query) }
+                }
+                val albums = async { discoveryRepository.searchCollections(query, SearchFilter.ALBUMS) }
+                val artists = async { discoveryRepository.searchCollections(query, SearchFilter.ARTISTS) }
+                val playlists = async { discoveryRepository.searchCollections(query, SearchFilter.PLAYLISTS) }
+                val found = songs.await()
+                _uiState.update {
+                    it.copy(
+                        isSearching = false,
+                        results = found,
+                        albums = albums.await(),
+                        artists = artists.await(),
+                        playlists = playlists.await(),
+                        errorMessage = if (found.isEmpty()) "No songs found" else null
+                    )
+                }
             }
         }
     }

@@ -7,6 +7,8 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.abn3li.telemusic.data.browse.BrowseCollection
 import com.abn3li.telemusic.data.browse.BrowseTrack
+import com.abn3li.telemusic.data.browse.ArtistPage
+import com.abn3li.telemusic.data.browse.CollectionHeader
 import com.abn3li.telemusic.data.download.DownloadQuality
 import com.abn3li.telemusic.data.download.YtDlpRepository
 import com.abn3li.telemusic.data.download.ytDlpStableSongId
@@ -26,6 +28,9 @@ data class BrowseCollectionUiState(
     val isLoading: Boolean = true,
     val tracks: List<BrowseTrack> = emptyList(),
     val collections: List<BrowseCollection> = emptyList(),
+    // An album's or playlist's own title block, and an artist's whole page - see BrowseContent.
+    val header: CollectionHeader? = null,
+    val artist: ArtistPage? = null,
     val errorMessage: String? = null,
     val downloadingIds: Set<String> = emptySet(),
     val downloadedIds: Set<String> = emptySet(),
@@ -71,11 +76,13 @@ class BrowseCollectionViewModel(
                     isLoading = false,
                     tracks = content.tracks,
                     collections = content.collections,
+                    header = content.header,
+                    artist = content.artist,
                     // Not "check your connection" - the request almost always succeeds fine
                     // (see DiscoveryRepository.browse's own diagnostic logging); an empty result
                     // here is far more often the page genuinely having nothing playable, or a
                     // page shape this app doesn't parse, than a network failure.
-                    errorMessage = if (content.tracks.isEmpty() && content.collections.isEmpty()) {
+                    errorMessage = if (content.tracks.isEmpty() && content.collections.isEmpty() && content.artist == null) {
                         "This playlist couldn't be loaded - it may be unavailable"
                     } else null
                 )
@@ -147,7 +154,7 @@ class BrowseCollectionViewModel(
         if (tracks.isEmpty()) return
         workScope.launch {
             _uiState.update { it.copy(importProgress = 0 to tracks.size) }
-            val playlistId = musicRepository.createPlaylist(_uiState.value.title)
+            val playlistId = musicRepository.createPlaylist(_uiState.value.header?.title ?: _uiState.value.title)
             tracks.forEachIndexed { index, track ->
                 val song = musicRepository.importPlaylistTrackAsStreamable(track)
                 musicRepository.addSongToPlaylist(playlistId, song)

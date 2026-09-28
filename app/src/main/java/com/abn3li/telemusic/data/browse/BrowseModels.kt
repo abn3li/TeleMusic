@@ -30,8 +30,43 @@ data class HomeSection(val title: String, val items: List<BrowseCollection>)
 
 /** One browse page's worth of content: either a track list (a playlist/chart/artist's own
  * songs) or more collection cards (a chart page linking to sub-charts, say) - never
- * meaningfully both at once in practice, same tradeoff the search-side parser makes. */
+ * meaningfully both at once in practice, same tradeoff the search-side parser makes.
+ * [header] is an album's or playlist's own title block, [artist] an artist page's sections. */
 data class BrowseContent(
     val tracks: List<BrowseTrack> = emptyList(),
-    val collections: List<BrowseCollection> = emptyList()
+    val collections: List<BrowseCollection> = emptyList(),
+    val header: CollectionHeader? = null,
+    val artist: ArtistPage? = null
 )
+
+/** An album's or playlist's title block: "Night Drive", "Album • 2024", by [artist],
+ * "10 songs • 38 minutes". [artistBrowseId] opens the artist's page when there is one. */
+data class CollectionHeader(
+    val title: String,
+    val subtitle: String?,
+    val artist: String?,
+    val artistBrowseId: String?,
+    val detail: String?,
+    val thumbnailUrl: String?
+)
+
+/** An artist's page: their name and picture, top songs ([allSongsBrowseId] opens the full
+ * list), and the shelves under them - Albums, Singles & EPs, Playlists, similar artists. */
+data class ArtistPage(
+    val name: String,
+    val subtitle: String?,
+    val thumbnailUrl: String?,
+    val topSongs: List<BrowseTrack>,
+    val allSongsBrowseId: String?,
+    val allSongsParams: String?,
+    val shelves: List<HomeSection>
+)
+
+/** A YouTube search tab and YouTube Music's own filter for it ([params]). Songs only ever
+ * returns audio tracks; the rest return albums, artists or playlists to open. */
+enum class SearchFilter(val params: String) {
+    SONGS("EgWKAQIIAWoKEAkQBRAKEAMQBA%3D%3D"),
+    ALBUMS("EgWKAQIYAWoKEAkQChAFEAMQBA=="),
+    ARTISTS("EgWKAQIgAWoKEAkQChAFEAMQBA=="),
+    PLAYLISTS("EgWKAQIoAWoKEAkQChAFEAMQBA==")
+}
