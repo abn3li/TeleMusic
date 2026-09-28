@@ -94,7 +94,13 @@ class BrowseCollectionViewModel(
                     title = stream.title,
                     artist = stream.artist,
                     durationSeconds = stream.durationSeconds,
-                    albumArtUrl = stream.thumbnailUrl,
+                    // The row's own square album art (YouTube Music search/browse), not the
+                    // resolve's thumbnail: the light resolve skips the watch page, so its
+                    // thumbnail is the video frame - album art letterboxed with bars.
+                    albumArtUrl = com.abn3li.telemusic.data.browse.googleArtworkAtSize(
+                        track.thumbnailUrl?.takeIf { it.isNotBlank() } ?: stream.thumbnailUrl,
+                        com.abn3li.telemusic.data.browse.SAVED_ARTWORK_SIZE
+                    ),
                     isLocalImport = true
                 )
                 onPlayStream(song, stream.streamUrl.toUri(), track.videoId)
