@@ -26,6 +26,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.LibraryMusic
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Sync
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Scaffold
@@ -228,8 +229,7 @@ fun TgMusicNavGraph(navController: NavHostController = rememberNavController()) 
                         onOpenSettings = { navController.navigate(Routes.SETTINGS) },
                         onOpenPlaylist = { id, name -> navController.navigate(Routes.playlist(id, name)) },
                         onOpenSmartPlaylist = { kind -> navController.navigate(Routes.smartPlaylist(kind)) },
-                        onOpenYouTubeCollection = { c -> navController.navigate(Routes.youtubeBrowse(c.browseId, c.title, c.params)) },
-                        onOpenSearch = { navController.navigate(Routes.SEARCH) { launchSingleTop = true } }
+                        onOpenYouTubeCollection = { c -> navController.navigate(Routes.youtubeBrowse(c.browseId, c.title, c.params)) }
                     )
                 }
                 composable(Routes.SEARCH) {
@@ -333,12 +333,7 @@ fun TgMusicNavGraph(navController: NavHostController = rememberNavController()) 
 
         if (showBottomBar) {
             AppBottomNavBar(
-                // The search page is opened from Home, so Home stays lit there.
-                currentRoute = when {
-                    inLibrary -> Routes.LIBRARY
-                    currentRoute == Routes.SEARCH -> Routes.HOME
-                    else -> currentRoute
-                },
+                currentRoute = if (inLibrary) Routes.LIBRARY else currentRoute,
                 onNavigate = { route ->
                     when {
                         // Home tapped: back to the Home page (a playlist/artist opened from Home
@@ -390,8 +385,9 @@ private fun AppBottomNavBar(
     val items = remember {
         listOf(
             NavigationItem(Routes.HOME, "Home", Icons.Default.Home),
-            NavigationItem(Routes.LIBRARY, "Library", Icons.Default.LibraryMusic),
-            NavigationItem(Routes.SYNC, "Sync", Icons.Default.Sync)
+            NavigationItem(Routes.SEARCH, "Search", Icons.Default.Search),
+            NavigationItem(Routes.SYNC, "Sync", Icons.Default.Sync),
+            NavigationItem(Routes.LIBRARY, "Library", Icons.Default.LibraryMusic)
         )
     }
 

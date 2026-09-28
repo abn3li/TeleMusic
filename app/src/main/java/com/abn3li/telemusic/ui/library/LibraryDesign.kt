@@ -47,7 +47,6 @@ import androidx.compose.material.icons.automirrored.rounded.ArrowForwardIos
 import androidx.compose.material.icons.rounded.Cancel
 import androidx.compose.material.icons.rounded.MoreHoriz
 import androidx.compose.material.icons.rounded.PlayArrow
-import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Shuffle
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
@@ -363,33 +362,6 @@ internal fun LibrarySearchField(
                     .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) { onValueChange("") }
             )
         }
-    }
-}
-
-/** Looks like [LibrarySearchField] but only opens the search page when tapped (Home's search). */
-@Composable
-internal fun SearchEntryField(placeholder: String, onClick: () -> Unit) {
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 18.dp)
-            .padding(top = 5.dp, bottom = 12.dp)
-            .height(44.dp)
-            .clip(RoundedCornerShape(10.dp))
-            .background(LibraryFieldColor)
-            .clickable(onClick = onClick)
-            .padding(horizontal = 10.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Icon(Icons.Rounded.Search, contentDescription = null, tint = Color.White.copy(alpha = 0.6f), modifier = Modifier.size(22.dp))
-        Text(
-            placeholder,
-            color = Color.White.copy(alpha = 0.6f),
-            fontSize = 17.sp,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.padding(start = 6.dp)
-        )
     }
 }
 

@@ -177,8 +177,8 @@ fun SearchScreen(
     val youTubeLoading = query.isNotEmpty() && (state.isSearching || state.searchedQuery != query)
 
     LargeTitleList(
+        // A bottom-bar tab: no back arrow.
         title = "Search",
-        onBack = callbacks.onBack,
         stickyHeight = if (query.isEmpty()) SearchStickyHeight else SearchStickyHeight + PillsHeight,
         stickyContent = {
             Column {

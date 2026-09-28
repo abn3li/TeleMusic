@@ -54,7 +54,7 @@ private val MixDaily = Color(0xFF72243E)
 private val MixRediscover = Color(0xFF3C3489)
 
 /**
- * The Home tab: a search field (library and YouTube), shortcut tiles, then Recently Played, Made
+ * The Home tab: shortcut tiles, then Recently Played, Made
  * for You, Recently Added, Top Artists, and YouTube Music - imported playlists, genres and its
  * own shelves. The library sections come from [LibraryViewModel.home] (worked out once per
  * library change); the YouTube part from the Discovery feed's cache. Nothing here animates or
@@ -67,9 +67,7 @@ fun HomeScreen(
     onOpenSettings: () -> Unit,
     onOpenPlaylist: (Long, String) -> Unit,
     onOpenSmartPlaylist: (SmartPlaylistKind) -> Unit,
-    onOpenYouTubeCollection: (BrowseCollection) -> Unit,
-    onOpenSearch: () -> Unit
-) {
+    onOpenYouTubeCollection: (BrowseCollection) -> Unit) {
     val app = LocalContext.current.applicationContext as TgMusicApp
     val home by viewModel.home.collectAsState()
     val artists by viewModel.artists.collectAsState()
@@ -95,8 +93,7 @@ fun HomeScreen(
                     .size(34.dp)
                     .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onOpenSettings)
             )
-        },
-        stickyContent = { SearchEntryField("Your music and YouTube", onOpenSearch) }
+        }
     ) {
         item("shortcuts") {
             Column(Modifier.padding(horizontal = 16.dp).padding(top = 4.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
