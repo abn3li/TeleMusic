@@ -67,7 +67,7 @@ import com.abn3li.telemusic.ui.library.DestructiveRed
 import com.abn3li.telemusic.ui.library.FilterPill
 import com.abn3li.telemusic.ui.library.GroupLabelColor
 
-/** Home's paste-a-link dialog, wired to [viewModel]: a YouTube playlist link is pinned into
+/** The Search tab's paste-a-link dialog, wired to [viewModel]: a YouTube playlist link is pinned into
  * Discovery, a Spotify link is imported into the Library. */
 @Composable
 internal fun ImportPlaylistPrompt(viewModel: DiscoveryViewModel, onClose: () -> Unit) {
@@ -90,7 +90,7 @@ internal fun ImportPlaylistPrompt(viewModel: DiscoveryViewModel, onClose: () -> 
 }
 
 /**
- * YouTube Music on Home: playlists imported by link (+ adds one), genres, then YouTube Music's
+ * YouTube Music's feed on the Search tab (before anything is typed): playlists imported by link (+ adds one), genres, then YouTube Music's
  * own home shelves.
  */
 internal fun LazyListScope.youTubeDiscovery(

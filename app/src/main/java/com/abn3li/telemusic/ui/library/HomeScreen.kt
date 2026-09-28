@@ -28,37 +28,25 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.setValue
-import androidx.lifecycle.viewmodel.initializer
-import androidx.lifecycle.viewmodel.viewModelFactory
-import com.abn3li.telemusic.ui.download.DiscoveryViewModel
-import com.abn3li.telemusic.ui.download.ImportPlaylistPrompt
-import com.abn3li.telemusic.ui.download.youTubeDiscovery
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.abn3li.telemusic.TgMusicApp
-import com.abn3li.telemusic.data.browse.BrowseCollection
 import com.abn3li.telemusic.data.local.SongEntity
 
 private val MixDaily = Color(0xFF72243E)
 private val MixRediscover = Color(0xFF3C3489)
 
 /**
- * The Home tab: shortcut tiles, then Recently Played, Made
- * for You, Recently Added, Top Artists, and YouTube Music - imported playlists, genres and its
- * own shelves. The library sections come from [LibraryViewModel.home] (worked out once per
- * library change); the YouTube part from the Discovery feed's cache. Nothing here animates or
- * polls.
+ * The Home tab: shortcut tiles, then Recently Played, Made for You, Recently Added and Top
+ * Artists - all from [LibraryViewModel.home] (worked out once per library change). YouTube
+ * Music's feed lives on the Search tab. Nothing here animates or polls.
  */
 @Composable
 fun HomeScreen(
@@ -66,19 +54,11 @@ fun HomeScreen(
     callbacks: LibraryCallbacks,
     onOpenSettings: () -> Unit,
     onOpenPlaylist: (Long, String) -> Unit,
-    onOpenSmartPlaylist: (SmartPlaylistKind) -> Unit,
-    onOpenYouTubeCollection: (BrowseCollection) -> Unit) {
-    val app = LocalContext.current.applicationContext as TgMusicApp
+    onOpenSmartPlaylist: (SmartPlaylistKind) -> Unit
+) {
     val home by viewModel.home.collectAsState()
     val artists by viewModel.artists.collectAsState()
     val pinned by viewModel.pinnedPlaylists.collectAsState()
-    // Qualified: this function's own `viewModel` parameter hides the plain name.
-    val discovery = androidx.lifecycle.viewmodel.compose.viewModel<DiscoveryViewModel>(
-        factory = viewModelFactory { initializer { DiscoveryViewModel(app.ytDlpRepository, app.discoveryRepository) } }
-    )
-    val youTube by discovery.uiState.collectAsState()
-    var showImport by remember { mutableStateOf(false) }
-    if (showImport) ImportPlaylistPrompt(discovery, onClose = { showImport = false })
     val topArtists = remember(artists) { artists.sortedByDescending { it.songCount }.take(12) }
     val pinnedRows = remember(pinned) { pinned.chunked(2) }
 
@@ -182,14 +162,6 @@ fun HomeScreen(
             }
         }
 
-        item("yt_header") { HomeSectionHeader("From YouTube Music") }
-        youTubeDiscovery(
-            state = youTube,
-            onOpenCollection = onOpenYouTubeCollection,
-            onImportPlaylistClick = { showImport = true },
-            onRemoveImportedPlaylist = discovery::removeImportedPlaylist,
-            onRetry = discovery::reload
-        )
         item("end") { Spacer(Modifier.height(8.dp)) }
     }
 }

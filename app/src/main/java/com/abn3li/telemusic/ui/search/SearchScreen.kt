@@ -1,6 +1,7 @@
 package com.abn3li.telemusic.ui.search
 
 import android.net.Uri
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -27,11 +28,9 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -52,6 +51,9 @@ import com.abn3li.telemusic.data.local.SongEntity
 import com.abn3li.telemusic.ui.download.CenteredMessage
 import com.abn3li.telemusic.ui.download.CenteredSpinner
 import com.abn3li.telemusic.ui.download.CollectionCard
+import com.abn3li.telemusic.ui.download.DiscoveryViewModel
+import com.abn3li.telemusic.ui.download.ImportPlaylistPrompt
+import com.abn3li.telemusic.ui.download.youTubeDiscovery
 import com.abn3li.telemusic.ui.download.SearchTab
 import com.abn3li.telemusic.ui.download.Thumbnail
 import com.abn3li.telemusic.ui.download.TrackResultRow
@@ -93,8 +95,9 @@ private data class LibraryMatches(
 }
 
 /**
- * One search for everything: what's in the library first (live as you type), then YouTube Music
- * below it (asked once typing pauses). YouTube songs the library already has aren't repeated.
+ * The Search tab. Before typing it shows YouTube Music's feed. Typing searches everything: the
+ * library first (live as you type), then YouTube Music below it (asked once typing pauses).
+ * YouTube songs the library already has aren't repeated.
  */
 @Composable
 fun SearchScreen(
@@ -163,15 +166,16 @@ fun SearchScreen(
         viewModel.search()
     }
 
-    val focusRequester = remember { FocusRequester() }
-    var focused by rememberSaveable { mutableStateOf(false) }
-    // Keyboard up on arrival only - not again when coming back from a page opened from here.
-    LaunchedEffect(Unit) {
-        if (!focused) {
-            focused = true
-            runCatching { focusRequester.requestFocus() }
-        }
-    }
+    // With nothing typed, the tab is YouTube Music's feed: imported playlists, genres, shelves.
+    val discovery = viewModel<DiscoveryViewModel>(
+        factory = viewModelFactory { initializer { DiscoveryViewModel(app.ytDlpRepository, app.discoveryRepository) } }
+    )
+    val feed by discovery.uiState.collectAsState()
+    var showImport by remember { mutableStateOf(false) }
+    if (showImport) ImportPlaylistPrompt(discovery, onClose = { showImport = false })
+
+    // Back while showing results goes back to the feed first.
+    BackHandler(enabled = state.query.isNotEmpty()) { viewModel.onQueryChange("") }
 
     // YouTube's part is still coming while a search runs, or while typing hasn't paused yet.
     val youTubeLoading = query.isNotEmpty() && (state.isSearching || state.searchedQuery != query)
@@ -186,8 +190,7 @@ fun SearchScreen(
                     state.query,
                     "Your music and YouTube",
                     viewModel::onQueryChange,
-                    onSearch = { viewModel.search(force = true) },
-                    focusRequester = focusRequester
+                    onSearch = { viewModel.search(force = true) }
                 )
                 if (query.isNotEmpty()) {
                     LazyRow(
@@ -204,7 +207,13 @@ fun SearchScreen(
         }
     ) {
         if (query.isEmpty()) {
-            item("hint") { CenteredMessage("Search your library and YouTube Music") }
+            youTubeDiscovery(
+                state = feed,
+                onOpenCollection = onOpenCollection,
+                onImportPlaylistClick = { showImport = true },
+                onRemoveImportedPlaylist = discovery::removeImportedPlaylist,
+                onRetry = discovery::reload
+            )
             return@LargeTitleList
         }
         val tab = state.tab

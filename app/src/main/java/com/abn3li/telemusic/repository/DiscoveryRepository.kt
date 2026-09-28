@@ -26,7 +26,7 @@ class DiscoveryRepository(
     private val importedPlaylistDao: ImportedPlaylistDao,
     private val client: InnertubeBrowseClient = InnertubeBrowseClient()
 ) {
-    // Home's YouTube part asks for the feed again whenever its ViewModel is rebuilt (a fresh
+    // The Search tab's feed asks for it again whenever its ViewModel is rebuilt (a fresh
     // start, Home recreated) - a real ~670KB request each time without this cache; with it,
     // every ask after the first is instant and free.
     @Volatile private var cachedHome: List<HomeSection>? = null

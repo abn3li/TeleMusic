@@ -27,7 +27,7 @@ data class DiscoveryUiState(
     val importPlaylistError: String? = null
 )
 
-/** Home's "From YouTube Music" part: the feed, genres, and playlists imported by link. */
+/** The Search tab's YouTube Music feed: its shelves, genres, and playlists imported by link. */
 class DiscoveryViewModel(
     private val ytDlpRepository: YtDlpRepository,
     private val discoveryRepository: DiscoveryRepository
@@ -46,8 +46,8 @@ class DiscoveryViewModel(
         }
     }
 
-    /** Fetches the feed and genres. Home keeps this ViewModel for the whole session, so a start
-     * without a connection is retried from the error message ([reload]), not by reopening. */
+    /** Fetches the feed and genres. The Search tab keeps this ViewModel while you switch tabs,
+     * so a start without a connection is retried from the error message ([reload]). */
     private fun load() {
         loadJob = viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true) }

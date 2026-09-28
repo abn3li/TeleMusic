@@ -77,8 +77,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
-import androidx.compose.ui.focus.FocusRequester
-import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -322,8 +320,7 @@ internal fun LibrarySearchField(
     placeholder: String,
     onValueChange: (String) -> Unit,
     modifier: Modifier = Modifier,
-    onSearch: () -> Unit = {},
-    focusRequester: FocusRequester? = null
+    onSearch: () -> Unit = {}
 ) {
     val keyboard = LocalSoftwareKeyboardController.current
     Row(
@@ -349,7 +346,7 @@ internal fun LibrarySearchField(
                 cursorBrush = SolidColor(AppAccent),
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
                 keyboardActions = KeyboardActions(onSearch = { onSearch(); keyboard?.hide() }),
-                modifier = Modifier.fillMaxWidth().then(if (focusRequester != null) Modifier.focusRequester(focusRequester) else Modifier)
+                modifier = Modifier.fillMaxWidth()
             )
         }
         if (text.isNotEmpty()) {
