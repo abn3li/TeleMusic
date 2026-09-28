@@ -89,7 +89,10 @@ import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.layout.layout
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.offset
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
@@ -402,6 +405,22 @@ private data class SweepTiming(val points: List<WordMark>) {
     }
 }
 
+private const val SWEEP_STEP_MS = 25L
+private val GLOW_ROOM = 24.dp
+
+/**
+ * Lets what follows (laid out [room] taller than the line, on both ends) reach [room] past the
+ * line's own top and bottom without taking up that space - so a layer there can be big enough
+ * for the glow while the lines stay spaced as before.
+ */
+private fun Modifier.glowRoom(room: Dp): Modifier = layout { measurable, constraints ->
+    val extra = room.roundToPx()
+    val placeable = measurable.measure(constraints.offset(vertical = 2 * extra))
+    layout(placeable.width, (placeable.height - 2 * extra).coerceAtLeast(0)) {
+        placeable.place(0, -extra)
+    }
+}
+
 // How unsung letters of the line being sung look: dim, like the lines around it.
 private const val UNSUNG_ALPHA = 0.35f
 // Width of the soft edge where sung turns into unsung, in px.
@@ -545,6 +564,10 @@ private fun LyricLineText(
                     shownMs = if (estimate < shownMs && shownMs - estimate < 400) shownMs else estimate
                     update(shownMs)
                 }
+                // Each step redraws the whole lyrics list's layers, so the sweep steps about 30
+                // times a second rather than at the screen's 60-120: its soft edge hides the
+                // difference, the phone's GPU (and battery, and warmth) doesn't.
+                if (sungChars < length) delay(SWEEP_STEP_MS)
                 // Done sweeping: stop asking for frames until the position jumps (a seek back
                 // into this line); the next line restarts this effect anyway.
                 if (sungChars >= length) {
@@ -575,8 +598,16 @@ private fun LyricLineText(
         modifier = Modifier
             .fillMaxWidth()
             .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onClick)
-            // The line being sung gets its own layer, so the mask below fades only its letters.
-            .then(if (sweep != null) Modifier.graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen } else Modifier)
+            // The line being sung gets its own layer, so the mask below fades only its letters -
+            // with room above and below for the glow, which a layer cuts off at its edges.
+            .then(
+                if (sweep != null) {
+                    Modifier
+                        .glowRoom(GLOW_ROOM)
+                        .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
+                        .padding(vertical = GLOW_ROOM)
+                } else Modifier
+            )
             .padding(horizontal = 28.dp, vertical = 11.dp)
             .then(
                 if (sweep != null) Modifier.drawWithContent {

@@ -255,7 +255,6 @@ class LyricsRepository {
             val body = httpGet(url.toString()) ?: return@run null
             val response = runCatching { gson.fromJson(body, BiniSearchResponse::class.java) }.getOrNull()
                 ?: return@run null
-            reached?.set(true)
             val seconds = durationSeconds ?: -1
             val usable = response.results.orEmpty()
                 .filter { it.timing_type == "word" || it.timing_type == "line" }
@@ -263,13 +262,14 @@ class LyricsRepository {
                 .filter { seconds <= 0 || it.duration <= 0 || abs(it.duration - seconds) <= BINI_DURATION_SLACK_S }
             val pick = (if (seconds > 0) usable.firstOrNull { it.timing_type == "word" } else null)
                 ?: usable.firstOrNull()
-                ?: return@run null
-            val ttml = httpGet(pick.lyricsUrl!!)
-            if (ttml == null) {
-                // Found but not downloaded: says nothing about whether it has the lyrics.
-                reached?.set(false)
+            // Answered only once it's clear: nothing matching, or the lyrics downloaded. Found but
+            // not downloaded (failed, or out of time mid-download) says nothing about the song.
+            if (pick == null) {
+                reached?.set(true)
                 return@run null
             }
+            val ttml = httpGet(pick.lyricsUrl!!) ?: return@run null
+            reached?.set(true)
             val converted = TtmlLyrics.convert(ttml) ?: return@run null
             LyricsResult(plain = converted.plain.takeIf { it.isNotBlank() }, synced = converted.synced)
                 .takeIf { it.plain != null || it.synced != null }
