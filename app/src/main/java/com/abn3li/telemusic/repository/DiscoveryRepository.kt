@@ -27,7 +27,7 @@ class DiscoveryRepository(
     private val client: InnertubeBrowseClient = InnertubeBrowseClient()
 ) {
     // The Search tab's feed asks for it again whenever its ViewModel is rebuilt (a fresh
-    // start, Home recreated) - a real ~670KB request each time without this cache; with it,
+    // start, the tab recreated) - a real ~670KB request each time without this cache; with it,
     // every ask after the first is instant and free.
     @Volatile private var cachedHome: List<HomeSection>? = null
     @Volatile private var cachedGenres: List<BrowseCollection>? = null
