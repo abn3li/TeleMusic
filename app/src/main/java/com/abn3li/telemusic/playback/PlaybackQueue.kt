@@ -183,10 +183,14 @@ class PlaybackQueue {
 
     /** [auto] is the end-of-song advance: only that one repeats the song under Repeat One. A
      * Next the user asked for always moves on (wrapping around, like Repeat All). */
+    /** The next song, made current. [auto] is a song ending on its own: under Repeat One it
+     * replays, and with Repeat off the end of the queue stops (null) instead of wrapping round
+     * to the first song. A skip (not [auto]) still wraps, as before. */
     fun next(auto: Boolean = false): Long? {
         if (base.isEmpty()) return null
         if (auto && repeatMode == RepeatMode.ONE) return currentSongId()
         if (nextInQueue.isNotEmpty()) return advanceIntoNextInQueue()
+        if (auto && repeatMode == RepeatMode.OFF && baseIndex + 1 >= base.size) return null
         baseIndex = if (baseIndex + 1 < base.size) baseIndex + 1 else 0
         return base[baseIndex]
     }

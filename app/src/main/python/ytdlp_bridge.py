@@ -78,8 +78,14 @@ def search(query, limit=12):
             # request that was only ever going to discard the format list anyway.
             "extractor_args": {"youtube": {"player_client": ["android"]}},
         }
-        with yt_dlp.YoutubeDL(opts) as ydl:
-            return ydl.extract_info(f"https://music.youtube.com/watch?v={video_id}", download=False)
+        # One result that can't be read (age-restricted, blocked in this region, removed) is
+        # left out - it must not throw away every other result of the search.
+        try:
+            with yt_dlp.YoutubeDL(opts) as ydl:
+                return ydl.extract_info(f"https://music.youtube.com/watch?v={video_id}", download=False)
+        except Exception as e:
+            print(f"[search] skipped {video_id}: {e}")
+            return None
 
     # One worker per id (not capped at 8) - measured timing showed 15 ids capped at 8 workers
     # ran as two sequential waves of ~3.5-4s each (~7.5s total) instead of one, since the 9th+

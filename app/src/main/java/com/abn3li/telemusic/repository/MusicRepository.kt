@@ -375,19 +375,22 @@ class MusicRepository(
     /** The same resolution, with the reason when there's nothing to play - each reason decided
      * by the very branch that found nothing, so the message can't drift from the logic. */
     suspend fun resolvePlayback(song: SongEntity): PlaybackResolution {
-        var localPath = song.localFilePath
+        var current = song
+        val localPath = song.localFilePath
         if (localPath != null && !isLocalFileValid(localPath)) {
             clearStaleLocalPath(song.telegramMessageId)
-            localPath = null
+            // Carry on with the row as it is now: resolveDirectPlaybackUri skips any song that
+            // still has a local path, so the stale one would stop a deleted download streaming.
+            current = song.copy(localFilePath = null)
         }
         return when {
-            localPath != null -> PlaybackResolution.Playable(localFileToUri(localPath))
-            song.isLocalImport -> PlaybackResolution.Unplayable("file may have been moved or deleted")
-            song.youtubeVideoId != null -> resolveDirectPlaybackUri(song)?.let { PlaybackResolution.Playable(it) }
+            current.localFilePath != null -> PlaybackResolution.Playable(localFileToUri(current.localFilePath!!))
+            current.isLocalImport -> PlaybackResolution.Unplayable("file may have been moved or deleted")
+            current.youtubeVideoId != null -> resolveDirectPlaybackUri(current)?.let { PlaybackResolution.Playable(it) }
                 ?: PlaybackResolution.Unplayable("video may be unavailable")
             // A Telegram song with no copy on the phone needs Telegram (not set up, or logged out).
             !tdlibManager.isStarted -> PlaybackResolution.Unplayable("set up Telegram in the Sync tab to play it")
-            else -> PlaybackResolution.Playable(TdlibDataSource.uriFor(getFreshFileIdForSong(song)))
+            else -> PlaybackResolution.Playable(TdlibDataSource.uriFor(getFreshFileIdForSong(current)))
         }
     }
 

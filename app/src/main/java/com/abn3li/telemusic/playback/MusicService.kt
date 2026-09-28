@@ -7,6 +7,7 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.net.Uri
 import android.os.Handler
 import android.os.Looper
 import android.os.PowerManager
@@ -34,6 +35,7 @@ import androidx.media3.session.MediaLibraryService.MediaLibrarySession
 import androidx.media3.session.MediaSession
 import com.abn3li.telemusic.MainActivity
 import com.abn3li.telemusic.TgMusicApp
+import com.abn3li.telemusic.data.download.DownloadQuality
 import com.abn3li.telemusic.data.local.displayArtworkUri
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -44,6 +46,9 @@ import kotlinx.coroutines.withContext
 
 // A song whose fresh YouTube link also fails isn't refetched again within this window.
 private const val LINK_REFRESH_COOLDOWN_MS = 60_000L
+
+// Unplayable songs passed over in a row when a song ends, before playback just stops.
+private const val MAX_UNPLAYABLE_SKIPS = 5
 
 // How often the widget progress bar moves while music plays (see widgetProgressTick).
 private const val WIDGET_TICK_MS = 1_000L
@@ -98,6 +103,13 @@ class MusicService : MediaLibraryService() {
             .build()
         player.addListener(object : Player.Listener {
             override fun onPlayerError(error: PlaybackException) = refreshExpiredStreamLink(error)
+
+            // The end-of-song advance lives here, in the service, so the queue keeps playing
+            // with the app closed (it used to live only in Now Playing's listener, which goes
+            // away with the app's screen). The app follows along via its transition listener.
+            override fun onPlaybackStateChanged(playbackState: Int) {
+                if (playbackState == Player.STATE_ENDED) advanceAfterSongEnded()
+            }
 
             override fun onEvents(player: Player, events: Player.Events) {
                 if (events.containsAny(
@@ -159,7 +171,28 @@ class MusicService : MediaLibraryService() {
         skipJob = serviceScope.launch { playAdjacentSong(songId) }
     }
 
-    private suspend fun playAdjacentSong(songId: Long) {
+    /** A song finished on its own: play the queue's next one (Repeat One replays it; Repeat off
+     * stops at the end). A song that can't be played is passed over, a few at most, the way the
+     * in-app player skips an unplayable song. */
+    private fun advanceAfterSongEnded() {
+        val queue = (application as TgMusicApp).playbackQueue
+        // Only the queue's own current song ending moves the queue on - not a one-off stream
+        // played from search (the queue is empty then) or an item already replaced.
+        val endedId = player.currentMediaItem?.mediaId?.toLongOrNull() ?: return
+        if (endedId != queue.currentSongId()) return
+        skipJob?.cancel()
+        skipJob = serviceScope.launch {
+            repeat(MAX_UNPLAYABLE_SKIPS) {
+                val nextId = queue.next(auto = true) ?: return@launch
+                if (playAdjacentSong(nextId)) return@launch
+                // Not played because the user moved on meanwhile: leave the queue where they put it.
+                if (queue.currentSongId() != nextId) return@launch
+            }
+        }
+    }
+
+    /** Plays [songId]; false when it couldn't be played (or the queue moved on meanwhile). */
+    private suspend fun playAdjacentSong(songId: Long): Boolean {
         val app = application as TgMusicApp
         val repository = app.musicRepository
 
@@ -177,9 +210,9 @@ class MusicService : MediaLibraryService() {
             }
         }
 
-        val song = withContext(Dispatchers.IO) { repository.getSongById(songId) } ?: return
-        val uri = withContext(Dispatchers.IO) { repository.resolvePlaybackUri(song) } ?: return
-        if (app.playbackQueue.currentSongId() != songId) return
+        val song = withContext(Dispatchers.IO) { repository.getSongById(songId) } ?: return false
+        val uri = withContext(Dispatchers.IO) { repository.resolvePlaybackUri(song) } ?: return false
+        if (app.playbackQueue.currentSongId() != songId) return false
 
         val item = MediaItem.Builder()
             .setUri(uri)
@@ -200,6 +233,7 @@ class MusicService : MediaLibraryService() {
         if (!song.isLocalImport && song.youtubeVideoId == null && song.localFilePath == null) {
             cacheJob = serviceScope.launch(Dispatchers.IO) { repository.markStreamedFileCached(song) }
         }
+        return true
     }
 
     // ---- Home-screen widgets ----
@@ -268,10 +302,21 @@ class MusicService : MediaLibraryService() {
         val positionMs = player.currentPosition
         val repository = (application as TgMusicApp).musicRepository
         linkRefreshJob = serviceScope.launch {
-            val song = withContext(Dispatchers.IO) { repository.getSongById(songId) } ?: return@launch
-            val videoId = song.youtubeVideoId ?: return@launch
-            repository.invalidateStreamCache(videoId)
-            val uri = withContext(Dispatchers.IO) { repository.resolvePlaybackUri(song) } ?: return@launch
+            val song = withContext(Dispatchers.IO) { repository.getSongById(songId) }
+            val uri = if (song != null) {
+                val videoId = song.youtubeVideoId ?: return@launch
+                repository.invalidateStreamCache(videoId)
+                withContext(Dispatchers.IO) { repository.resolvePlaybackUri(song) } ?: return@launch
+            } else {
+                // A stream played from search or Discovery: no library row, so its video id
+                // travels on the media item (see PlaybackController.playUri).
+                val videoId = item.mediaMetadata.extras?.getString(EXTRA_YOUTUBE_VIDEO_ID) ?: return@launch
+                val app = application as TgMusicApp
+                app.ytDlpRepository.invalidateStreamCache(videoId)
+                val stream = app.ytDlpRepository.resolveStreamUrl(videoId, DownloadQuality.BEST.formatSelector)
+                    .getOrNull()?.streamUrl?.takeIf { it.isNotBlank() } ?: return@launch
+                Uri.parse(stream)
+            }
             // The user may have moved on to another song while the link was being fetched.
             if (player.currentMediaItem?.mediaId != item.mediaId) return@launch
             player.setMediaItem(item.buildUpon().setUri(uri).build(), positionMs)

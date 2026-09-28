@@ -18,6 +18,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.lifecycle.viewmodel.initializer
+import androidx.lifecycle.viewmodel.viewModelFactory
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -50,12 +53,19 @@ fun BrowseCollectionScreen(
     onPlayStream: (SongEntity, Uri, String) -> Unit
 ) {
     val app = LocalContext.current.applicationContext as TgMusicApp
-    val viewModel = remember(browseId, params) {
-        BrowseCollectionViewModel(
-            app.applicationContext, title, browseId, params,
-            app.discoveryRepository, app.ytDlpRepository, app.musicRepository, app.settingsStore, onPlayStream
-        )
-    }
+    // viewModel(), not remember{}: cleared with this screen's back-stack entry, and kept across
+    // rotation (see YouTubeDownloadScreen).
+    val viewModel = viewModel<BrowseCollectionViewModel>(
+        key = "browse:$browseId:$params",
+        factory = viewModelFactory {
+            initializer {
+                BrowseCollectionViewModel(
+                    app.applicationContext, title, browseId, params,
+                    app.discoveryRepository, app.ytDlpRepository, app.musicRepository, app.settingsStore, onPlayStream
+                )
+            }
+        }
+    )
     val state by viewModel.uiState.collectAsState()
 
 

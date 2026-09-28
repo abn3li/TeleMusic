@@ -7,6 +7,7 @@ import androidx.lifecycle.viewModelScope
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import com.abn3li.telemusic.data.download.DownloadQuality
+import com.abn3li.telemusic.data.browse.BrowseTrack
 import com.abn3li.telemusic.data.download.YtDlpRepository
 import com.abn3li.telemusic.data.download.ytDlpStableSongId
 import com.abn3li.telemusic.data.local.SongEntity
@@ -237,17 +238,10 @@ class NowPlayingViewModel(
             // ever actually set it, so streaming stalls (TDlibDataSource waiting on more bytes
             // from Telegram) played dead silence with no way to tell that apart from the app
             // being broken. Player.STATE_BUFFERING is exactly ExoPlayer's own signal for this.
+            // A song ending moves the queue on in MusicService (so it works with the app closed);
+            // this screen follows the new song through onMediaItemTransition above.
             override fun onPlaybackStateChanged(playbackState: Int) {
                 _uiState.value = _uiState.value.copy(isBuffering = playbackState == Player.STATE_BUFFERING)
-                if (playbackState == Player.STATE_ENDED) {
-                    val currentPlayingId = _uiState.value.song?.telegramMessageId
-                    val queueCurrentId = queue.currentSongId()
-                    // Avoid double-advancing: only advance if a new song isn't already loading
-                    // and the queue hasn't already been advanced for this ended track.
-                    if (_uiState.value.loadingSongId == null && (currentPlayingId == null || queueCurrentId == currentPlayingId)) {
-                        autoAdvance()
-                    }
-                }
             }
     }
 
@@ -375,7 +369,7 @@ class NowPlayingViewModel(
             errorMessage = null,
             isDownloading = false
         )
-        playbackController.playUri(streamUri, song.telegramMessageId, song.title, song.artist, song.displayArtwork)
+        playbackController.playUri(streamUri, song.telegramMessageId, song.title, song.artist, song.displayArtwork, youtubeVideoId = videoId)
         refreshQueue()
     }
 
@@ -505,13 +499,6 @@ class NowPlayingViewModel(
         if (_lyricsSource.value.loading != null) _lyricsSource.value = _lyricsSource.value.copy(loading = null)
     }
 
-    /** The end-of-song advance: under Repeat One this replays the same song. */
-    private fun autoAdvance() {
-        val id = queue.next(auto = true) ?: return
-        loadCurrentQueuePosition(songIdOverride = id)
-        refreshQueue()
-    }
-
     fun nextSong() {
         val id = queue.next() ?: return
         loadCurrentQueuePosition(songIdOverride = id)
@@ -559,7 +546,17 @@ class NowPlayingViewModel(
         }
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(isDownloading = true)
-            runCatching { repository.downloadExplicitly(song) }
+            val failure = runCatching { repository.downloadExplicitly(song) }.exceptionOrNull()
+            if (failure != null) {
+                // Say so - a failed download used to just stop its spinner, with no message.
+                if (_uiState.value.song?.telegramMessageId == song.telegramMessageId) {
+                    _uiState.value = _uiState.value.copy(
+                        isDownloading = false,
+                        errorMessage = "Couldn't download \"${song.title}\": ${failure.message ?: "unknown error"}"
+                    )
+                }
+                return@launch
+            }
             val updated = repository.getSongById(song.telegramMessageId)
             // Only reflect the finished download in UI state if the user is still looking at
             // THIS song - a download can easily outlast a skip to the next/previous track, and
@@ -805,6 +802,23 @@ class NowPlayingViewModel(
         val song = _uiState.value.song ?: return
         viewModelScope.launch {
             val newFav = !song.isFavorite
+            // A stream played from search or Discovery isn't in the library, so there was no
+            // row for the Like to land on - it lit up and was lost. Liking it adds it to the
+            // library first (a streamable row, like Import to Library), then likes that.
+            val videoId = pendingEphemeralVideoId
+            if (newFav && song.isLocalImport && song.localFilePath == null && videoId != null) {
+                withContext(Dispatchers.IO) {
+                    repository.importPlaylistTrackAsStreamable(
+                        BrowseTrack(
+                            videoId = videoId,
+                            title = song.title,
+                            artist = song.artist,
+                            thumbnailUrl = song.albumArtUrl,
+                            durationSeconds = song.durationSeconds
+                        )
+                    )
+                }
+            }
             repository.setFavorite(song, newFav)
             _uiState.value = _uiState.value.copy(song = song.copy(isFavorite = newFav))
         }

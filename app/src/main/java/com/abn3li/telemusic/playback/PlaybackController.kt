@@ -3,6 +3,7 @@ package com.abn3li.telemusic.playback
 import android.content.ComponentName
 import android.content.Context
 import android.net.Uri
+import android.os.Bundle
 import android.util.Log
 import androidx.core.net.toUri
 import androidx.media3.common.MediaItem
@@ -15,6 +16,9 @@ import com.google.common.util.concurrent.MoreExecutors
 import java.io.File
 
 private const val MAX_ERROR_RETRIES = 3
+
+/** A stream's YouTube video id, kept on its media item - see PlaybackController.playUri. */
+const val EXTRA_YOUTUBE_VIDEO_ID = "telemusic.youtubeVideoId"
 
 class PlaybackController(context: Context) {
     private var controller: MediaController? = null
@@ -70,10 +74,8 @@ class PlaybackController(context: Context) {
                     if (playbackState == Player.STATE_READY) {
                         consecutiveErrorRetries = 0
                     }
-                    // STATE_ENDED (auto-advance to the next song) is handled in
-                    // NowPlayingViewModel's own addListener() instead - it already has the
-                    // queue/repeat-mode logic nextSong() needs, so this class doesn't need its
-                    // own separate "what happens when a song ends" callback and caller to wire up.
+                    // STATE_ENDED (moving on to the next song) is handled in MusicService, so the
+                    // queue keeps playing with the app closed.
                 }
             })
             pendingListeners.forEach { controller?.addListener(it) }
@@ -98,11 +100,16 @@ class PlaybackController(context: Context) {
         controller?.removeListener(listener)
     }
 
-    fun playUri(uri: Uri, songId: Long, title: String, artist: String, artworkUrl: String?) {
+    /** [youtubeVideoId] is only for a stream that isn't a library song (the YouTube Play
+     * button): it lets MusicService fetch a fresh link when this one expires, since there's no
+     * library row to look the video up from. */
+    fun playUri(uri: Uri, songId: Long, title: String, artist: String, artworkUrl: String?, youtubeVideoId: String? = null) {
         val item = MediaItem.Builder().setUri(uri).setMediaId(songId.toString()).setMediaMetadata(
             MediaMetadata.Builder()
                 .setTitle(title).setArtist(artist)
-                .setArtworkUri(artworkUriOf(artworkUrl)).build()
+                .setArtworkUri(artworkUriOf(artworkUrl))
+                .apply { if (youtubeVideoId != null) setExtras(Bundle().apply { putString(EXTRA_YOUTUBE_VIDEO_ID, youtubeVideoId) }) }
+                .build()
         ).build()
         controller?.setMediaItem(item, true)
         controller?.prepare()

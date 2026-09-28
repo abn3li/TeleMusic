@@ -47,6 +47,9 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.lifecycle.viewmodel.initializer
+import androidx.lifecycle.viewmodel.viewModelFactory
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -84,9 +87,17 @@ fun YouTubeDownloadScreen(
     onPlayStream: (SongEntity, Uri, String) -> Unit
 ) {
     val app = LocalContext.current.applicationContext as TgMusicApp
-    val viewModel = remember {
-        YouTubeDownloadViewModel(app.applicationContext, app.ytDlpRepository, app.musicRepository, app.settingsStore, app.discoveryRepository, onPlayStream)
-    }
+    // viewModel(), not remember{}: scoped to this screen's back-stack entry, so it's cleared
+    // (its library listener and feed fetch stopped) when the screen goes away, and survives
+    // rotation with download progress intact. onPlayStream only reaches the Activity-scoped
+    // player, which outlives a rotation too.
+    val viewModel = viewModel<YouTubeDownloadViewModel>(
+        factory = viewModelFactory {
+            initializer {
+                YouTubeDownloadViewModel(app.applicationContext, app.ytDlpRepository, app.musicRepository, app.settingsStore, app.discoveryRepository, onPlayStream)
+            }
+        }
+    )
     val state by viewModel.uiState.collectAsState()
     var showImportDialog by remember { mutableStateOf(false) }
 
