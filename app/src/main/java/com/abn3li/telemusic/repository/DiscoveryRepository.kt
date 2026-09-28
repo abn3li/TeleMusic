@@ -20,17 +20,15 @@ import kotlinx.coroutines.withContext
  * itself is a single app-wide instance (constructed once in TgMusicApp), which is what makes
  * [cachedHome] a real cache and not just a per-screen one. Also owns the imported-playlists
  * table (a user-pinned Discovery entry stays until they remove it - see
- * YouTubeDownloadViewModel.importPlaylist's own doc), since it's the same "things shown in
+ * DiscoveryViewModel.importPlaylist's own doc), since it's the same "things shown in
  * Discovery" concern as the home feed above. */
 class DiscoveryRepository(
     private val importedPlaylistDao: ImportedPlaylistDao,
     private val client: InnertubeBrowseClient = InnertubeBrowseClient()
 ) {
-    // The Home feed screen (YouTubeDownloadScreen) builds a fresh ViewModel via a plain
-    // remember{} every time it's entered - not tied to the NavBackStackEntry, so it re-fetches
-    // on every visit with no caching of its own. Without this, that meant a real ~670KB network
-    // request every single time the user opened the YouTube download screen, even just to
-    // search - this cache turns every visit after the first into an instant, free return.
+    // Home's YouTube part asks for the feed again whenever its ViewModel is rebuilt (a fresh
+    // start, Home recreated) - a real ~670KB request each time without this cache; with it,
+    // every ask after the first is instant and free.
     @Volatile private var cachedHome: List<HomeSection>? = null
     @Volatile private var cachedGenres: List<BrowseCollection>? = null
 

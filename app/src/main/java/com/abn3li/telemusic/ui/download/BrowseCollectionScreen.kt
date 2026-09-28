@@ -77,7 +77,7 @@ fun BrowseCollectionScreen(
 ) {
     val app = LocalContext.current.applicationContext as TgMusicApp
     // viewModel(), not remember{}: cleared with this screen's back-stack entry, and kept across
-    // rotation (see YouTubeDownloadScreen).
+    // rotation.
     val viewModel = viewModel<BrowseCollectionViewModel>(
         key = "browse:$browseId:$params",
         factory = viewModelFactory {

@@ -26,7 +26,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.LibraryMusic
-import androidx.compose.material.icons.filled.Subscriptions
 import androidx.compose.material.icons.filled.Sync
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Scaffold
@@ -58,7 +57,6 @@ import androidx.navigation.compose.rememberNavController
 import com.abn3li.telemusic.TgMusicApp
 import com.abn3li.telemusic.ui.download.BrowseCollectionScreen
 import com.abn3li.telemusic.ui.onboarding.OnboardingScreen
-import com.abn3li.telemusic.ui.download.YouTubeDownloadScreen
 import com.abn3li.telemusic.ui.search.SearchScreen
 import com.abn3li.telemusic.ui.library.AppAccent
 import com.abn3li.telemusic.ui.library.AlbumDetailScreen
@@ -104,7 +102,6 @@ object Routes {
     const val ARTIST = "artist/{artist}"
     const val PLAYLIST = "playlist/{id}/{name}"
     const val SMART_PLAYLIST = "smart_playlist/{kind}"
-    const val YOUTUBE_DOWNLOAD = "youtube_download"
     const val SEARCH = "search"
     const val SPOTIFY = "spotify"
     const val YOUTUBE_BROWSE = "youtube_browse/{browseId}/{title}/{params}"
@@ -196,7 +193,7 @@ fun TgMusicNavGraph(navController: NavHostController = rememberNavController()) 
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = navBackStackEntry?.destination?.route
     val inLibrary = currentRoute in LibraryRoutes
-    val showBottomBar = inLibrary || currentRoute in listOf(Routes.HOME, Routes.SEARCH, Routes.YOUTUBE_DOWNLOAD, Routes.SYNC, Routes.SETTINGS)
+    val showBottomBar = inLibrary || currentRoute in listOf(Routes.HOME, Routes.SEARCH, Routes.SYNC, Routes.SETTINGS)
 
     val miniPlayerBottomMargin = if (showBottomBar) NavBarHeight + 4.dp else 12.dp
     val miniPlayerInset = if (playerState.song != null) {
@@ -282,14 +279,6 @@ fun TgMusicNavGraph(navController: NavHostController = rememberNavController()) 
                         onBack = libraryCallbacks.onBack,
                         onOpenPlaylist = { id, name -> navController.navigate(Routes.playlist(id, name)) },
                         onOpenSmartPlaylist = { kind -> navController.navigate(Routes.smartPlaylist(kind)) }
-                    )
-                }
-                composable(Routes.YOUTUBE_DOWNLOAD) {
-                    YouTubeDownloadScreen(
-                        onBack = { navController.popBackStack() },
-                        onOpenSearch = { navController.navigate(Routes.SEARCH) { launchSingleTop = true } },
-                        onOpenCollection = { c -> navController.navigate(Routes.youtubeBrowse(c.browseId, c.title, c.params)) },
-                        onPlayStream = { song, uri, videoId -> playerViewModel.playEphemeral(song, uri, videoId) }
                     )
                 }
                 composable(Routes.YOUTUBE_BROWSE) { backStackEntry ->
@@ -402,7 +391,6 @@ private fun AppBottomNavBar(
         listOf(
             NavigationItem(Routes.HOME, "Home", Icons.Default.Home),
             NavigationItem(Routes.LIBRARY, "Library", Icons.Default.LibraryMusic),
-            NavigationItem(Routes.YOUTUBE_DOWNLOAD, "YouTube", Icons.Default.Subscriptions),
             NavigationItem(Routes.SYNC, "Sync", Icons.Default.Sync)
         )
     }

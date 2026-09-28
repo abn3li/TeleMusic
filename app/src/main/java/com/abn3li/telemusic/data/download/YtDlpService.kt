@@ -43,7 +43,7 @@ data class YtDlpStreamResult(
 
 /** A playlist's own metadata, resolved by [YtDlpService.fetchPlaylistMetadata] from a pasted URL
  * - backs Discovery's "Import playlist" feature. [playlistId] is a bare YouTube playlist id (no
- * "VL" prefix), see YouTubeDownloadViewModel.importPlaylist for where that prefix gets added to
+ * "VL" prefix), see DiscoveryViewModel.importPlaylist for where that prefix gets added to
  * turn it into a real Innertube browseId. */
 data class YtDlpPlaylistMetadata(
     val playlistId: String,

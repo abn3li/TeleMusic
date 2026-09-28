@@ -6,13 +6,11 @@ import androidx.core.net.toUri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.abn3li.telemusic.data.browse.BrowseCollection
-import com.abn3li.telemusic.data.browse.HomeSection
 import com.abn3li.telemusic.data.browse.SearchFilter
 import com.abn3li.telemusic.data.download.DownloadQuality
 import com.abn3li.telemusic.data.download.YtDlpRepository
 import com.abn3li.telemusic.data.download.YtDlpSearchResult
 import com.abn3li.telemusic.data.download.ytDlpStableSongId
-import com.abn3li.telemusic.data.local.ImportedPlaylistEntity
 import com.abn3li.telemusic.data.local.SongEntity
 import com.abn3li.telemusic.data.settings.AppSettingsStore
 import com.abn3li.telemusic.repository.DiscoveryRepository
@@ -54,24 +52,13 @@ data class YouTubeDownloadUiState(
     // rather than re-requested, so picking a folder resumes the exact song the user tapped.
     // A row streams (not downloads) while its videoId is in here - shows a spinner in place of
     // its Play icon, same idea as downloadingIds/downloadedIds above but for onPlayClick.
-    val loadingStreamIds: Set<String> = emptySet(),
-    // The Home feed - shown whenever the query is blank instead of a plain "search for a song"
-    // placeholder, same as YouTube Music's own Home tab doubling as pre-search browse.
-    val isLoadingHome: Boolean = true,
-    val homeSections: List<HomeSection> = emptyList(),
-    val genres: List<BrowseCollection> = emptyList(),
-    // The user's pinned-by-URL Discovery entries - see importPlaylist's own doc. Backed by a
-    // Room Flow (collected via stateIn in the ViewModel), so a remove/import is reflected here
-    // automatically, no manual re-fetch needed.
-    val importedPlaylists: List<ImportedPlaylistEntity> = emptyList(),
-    val importPlaylistError: String? = null
+    val loadingStreamIds: Set<String> = emptySet()
 )
 
 /**
- * Backs the "search a song by name, download it" screen - the Seal-style flow the user asked
- * for, built on real yt-dlp (see data/download/YtDlpService) rather than a hand-rolled Innertube
- * client. A search is a single explicit action (the search action/button), not live-as-you-type -
- * each one is a real network call into yt-dlp, not free to fire on every keystroke.
+ * The YouTube half of the search page: finds songs, albums, artists and playlists, and plays
+ * (streams) or downloads a song. Each search is several network calls, so the page asks for one
+ * only once typing pauses, not on every key.
  */
 class YouTubeDownloadViewModel(
     private val context: Context,
@@ -88,23 +75,6 @@ class YouTubeDownloadViewModel(
 ) : ViewModel() {
     private val _uiState = MutableStateFlow(YouTubeDownloadUiState())
     val uiState: StateFlow<YouTubeDownloadUiState> = _uiState
-
-    init {
-        viewModelScope.launch {
-            coroutineScope {
-                val sectionsDeferred = async { discoveryRepository.homeFeed() }
-                val genresDeferred = async { discoveryRepository.genres() }
-                _uiState.update {
-                    it.copy(isLoadingHome = false, homeSections = sectionsDeferred.await(), genres = genresDeferred.await())
-                }
-            }
-        }
-        viewModelScope.launch {
-            discoveryRepository.observeImportedPlaylists().collect { imported ->
-                _uiState.update { it.copy(importedPlaylists = imported) }
-            }
-        }
-    }
 
     fun onQueryChange(query: String) {
         if (query.isBlank()) {
@@ -163,42 +133,6 @@ class YouTubeDownloadViewModel(
                 }
             }
         }
-    }
-
-    /** Resolves a pasted playlist URL (via yt-dlp - see fetch_playlist_metadata's own doc) and
-     * pins it into Discovery permanently, until the user removes it. [onResult] tells the dialog
-     * whether to close itself (true) or stay open showing [YouTubeDownloadUiState.importPlaylistError]
-     * (false). Uses the same "VL" browseId convention search-result playlists used to (see the
-     * removed playlistAsCollection's own history) so it opens through the exact same
-     * BrowseCollectionScreen/DiscoveryRepository.browse() path as any other Discovery card. */
-    fun importPlaylist(url: String, onResult: (Boolean) -> Unit) {
-        viewModelScope.launch {
-            val metadata = ytDlpRepository.fetchPlaylistMetadata(url)
-            if (metadata == null) {
-                _uiState.update { it.copy(importPlaylistError = "Couldn't recognize that as a playlist link") }
-                onResult(false)
-                return@launch
-            }
-            val browseId = if (metadata.playlistId.startsWith("VL")) metadata.playlistId else "VL${metadata.playlistId}"
-            discoveryRepository.saveImportedPlaylist(
-                ImportedPlaylistEntity(
-                    browseId = browseId,
-                    title = metadata.title,
-                    subtitle = metadata.subtitle,
-                    thumbnailUrl = metadata.thumbnailUrl
-                )
-            )
-            _uiState.update { it.copy(importPlaylistError = null) }
-            onResult(true)
-        }
-    }
-
-    fun removeImportedPlaylist(playlist: ImportedPlaylistEntity) {
-        viewModelScope.launch { discoveryRepository.removeImportedPlaylist(playlist.browseId) }
-    }
-
-    fun clearImportPlaylistError() {
-        _uiState.update { it.copy(importPlaylistError = null) }
     }
 
     /** Entry point from a row's Play tap - streams straight from a resolved googlevideo.com URL

@@ -7,7 +7,6 @@ import com.abn3li.telemusic.ui.library.AppAlert
 import com.abn3li.telemusic.ui.library.AlertAction
 import com.abn3li.telemusic.ui.library.AlertTextField
 import com.abn3li.telemusic.ui.library.AlertNote
-import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -46,9 +45,6 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.lifecycle.viewmodel.compose.viewModel
-import androidx.lifecycle.viewmodel.initializer
-import androidx.lifecycle.viewmodel.viewModelFactory
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -66,71 +62,51 @@ import com.abn3li.telemusic.TgMusicApp
 import com.abn3li.telemusic.data.browse.BrowseCollection
 import com.abn3li.telemusic.data.browse.BrowseKind
 import com.abn3li.telemusic.data.local.ImportedPlaylistEntity
-import com.abn3li.telemusic.data.local.SongEntity
 import com.abn3li.telemusic.ui.library.AppAccent
 import com.abn3li.telemusic.ui.library.DestructiveRed
 import com.abn3li.telemusic.ui.library.FilterPill
 import com.abn3li.telemusic.ui.library.GroupLabelColor
-import com.abn3li.telemusic.ui.library.LargeTitleList
-import com.abn3li.telemusic.ui.library.SearchEntryField
 
-/**
- * YouTube Music's own home shelves plus any playlists imported by URL. The search field opens
- * the app's one search page (library and YouTube together).
- */
+/** Home's paste-a-link dialog, wired to [viewModel]: a YouTube playlist link is pinned into
+ * Discovery, a Spotify link is imported into the Library. */
 @Composable
-fun YouTubeDownloadScreen(
-    onBack: () -> Unit,
-    onOpenSearch: () -> Unit,
-    onOpenCollection: (BrowseCollection) -> Unit,
-    onPlayStream: (SongEntity, Uri, String) -> Unit
-) {
+internal fun ImportPlaylistPrompt(viewModel: DiscoveryViewModel, onClose: () -> Unit) {
     val app = LocalContext.current.applicationContext as TgMusicApp
-    // viewModel(), not remember{}: scoped to this screen's back-stack entry, so it's cleared
-    // (its library listener and feed fetch stopped) when the screen goes away.
-    val viewModel = viewModel<YouTubeDownloadViewModel>(
-        factory = viewModelFactory {
-            initializer {
-                YouTubeDownloadViewModel(app.applicationContext, app.ytDlpRepository, app.musicRepository, app.settingsStore, app.discoveryRepository, onPlayStream, app.workScope)
-            }
+    val state by viewModel.uiState.collectAsState()
+    val spotifyState by app.spotifyImporter.state.collectAsState()
+    ImportPlaylistDialog(
+        errorMessage = state.importPlaylistError,
+        spotifyState = spotifyState,
+        onDismiss = {
+            onClose()
+            viewModel.clearImportPlaylistError()
+            app.spotifyImporter.acknowledge()
+        },
+        onImport = { url ->
+            if (app.spotifyImporter.isSpotifyLink(url)) app.spotifyImporter.start(url)
+            else viewModel.importPlaylist(url) { success -> if (success) onClose() }
         }
     )
-    val state by viewModel.uiState.collectAsState()
-    var showImportDialog by remember { mutableStateOf(false) }
-
-    val spotifyState by app.spotifyImporter.state.collectAsState()
-    if (showImportDialog) {
-        ImportPlaylistDialog(
-            errorMessage = state.importPlaylistError,
-            spotifyState = spotifyState,
-            onDismiss = {
-                showImportDialog = false
-                viewModel.clearImportPlaylistError()
-                app.spotifyImporter.acknowledge()
-            },
-            onImport = { url ->
-                if (app.spotifyImporter.isSpotifyLink(url)) app.spotifyImporter.start(url)
-                else viewModel.importPlaylist(url) { success -> if (success) showImportDialog = false }
-            }
-        )
-    }
-
-    LargeTitleList(
-        title = "YouTube",
-        onBack = onBack,
-        stickyContent = { SearchEntryField("Your music and YouTube", onOpenSearch) }
-    ) {
-        discovery(
-            isLoading = state.isLoadingHome,
-            sections = state.homeSections,
-            genres = state.genres,
-            importedPlaylists = state.importedPlaylists,
-            onOpenCollection = onOpenCollection,
-            onImportPlaylistClick = { showImportDialog = true },
-            onRemoveImportedPlaylist = viewModel::removeImportedPlaylist
-        )
-    }
 }
+
+/**
+ * YouTube Music on Home: playlists imported by link (+ adds one), genres, then YouTube Music's
+ * own home shelves.
+ */
+internal fun LazyListScope.youTubeDiscovery(
+    state: DiscoveryUiState,
+    onOpenCollection: (BrowseCollection) -> Unit,
+    onImportPlaylistClick: () -> Unit,
+    onRemoveImportedPlaylist: (ImportedPlaylistEntity) -> Unit
+) = discovery(
+    isLoading = state.isLoading,
+    sections = state.sections,
+    genres = state.genres,
+    importedPlaylists = state.importedPlaylists,
+    onOpenCollection = onOpenCollection,
+    onImportPlaylistClick = onImportPlaylistClick,
+    onRemoveImportedPlaylist = onRemoveImportedPlaylist
+)
 
 private fun LazyListScope.discovery(
     isLoading: Boolean,
@@ -203,7 +179,7 @@ private fun LazyListScope.discovery(
                 }
             }
             // Keyed by title + index: YouTube's feed can contain two shelves with the same title.
-            itemsIndexed(sections, key = { index, section -> "${section.title}_$index" }, contentType = { _, _ -> "shelf" }) { _, section ->
+            itemsIndexed(sections, key = { index, section -> "yt_shelf_${section.title}_$index" }, contentType = { _, _ -> "shelf" }) { _, section ->
                 ShelfHeader(section.title)
                 LazyRow(horizontalArrangement = Arrangement.spacedBy(14.dp), contentPadding = PaddingValues(horizontal = 18.dp)) {
                     items(section.items, key = { it.browseId }) { card ->
@@ -218,10 +194,10 @@ private fun LazyListScope.discovery(
 @Composable
 internal fun ShelfHeader(title: String, action: (@Composable () -> Unit)? = null) {
     Row(
-        Modifier.fillMaxWidth().padding(horizontal = 18.dp).padding(top = 22.dp, bottom = 10.dp),
+        Modifier.fillMaxWidth().padding(horizontal = 18.dp).padding(top = 18.dp, bottom = 10.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Text(title, color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+        Text(title, color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
         action?.invoke()
     }
 }
@@ -350,7 +326,6 @@ internal fun CenteredMessage(text: String) {
 }
 
 
-/** Paste a YouTube playlist link to pin it in Discovery. */
 /** Paste a YouTube playlist link to pin it in Discovery, or a Spotify playlist/album link to
  * import it into the Library as YouTube Music songs (progress shown here while it runs; closing
  * the dialog doesn't stop it). */

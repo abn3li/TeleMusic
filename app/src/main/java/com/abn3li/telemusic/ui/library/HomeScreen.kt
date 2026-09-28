@@ -28,7 +28,13 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.produceState
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.lifecycle.viewmodel.initializer
+import androidx.lifecycle.viewmodel.viewModelFactory
+import com.abn3li.telemusic.ui.download.DiscoveryViewModel
+import com.abn3li.telemusic.ui.download.ImportPlaylistPrompt
+import com.abn3li.telemusic.ui.download.youTubeDiscovery
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -48,10 +54,11 @@ private val MixDaily = Color(0xFF72243E)
 private val MixRediscover = Color(0xFF3C3489)
 
 /**
- * The Home tab: shortcut tiles, then Recently Played, Made for You, Recently Added, Top Artists
- * and a few YouTube Music picks. The library sections come from [LibraryViewModel.home] (worked
- * out once per library change); the YouTube row reuses the Discovery feed's cache. Nothing here
- * animates or polls.
+ * The Home tab: a search field (library and YouTube), shortcut tiles, then Recently Played, Made
+ * for You, Recently Added, Top Artists, and YouTube Music - imported playlists, genres and its
+ * own shelves. The library sections come from [LibraryViewModel.home] (worked out once per
+ * library change); the YouTube part from the Discovery feed's cache. Nothing here animates or
+ * polls.
  */
 @Composable
 fun HomeScreen(
@@ -67,11 +74,13 @@ fun HomeScreen(
     val home by viewModel.home.collectAsState()
     val artists by viewModel.artists.collectAsState()
     val pinned by viewModel.pinnedPlaylists.collectAsState()
-    val youTubePicks by produceState<List<BrowseCollection>>(emptyList()) {
-        value = runCatching { app.discoveryRepository.homeFeed() }.getOrNull()
-            // The same playlist/album can sit in more than one shelf; LazyRow keys must be unique.
-            ?.flatMap { it.items }?.distinctBy { it.browseId }?.take(10).orEmpty()
-    }
+    // Qualified: this function's own `viewModel` parameter hides the plain name.
+    val discovery = androidx.lifecycle.viewmodel.compose.viewModel<DiscoveryViewModel>(
+        factory = viewModelFactory { initializer { DiscoveryViewModel(app.ytDlpRepository, app.discoveryRepository) } }
+    )
+    val youTube by discovery.uiState.collectAsState()
+    var showImport by remember { mutableStateOf(false) }
+    if (showImport) ImportPlaylistPrompt(discovery, onClose = { showImport = false })
     val topArtists = remember(artists) { artists.sortedByDescending { it.songCount }.take(12) }
     val pinnedRows = remember(pinned) { pinned.chunked(2) }
 
@@ -176,23 +185,13 @@ fun HomeScreen(
             }
         }
 
-        if (youTubePicks.isNotEmpty()) {
-            item("yt_header") { HomeSectionHeader("From YouTube Music") }
-            item("yt") {
-                LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    items(youTubePicks, key = { it.browseId }) { collection ->
-                        Column(Modifier.width(128.dp).clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) { onOpenYouTubeCollection(collection) }) {
-                            CoverTile(collection.thumbnailUrl, Modifier.size(128.dp), corner = 6)
-                            Spacer(Modifier.height(5.dp))
-                            Text(collection.title, color = Color.White.copy(alpha = 0.9f), fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                            collection.subtitle?.let {
-                                Text(it, color = Color.White.copy(alpha = 0.55f), fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                            }
-                        }
-                    }
-                }
-            }
-        }
+        item("yt_header") { HomeSectionHeader("From YouTube Music") }
+        youTubeDiscovery(
+            state = youTube,
+            onOpenCollection = onOpenYouTubeCollection,
+            onImportPlaylistClick = { showImport = true },
+            onRemoveImportedPlaylist = discovery::removeImportedPlaylist
+        )
         item("end") { Spacer(Modifier.height(8.dp)) }
     }
 }
