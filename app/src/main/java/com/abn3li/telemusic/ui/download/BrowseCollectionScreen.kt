@@ -61,7 +61,7 @@ fun BrowseCollectionScreen(
             initializer {
                 BrowseCollectionViewModel(
                     app.applicationContext, title, browseId, params,
-                    app.discoveryRepository, app.ytDlpRepository, app.musicRepository, app.settingsStore, onPlayStream
+                    app.discoveryRepository, app.ytDlpRepository, app.musicRepository, app.settingsStore, onPlayStream, app.workScope
                 )
             }
         }

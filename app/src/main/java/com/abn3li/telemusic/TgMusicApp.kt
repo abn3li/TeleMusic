@@ -40,6 +40,10 @@ class TgMusicApp : Application(), ImageLoaderFactory {
 
     private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
+    /** For work a screen starts that must finish even if the screen closes - a YouTube download
+     * or a playlist Import to Library. (Main thread, like a ViewModel's own scope.) */
+    val workScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+
     override fun onCreate() {
         super.onCreate()
         val db = AppDatabase.get(this)

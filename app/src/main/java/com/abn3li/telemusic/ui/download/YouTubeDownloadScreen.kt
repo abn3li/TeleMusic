@@ -94,7 +94,7 @@ fun YouTubeDownloadScreen(
     val viewModel = viewModel<YouTubeDownloadViewModel>(
         factory = viewModelFactory {
             initializer {
-                YouTubeDownloadViewModel(app.applicationContext, app.ytDlpRepository, app.musicRepository, app.settingsStore, app.discoveryRepository, onPlayStream)
+                YouTubeDownloadViewModel(app.applicationContext, app.ytDlpRepository, app.musicRepository, app.settingsStore, app.discoveryRepository, onPlayStream, app.workScope)
             }
         }
     )

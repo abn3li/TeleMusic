@@ -17,6 +17,7 @@ import com.abn3li.telemusic.repository.MusicRepository
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 import java.io.File
 
@@ -54,7 +55,10 @@ class BrowseCollectionViewModel(
     private val ytDlpRepository: YtDlpRepository,
     private val musicRepository: MusicRepository,
     private val settingsStore: AppSettingsStore,
-    private val onPlayStream: (SongEntity, Uri, String) -> Unit
+    private val onPlayStream: (SongEntity, Uri, String) -> Unit,
+    // Downloads and Import to Library run here, not in viewModelScope: they must finish even
+    // when the screen closes and this ViewModel is cleared - never a half-imported playlist.
+    private val workScope: CoroutineScope
 ) : ViewModel() {
     private val _uiState = MutableStateFlow(BrowseCollectionUiState(title = title))
     val uiState: StateFlow<BrowseCollectionUiState> = _uiState
@@ -141,7 +145,7 @@ class BrowseCollectionViewModel(
         if (_uiState.value.importProgress != null || _uiState.value.importedPlaylistId != null) return
         val tracks = _uiState.value.tracks
         if (tracks.isEmpty()) return
-        viewModelScope.launch {
+        workScope.launch {
             _uiState.update { it.copy(importProgress = 0 to tracks.size) }
             val playlistId = musicRepository.createPlaylist(_uiState.value.title)
             tracks.forEachIndexed { index, track ->
@@ -155,7 +159,7 @@ class BrowseCollectionViewModel(
     }
 
     private fun startDownload(track: BrowseTrack) {
-        viewModelScope.launch {
+        workScope.launch {
             _uiState.update { it.copy(downloadingIds = it.downloadingIds + track.videoId) }
             val destDir = File(context.filesDir, "youtube_downloads")
             val songId = ytDlpStableSongId(track.videoId)

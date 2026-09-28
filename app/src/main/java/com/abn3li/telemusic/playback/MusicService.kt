@@ -15,6 +15,7 @@ import android.os.SystemClock
 import androidx.core.content.ContextCompat
 import com.abn3li.telemusic.widget.MusicWidgets
 import android.util.Log
+import android.widget.Toast
 import androidx.annotation.OptIn
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
@@ -182,11 +183,20 @@ class MusicService : MediaLibraryService() {
         if (endedId != queue.currentSongId()) return
         skipJob?.cancel()
         skipJob = serviceScope.launch {
-            repeat(MAX_UNPLAYABLE_SKIPS) {
-                val nextId = queue.next(auto = true) ?: return@launch
+            val before = queue.snapshot()
+            var lastTried: Long? = null
+            for (attempt in 0 until MAX_UNPLAYABLE_SKIPS) {
+                val nextId = queue.next(auto = true) ?: break
+                lastTried = nextId
                 if (playAdjacentSong(nextId)) return@launch
                 // Not played because the user moved on meanwhile: leave the queue where they put it.
                 if (queue.currentSongId() != nextId) return@launch
+            }
+            // Nothing could be played: put the queue back on the song that ended, so the app
+            // (still showing that song) and the queue agree, and say why the music stopped.
+            if (lastTried != null && queue.currentSongId() == lastTried) {
+                queue.restore(before)
+                Toast.makeText(this@MusicService, "Couldn't play the next songs", Toast.LENGTH_LONG).show()
             }
         }
     }

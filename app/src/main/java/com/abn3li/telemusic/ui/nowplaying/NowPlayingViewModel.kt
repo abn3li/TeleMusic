@@ -320,6 +320,10 @@ class NowPlayingViewModel(
                 isPlaying = if (resetPosition) _uiState.value.isPlaying else playbackController.isPlaying()
             )
             refreshQueue()
+            // Songs now move on in MusicService, so this is the usual path to the next song:
+            // get the one after it ready too (a YouTube link resolved ahead), as an in-app
+            // play does, or every change after the first would start with a gap.
+            prefetchNextTrack()
             withContext(Dispatchers.IO) { repository.stampLastPlayed(song) }
         }
     }

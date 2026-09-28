@@ -21,6 +21,7 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 import java.io.File
 
@@ -65,7 +66,10 @@ class YouTubeDownloadViewModel(
     private val discoveryRepository: DiscoveryRepository,
     // Hands off to the shared NowPlayingViewModel.playEphemeral() - constructed at the nav root
     // (see NavGraph.kt), not something this screen-scoped ViewModel has a reference to itself.
-    private val onPlayStream: (SongEntity, Uri, String) -> Unit
+    private val onPlayStream: (SongEntity, Uri, String) -> Unit,
+    // Downloads run here, not in viewModelScope: they must finish (and land in the library)
+    // even when the screen closes and this ViewModel is cleared.
+    private val workScope: CoroutineScope
 ) : ViewModel() {
     private val _uiState = MutableStateFlow(YouTubeDownloadUiState())
     val uiState: StateFlow<YouTubeDownloadUiState> = _uiState
@@ -196,7 +200,7 @@ class YouTubeDownloadViewModel(
 
 
     private fun startDownload(result: YtDlpSearchResult) {
-        viewModelScope.launch {
+        workScope.launch {
             _uiState.update { it.copy(downloadingIds = it.downloadingIds + result.videoId) }
             val destDir = File(context.filesDir, "youtube_downloads")
             val songId = ytDlpStableSongId(result.videoId)

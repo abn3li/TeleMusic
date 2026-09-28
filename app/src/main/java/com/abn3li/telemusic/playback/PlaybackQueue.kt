@@ -45,6 +45,20 @@ class PlaybackQueue {
 
     fun currentSongId(): Long? = base.getOrNull(baseIndex)
 
+    /** Where the queue is now, to go back to with [restore]. */
+    fun snapshot(): Snapshot = Snapshot(originalSongIds.toList(), base.toList(), baseIndex, nextInQueue.toList())
+
+    /** Puts the queue back where [snapshot] was taken - used when moving on played nothing. */
+    fun restore(snapshot: Snapshot) {
+        originalSongIds = snapshot.originalSongIds.toMutableList()
+        base = snapshot.base.toMutableList()
+        baseIndex = snapshot.baseIndex
+        nextInQueue.clear()
+        nextInQueue.addAll(snapshot.nextInQueue)
+    }
+
+    class Snapshot(val originalSongIds: List<Long>, val base: List<Long>, val baseIndex: Int, val nextInQueue: List<Long>)
+
     fun nextInQueueIds(): List<Long> = nextInQueue.toList()
 
     fun upNextIds(): List<Long> =
@@ -181,11 +195,9 @@ class PlaybackQueue {
         return repeatMode
     }
 
-    /** [auto] is the end-of-song advance: only that one repeats the song under Repeat One. A
-     * Next the user asked for always moves on (wrapping around, like Repeat All). */
     /** The next song, made current. [auto] is a song ending on its own: under Repeat One it
      * replays, and with Repeat off the end of the queue stops (null) instead of wrapping round
-     * to the first song. A skip (not [auto]) still wraps, as before. */
+     * to the first song. A Next the user asked for always moves on (wrapping around). */
     fun next(auto: Boolean = false): Long? {
         if (base.isEmpty()) return null
         if (auto && repeatMode == RepeatMode.ONE) return currentSongId()
