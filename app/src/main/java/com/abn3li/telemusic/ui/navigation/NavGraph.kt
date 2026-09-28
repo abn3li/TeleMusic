@@ -59,6 +59,7 @@ import com.abn3li.telemusic.TgMusicApp
 import com.abn3li.telemusic.ui.download.BrowseCollectionScreen
 import com.abn3li.telemusic.ui.onboarding.OnboardingScreen
 import com.abn3li.telemusic.ui.download.YouTubeDownloadScreen
+import com.abn3li.telemusic.ui.search.SearchScreen
 import com.abn3li.telemusic.ui.library.AppAccent
 import com.abn3li.telemusic.ui.library.AlbumDetailScreen
 import com.abn3li.telemusic.ui.library.ArtistDetailScreen
@@ -104,6 +105,7 @@ object Routes {
     const val PLAYLIST = "playlist/{id}/{name}"
     const val SMART_PLAYLIST = "smart_playlist/{kind}"
     const val YOUTUBE_DOWNLOAD = "youtube_download"
+    const val SEARCH = "search"
     const val SPOTIFY = "spotify"
     const val YOUTUBE_BROWSE = "youtube_browse/{browseId}/{title}/{params}"
 
@@ -194,7 +196,7 @@ fun TgMusicNavGraph(navController: NavHostController = rememberNavController()) 
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = navBackStackEntry?.destination?.route
     val inLibrary = currentRoute in LibraryRoutes
-    val showBottomBar = inLibrary || currentRoute in listOf(Routes.HOME, Routes.YOUTUBE_DOWNLOAD, Routes.SYNC, Routes.SETTINGS)
+    val showBottomBar = inLibrary || currentRoute in listOf(Routes.HOME, Routes.SEARCH, Routes.YOUTUBE_DOWNLOAD, Routes.SYNC, Routes.SETTINGS)
 
     val miniPlayerBottomMargin = if (showBottomBar) NavBarHeight + 4.dp else 12.dp
     val miniPlayerInset = if (playerState.song != null) {
@@ -229,7 +231,17 @@ fun TgMusicNavGraph(navController: NavHostController = rememberNavController()) 
                         onOpenSettings = { navController.navigate(Routes.SETTINGS) },
                         onOpenPlaylist = { id, name -> navController.navigate(Routes.playlist(id, name)) },
                         onOpenSmartPlaylist = { kind -> navController.navigate(Routes.smartPlaylist(kind)) },
-                        onOpenYouTubeCollection = { c -> navController.navigate(Routes.youtubeBrowse(c.browseId, c.title, c.params)) }
+                        onOpenYouTubeCollection = { c -> navController.navigate(Routes.youtubeBrowse(c.browseId, c.title, c.params)) },
+                        onOpenSearch = { navController.navigate(Routes.SEARCH) { launchSingleTop = true } }
+                    )
+                }
+                composable(Routes.SEARCH) {
+                    SearchScreen(
+                        libraryViewModel = libraryViewModel,
+                        callbacks = libraryCallbacks,
+                        onOpenPlaylist = { id, name -> navController.navigate(Routes.playlist(id, name)) },
+                        onOpenCollection = { c -> navController.navigate(Routes.youtubeBrowse(c.browseId, c.title, c.params)) },
+                        onPlayStream = { song, uri, videoId -> playerViewModel.playEphemeral(song, uri, videoId) }
                     )
                 }
                 composable(Routes.SPOTIFY) {
@@ -275,6 +287,7 @@ fun TgMusicNavGraph(navController: NavHostController = rememberNavController()) 
                 composable(Routes.YOUTUBE_DOWNLOAD) {
                     YouTubeDownloadScreen(
                         onBack = { navController.popBackStack() },
+                        onOpenSearch = { navController.navigate(Routes.SEARCH) { launchSingleTop = true } },
                         onOpenCollection = { c -> navController.navigate(Routes.youtubeBrowse(c.browseId, c.title, c.params)) },
                         onPlayStream = { song, uri, videoId -> playerViewModel.playEphemeral(song, uri, videoId) }
                     )
@@ -331,7 +344,12 @@ fun TgMusicNavGraph(navController: NavHostController = rememberNavController()) 
 
         if (showBottomBar) {
             AppBottomNavBar(
-                currentRoute = if (inLibrary) Routes.LIBRARY else currentRoute,
+                // The search page is opened from Home, so Home stays lit there.
+                currentRoute = when {
+                    inLibrary -> Routes.LIBRARY
+                    currentRoute == Routes.SEARCH -> Routes.HOME
+                    else -> currentRoute
+                },
                 onNavigate = { route ->
                     when {
                         // Home tapped: back to the Home page (a playlist/artist opened from Home

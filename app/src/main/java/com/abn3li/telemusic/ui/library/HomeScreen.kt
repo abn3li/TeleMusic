@@ -60,7 +60,8 @@ fun HomeScreen(
     onOpenSettings: () -> Unit,
     onOpenPlaylist: (Long, String) -> Unit,
     onOpenSmartPlaylist: (SmartPlaylistKind) -> Unit,
-    onOpenYouTubeCollection: (BrowseCollection) -> Unit
+    onOpenYouTubeCollection: (BrowseCollection) -> Unit,
+    onOpenSearch: () -> Unit
 ) {
     val app = LocalContext.current.applicationContext as TgMusicApp
     val home by viewModel.home.collectAsState()
@@ -85,7 +86,8 @@ fun HomeScreen(
                     .size(34.dp)
                     .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onOpenSettings)
             )
-        }
+        },
+        stickyContent = { SearchEntryField("Your music and YouTube", onOpenSearch) }
     ) {
         item("shortcuts") {
             Column(Modifier.padding(horizontal = 16.dp).padding(top = 4.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {

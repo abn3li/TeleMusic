@@ -27,11 +27,16 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import java.io.File
 
-/** The search result tabs: everything, or one kind. */
-enum class SearchTab(val label: String) { ALL("All"), SONGS("Songs"), ALBUMS("Albums"), ARTISTS("Artists"), PLAYLISTS("Playlists") }
+/** The search result tabs: everything, only what's in the library, or one kind (library matches
+ * of that kind first, then YouTube's). */
+enum class SearchTab(val label: String) {
+    ALL("All"), LIBRARY("Library"), SONGS("Songs"), ALBUMS("Albums"), ARTISTS("Artists"), PLAYLISTS("Playlists")
+}
 
 data class YouTubeDownloadUiState(
     val query: String = "",
+    // The query the results below belong to; differs from [query] while a new search waits to run.
+    val searchedQuery: String = "",
     val isSearching: Boolean = false,
     val tab: SearchTab = SearchTab.ALL,
     val results: List<YtDlpSearchResult> = emptyList(),
@@ -102,28 +107,39 @@ class YouTubeDownloadViewModel(
     }
 
     fun onQueryChange(query: String) {
-        _uiState.update { it.copy(query = query) }
+        if (query.isBlank()) {
+            // Cleared: drop the old results, so the next search starts clean.
+            searchJob?.cancel()
+            _uiState.update {
+                it.copy(query = query, searchedQuery = "", isSearching = false, results = emptyList(), albums = emptyList(), artists = emptyList(), playlists = emptyList(), errorMessage = null)
+            }
+        } else {
+            _uiState.update { it.copy(query = query) }
+        }
     }
 
     fun selectTab(tab: SearchTab) {
         _uiState.update { it.copy(tab = tab) }
     }
 
-    /** One search fills every tab at once - songs, albums, artists and playlists are asked in
-     * parallel, so switching tabs afterwards is instant. Songs come from YouTube Music's own
-     * Songs tab (one request, square album art); if that finds nothing, the older yt-dlp search
-     * is tried instead. */
     // The search in flight: a new one cancels it, so an older, slower search can't finish last
     // and put its results under the newer query.
     private var searchJob: Job? = null
 
-    fun search() {
+    /** One search fills every tab at once - songs, albums, artists and playlists are asked in
+     * parallel, so switching tabs afterwards is instant. Songs come from YouTube Music's own
+     * Songs tab (one request, square album art); if that finds nothing, the older yt-dlp search
+     * is tried instead. The search page calls it on its own once typing
+     * pauses, and again ([force]) from the keyboard's Search key; without [force] a query that's
+     * already searched (or being searched) isn't asked again. */
+    fun search(force: Boolean = false) {
         val query = _uiState.value.query.trim()
         if (query.isEmpty()) return
+        if (!force && query == _uiState.value.searchedQuery) return
         searchJob?.cancel()
         searchJob = viewModelScope.launch {
             _uiState.update {
-                it.copy(isSearching = true, errorMessage = null, results = emptyList(), albums = emptyList(), artists = emptyList(), playlists = emptyList())
+                it.copy(searchedQuery = query, isSearching = true, errorMessage = null, results = emptyList(), albums = emptyList(), artists = emptyList(), playlists = emptyList())
             }
             coroutineScope {
                 val songs = async {

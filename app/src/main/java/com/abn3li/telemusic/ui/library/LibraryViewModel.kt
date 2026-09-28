@@ -121,6 +121,10 @@ class LibraryViewModel(private val repository: MusicRepository) : ViewModel() {
         .flowOn(kotlinx.coroutines.Dispatchers.Default)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), HomeData())
 
+    /** Every library song, with nothing hidden - what the search page looks through. */
+    val allSongs: StateFlow<List<SongEntity>> = repository.observeLibrary(SortField.TITLE, true)
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
     val albums: StateFlow<List<AlbumSummary>> = repository.observeAlbums().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
     val artists: StateFlow<List<ArtistSummary>> = repository.observeArtists().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
     val playlists: StateFlow<List<PlaylistEntity>> = repository.observePlaylists().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())

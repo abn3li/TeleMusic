@@ -8,7 +8,6 @@ import com.abn3li.telemusic.ui.library.AlertAction
 import com.abn3li.telemusic.ui.library.AlertTextField
 import com.abn3li.telemusic.ui.library.AlertNote
 import android.net.Uri
-import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -73,27 +72,22 @@ import com.abn3li.telemusic.ui.library.DestructiveRed
 import com.abn3li.telemusic.ui.library.FilterPill
 import com.abn3li.telemusic.ui.library.GroupLabelColor
 import com.abn3li.telemusic.ui.library.LargeTitleList
-import com.abn3li.telemusic.ui.library.LibraryDivider
-import com.abn3li.telemusic.ui.library.LibrarySearchField
-import com.abn3li.telemusic.data.download.YtDlpSearchResult
-import com.abn3li.telemusic.ui.library.SectionHeader
-import androidx.compose.material.icons.automirrored.rounded.ArrowForwardIos
+import com.abn3li.telemusic.ui.library.SearchEntryField
 
 /**
- * Search a song by name and stream (Play) or save (Download) it. With no query, Discovery shows
- * YouTube Music's own home shelves plus any playlists imported by URL.
+ * YouTube Music's own home shelves plus any playlists imported by URL. The search field opens
+ * the app's one search page (library and YouTube together).
  */
 @Composable
 fun YouTubeDownloadScreen(
     onBack: () -> Unit,
+    onOpenSearch: () -> Unit,
     onOpenCollection: (BrowseCollection) -> Unit,
     onPlayStream: (SongEntity, Uri, String) -> Unit
 ) {
     val app = LocalContext.current.applicationContext as TgMusicApp
     // viewModel(), not remember{}: scoped to this screen's back-stack entry, so it's cleared
-    // (its library listener and feed fetch stopped) when the screen goes away, and survives
-    // rotation with download progress intact. onPlayStream only reaches the Activity-scoped
-    // player, which outlives a rotation too.
+    // (its library listener and feed fetch stopped) when the screen goes away.
     val viewModel = viewModel<YouTubeDownloadViewModel>(
         factory = viewModelFactory {
             initializer {
@@ -103,9 +97,6 @@ fun YouTubeDownloadScreen(
     )
     val state by viewModel.uiState.collectAsState()
     var showImportDialog by remember { mutableStateOf(false) }
-
-    // Back while showing results returns to Discovery first rather than leaving the screen.
-    BackHandler(enabled = state.query.isNotBlank()) { viewModel.onQueryChange("") }
 
     val spotifyState by app.spotifyImporter.state.collectAsState()
     if (showImportDialog) {
@@ -124,142 +115,19 @@ fun YouTubeDownloadScreen(
         )
     }
 
-
     LargeTitleList(
         title = "YouTube",
         onBack = onBack,
-        stickyContent = {
-            Column {
-                LibrarySearchField(state.query, "Search YouTube", viewModel::onQueryChange, onSearch = { viewModel.search() })
-                if (state.query.isNotBlank()) {
-                    LazyRow(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        contentPadding = PaddingValues(horizontal = 18.dp),
-                        modifier = Modifier.padding(top = 10.dp, bottom = 4.dp)
-                    ) {
-                        items(SearchTab.entries.toList(), key = { it.name }) { tab ->
-                            FilterPill(tab.label, selected = state.tab == tab, onClick = { viewModel.selectTab(tab) })
-                        }
-                    }
-                }
-            }
-        }
+        stickyContent = { SearchEntryField("Your music and YouTube", onOpenSearch) }
     ) {
-        when {
-            state.query.isBlank() -> discovery(
-                isLoading = state.isLoadingHome,
-                sections = state.homeSections,
-                genres = state.genres,
-                importedPlaylists = state.importedPlaylists,
-                onOpenCollection = onOpenCollection,
-                onImportPlaylistClick = { showImportDialog = true },
-                onRemoveImportedPlaylist = viewModel::removeImportedPlaylist
-            )
-            state.isSearching -> item("searching") { CenteredSpinner() }
-            else -> searchResults(
-                state = state,
-                songRow = { result ->
-                    TrackResultRow(
-                        title = result.title,
-                        artist = result.artist,
-                        thumbnailUrl = result.thumbnailUrl,
-                        isDownloading = result.videoId in state.downloadingIds,
-                        isDownloaded = result.videoId in state.downloadedIds,
-                        isLoadingStream = result.videoId in state.loadingStreamIds,
-                        onDownloadClick = { app.downloadGate.run { viewModel.onDownloadIconClick(result) } },
-                        onPlayClick = { viewModel.onPlayClick(result) }
-                    )
-                },
-                onSelectTab = viewModel::selectTab,
-                onOpenCollection = onOpenCollection
-            )
-        }
-    }
-}
-
-/**
- * A search's results for the chosen tab. All shows a few songs, then a shelf each of albums,
- * artists and playlists (the arrow opens that tab); the other tabs list one kind in full.
- */
-private fun LazyListScope.searchResults(
-    state: YouTubeDownloadUiState,
-    songRow: @Composable (YtDlpSearchResult) -> Unit,
-    onSelectTab: (SearchTab) -> Unit,
-    onOpenCollection: (BrowseCollection) -> Unit
-) {
-    fun songs(list: List<YtDlpSearchResult>) {
-        itemsIndexed(list, key = { _, r -> r.videoId }, contentType = { _, _ -> "track" }) { index, result ->
-            songRow(result)
-            if (index < list.lastIndex) LibraryDivider(start = 88.dp)
-        }
-    }
-    fun rows(list: List<BrowseCollection>, empty: String) {
-        if (list.isEmpty()) item("empty_rows") { CenteredMessage(empty) }
-        itemsIndexed(list, key = { _, c -> c.browseId }, contentType = { _, _ -> "collection" }) { index, collection ->
-            CollectionResultRow(collection) { onOpenCollection(collection) }
-            if (index < list.lastIndex) LibraryDivider(start = 88.dp)
-        }
-    }
-    fun shelf(title: String, tab: SearchTab, list: List<BrowseCollection>) {
-        if (list.isEmpty()) return
-        item("shelf_title_${tab.name}") { SectionHeader(title) { onSelectTab(tab) } }
-        item("shelf_${tab.name}") {
-            LazyRow(horizontalArrangement = Arrangement.spacedBy(14.dp), contentPadding = PaddingValues(horizontal = 18.dp)) {
-                items(list, key = { it.browseId }) { card -> CollectionCard(card) { onOpenCollection(card) } }
-            }
-        }
-    }
-
-    when (state.tab) {
-        SearchTab.ALL -> {
-            if (state.results.isEmpty() && state.albums.isEmpty() && state.artists.isEmpty() && state.playlists.isEmpty()) {
-                item("nothing") { CenteredMessage("Nothing found") }
-                return
-            }
-            if (state.results.isNotEmpty()) {
-                item("songs_title") { SectionHeader("Songs") { onSelectTab(SearchTab.SONGS) } }
-                songs(state.results.take(4))
-            }
-            shelf("Albums", SearchTab.ALBUMS, state.albums)
-            shelf("Artists", SearchTab.ARTISTS, state.artists)
-            shelf("Playlists", SearchTab.PLAYLISTS, state.playlists)
-        }
-        SearchTab.SONGS -> {
-            if (state.results.isEmpty()) item("no_songs") { CenteredMessage(state.errorMessage ?: "No songs found") }
-            songs(state.results)
-        }
-        SearchTab.ALBUMS -> rows(state.albums, "No albums found")
-        SearchTab.ARTISTS -> rows(state.artists, "No artists found")
-        SearchTab.PLAYLISTS -> rows(state.playlists, "No playlists found")
-    }
-}
-
-/** An album / artist / playlist in a search list: artwork (round for an artist), title, what
- * it is, and an arrow - it opens a page rather than playing. */
-@Composable
-private fun CollectionResultRow(collection: BrowseCollection, onClick: () -> Unit) {
-    val round = collection.kind == BrowseKind.ARTIST
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .heightIn(min = 64.dp)
-            .clickable(onClick = onClick)
-            .padding(start = 22.dp, end = 16.dp, top = 6.dp, bottom = 6.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Thumbnail(collection.thumbnailUrl, Modifier.size(52.dp), corner = if (round) 26 else 4, requestPx = 150)
-        Column(Modifier.weight(1f).padding(start = 16.dp, end = 8.dp)) {
-            Text(collection.title, color = Color.White, fontSize = 16.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            // "Artist • 12M monthly audience" in the Artists tab: the tab already says what it is.
-            collection.subtitle?.removePrefix("Artist • ")?.let {
-                Text(it, color = Color.White.copy(alpha = 0.5f), fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            }
-        }
-        Icon(
-            Icons.AutoMirrored.Rounded.ArrowForwardIos,
-            contentDescription = null,
-            tint = Color.White.copy(alpha = 0.35f),
-            modifier = Modifier.size(14.dp)
+        discovery(
+            isLoading = state.isLoadingHome,
+            sections = state.homeSections,
+            genres = state.genres,
+            importedPlaylists = state.importedPlaylists,
+            onOpenCollection = onOpenCollection,
+            onImportPlaylistClick = { showImportDialog = true },
+            onRemoveImportedPlaylist = viewModel::removeImportedPlaylist
         )
     }
 }

@@ -47,6 +47,7 @@ import androidx.compose.material.icons.automirrored.rounded.ArrowForwardIos
 import androidx.compose.material.icons.rounded.Cancel
 import androidx.compose.material.icons.rounded.MoreHoriz
 import androidx.compose.material.icons.rounded.PlayArrow
+import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Shuffle
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
@@ -77,6 +78,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -101,6 +104,8 @@ internal fun LargeTitleList(
     titleTrailing: (@Composable () -> Unit)? = null,
     barActions: (@Composable RowScope.() -> Unit)? = null,
     stickyContent: (@Composable () -> Unit)? = null,
+    // Taller when the sticky part holds more than the search field (the search page's filter pills).
+    stickyHeight: Dp = SearchStickyHeight,
     overlay: (@Composable BoxScope.() -> Unit)? = null,
     content: LazyListScope.() -> Unit
 ) {
@@ -131,7 +136,7 @@ internal fun LargeTitleList(
             contentPadding = PaddingValues(top = LibraryBarHeight)
         ) {
             item("large_title") { LargeTitle(title, titleTrailing, { titleAlpha }) }
-            if (stickyContent != null) item("sticky_space") { Spacer(Modifier.height(SearchStickyHeight)) }
+            if (stickyContent != null) item("sticky_space") { Spacer(Modifier.height(stickyHeight)) }
             content()
             item("bottom_inset") { Spacer(Modifier.height(bottomInset)) }
         }
@@ -140,7 +145,7 @@ internal fun LargeTitleList(
                 Modifier
                     .offset { IntOffset(0, stickyOffset) }
                     .fillMaxWidth()
-                    .height(SearchStickyHeight)
+                    .height(stickyHeight)
                     .background(Color.Black)
             ) { stickyContent() }
         }
@@ -318,7 +323,8 @@ internal fun LibrarySearchField(
     placeholder: String,
     onValueChange: (String) -> Unit,
     modifier: Modifier = Modifier,
-    onSearch: () -> Unit = {}
+    onSearch: () -> Unit = {},
+    focusRequester: FocusRequester? = null
 ) {
     val keyboard = LocalSoftwareKeyboardController.current
     Row(
@@ -344,7 +350,7 @@ internal fun LibrarySearchField(
                 cursorBrush = SolidColor(AppAccent),
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
                 keyboardActions = KeyboardActions(onSearch = { onSearch(); keyboard?.hide() }),
-                modifier = Modifier.fillMaxWidth()
+                modifier = Modifier.fillMaxWidth().then(if (focusRequester != null) Modifier.focusRequester(focusRequester) else Modifier)
             )
         }
         if (text.isNotEmpty()) {
@@ -357,6 +363,33 @@ internal fun LibrarySearchField(
                     .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) { onValueChange("") }
             )
         }
+    }
+}
+
+/** Looks like [LibrarySearchField] but only opens the search page when tapped (Home's search). */
+@Composable
+internal fun SearchEntryField(placeholder: String, onClick: () -> Unit) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 18.dp)
+            .padding(top = 5.dp, bottom = 12.dp)
+            .height(44.dp)
+            .clip(RoundedCornerShape(10.dp))
+            .background(LibraryFieldColor)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 10.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(Icons.Rounded.Search, contentDescription = null, tint = Color.White.copy(alpha = 0.6f), modifier = Modifier.size(22.dp))
+        Text(
+            placeholder,
+            color = Color.White.copy(alpha = 0.6f),
+            fontSize = 17.sp,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.padding(start = 6.dp)
+        )
     }
 }
 
