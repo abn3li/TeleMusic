@@ -100,8 +100,8 @@ class LibraryViewModel(private val repository: MusicRepository) : ViewModel() {
      * added, played, liked...), off the main thread; nothing polls. The two mixes are shuffled with
      * a per-day seed, so they stay the same all day and change the next.
      */
-    val home: StateFlow<HomeData> = repository.observeLibrary(SortField.TITLE, true)
-        .map { songs ->
+    val home: StateFlow<HomeData> = combine(repository.observeLibrary(SortField.TITLE, true), repository.observeRecentStreams()) { songs, streams -> songs to streams }
+        .map { (songs, streams) ->
             val day = System.currentTimeMillis() / DAY_MS
             val played = songs.filter { it.lastPlayedAtMillis > 0 }.sortedByDescending { it.lastPlayedAtMillis }
             val monthAgo = System.currentTimeMillis() - 30 * DAY_MS
@@ -110,7 +110,9 @@ class LibraryViewModel(private val repository: MusicRepository) : ViewModel() {
             val rediscover = songs.filter { it.lastPlayedAtMillis in 1 until monthAgo || (it.lastPlayedAtMillis == 0L && it.isFavorite) }
                 .shuffled(java.util.Random(day + 1)).take(50)
             HomeData(
-                recentlyPlayed = played.take(15),
+                // YouTube songs played from search or an album page sit alongside library ones.
+                recentlyPlayed = (played.take(15) + streams).sortedByDescending { it.lastPlayedAtMillis }
+                    .distinctBy { it.telegramMessageId }.take(15),
                 recentlyAdded = songs.sortedByDescending { it.addedAtMillis }.take(15),
                 dailyMix = daily,
                 rediscover = rediscover,

@@ -1,5 +1,11 @@
 package com.abn3li.telemusic.ui.download
 
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import com.abn3li.telemusic.ui.library.AppAlert
+import com.abn3li.telemusic.ui.library.AlertAction
+import androidx.compose.ui.platform.LocalDensity
 import android.net.Uri
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -73,7 +79,9 @@ fun BrowseCollectionScreen(
     params: String?,
     onBack: () -> Unit,
     onOpenCollection: (BrowseCollection) -> Unit,
-    onPlayStream: (SongEntity, Uri, String) -> Unit
+    // Plays [tracks] as the queue from [index] (shuffled when [shuffle]) - see NavGraph.
+    onPlayTracks: (tracks: List<BrowseTrack>, index: Int, shuffle: Boolean) -> Unit,
+    onPlayNext: (BrowseTrack) -> Unit
 ) {
     val app = LocalContext.current.applicationContext as TgMusicApp
     // viewModel(), not remember{}: cleared with this screen's back-stack entry, and kept across
@@ -84,7 +92,7 @@ fun BrowseCollectionScreen(
             initializer {
                 BrowseCollectionViewModel(
                     app.applicationContext, title, browseId, params,
-                    app.discoveryRepository, app.ytDlpRepository, app.musicRepository, app.settingsStore, onPlayStream, app.workScope
+                    app.discoveryRepository, app.ytDlpRepository, app.musicRepository, app.settingsStore, app.workScope
                 )
             }
         }
@@ -93,7 +101,7 @@ fun BrowseCollectionScreen(
     val onDownload: (BrowseTrack) -> Unit = { track -> app.downloadGate.run { viewModel.onDownloadClick(track) } }
 
     state.artist?.let { artist ->
-        ArtistPageContent(artist, state, onBack, onOpenCollection, viewModel::onPlayClick, onDownload)
+        ArtistPageContent(artist, state, onBack, onOpenCollection, onPlayTracks, onPlayNext, onDownload)
         return
     }
 
@@ -137,7 +145,7 @@ fun BrowseCollectionScreen(
         matches = { track, query -> track.title.contains(query, true) || track.artist.contains(query, true) },
         emptyText = state.errorMessage ?: "Nothing here",
         heroActions = { shown, openSearch ->
-            PlayShuffleSearch(shown, viewModel::onPlayClick, openSearch)
+            PlayShuffleSearch(shown, onPlayTracks, openSearch)
         }
     ) { shown, searching ->
         if (state.isLoading) item("loading") { CenteredSpinner() }
@@ -145,16 +153,30 @@ fun BrowseCollectionScreen(
             item("import") {
                 GroupCard {
                     val progress = state.importProgress
+                    var chooseImport by remember { mutableStateOf(false) }
                     when {
                         state.importedPlaylistId != null -> GroupActionRow("Imported to Library", enabled = false) {}
+                        state.importedAsAlbum -> GroupActionRow("Imported to Library Albums", enabled = false) {}
                         progress != null -> GroupActionRow("Importing ${progress.first}/${progress.second}…", loading = true) {}
+                        // An album can go in as an album (Library > Albums) or as a playlist.
+                        isAlbum -> GroupActionRow("Import to Library") { chooseImport = true }
                         else -> GroupActionRow("Import to Library") { viewModel.importToLibrary() }
                     }
+                    if (chooseImport) AppAlert(
+                        title = "Import to Library",
+                        message = "Save \"${header?.title ?: state.title}\" as an album, or as a playlist.",
+                        onDismiss = { chooseImport = false },
+                        actions = listOf(
+                            AlertAction("As Album", bold = true) { chooseImport = false; viewModel.importToLibrary(asAlbum = true) },
+                            AlertAction("As Playlist") { chooseImport = false; viewModel.importToLibrary(asAlbum = false) },
+                            AlertAction("Cancel") { chooseImport = false }
+                        )
+                    )
                 }
                 Spacer(Modifier.height(8.dp))
             }
         }
-        trackRows(shown, state, viewModel::onPlayClick, onDownload)
+        trackRows(shown, state, onPlayTracks, onPlayNext, onDownload)
     }
 }
 
@@ -168,7 +190,8 @@ private fun ArtistPageContent(
     state: BrowseCollectionUiState,
     onBack: () -> Unit,
     onOpenCollection: (BrowseCollection) -> Unit,
-    onPlay: (BrowseTrack) -> Unit,
+    onPlay: (List<BrowseTrack>, Int, Boolean) -> Unit,
+    onPlayNext: (BrowseTrack) -> Unit,
     onDownload: (BrowseTrack) -> Unit
 ) {
     DetailPageScaffold(
@@ -195,7 +218,7 @@ private fun ArtistPageContent(
                 )
             }
         }
-        trackRows(if (searching) shown else shown.take(5), state, onPlay, onDownload)
+        trackRows(if (searching) shown else shown.take(5), state, onPlay, onPlayNext, onDownload)
         if (!searching) {
             artist.shelves.forEachIndexed { index, shelf ->
                 item("shelf_title_$index") { SectionHeader(shelf.title, null) }
@@ -209,13 +232,13 @@ private fun ArtistPageContent(
     }
 }
 
-/** Shuffle / Play / Search under a YouTube page's title. Nothing is queued here - Play streams
- * the first song and Shuffle a random one, the same as tapping that row. */
+/** Shuffle / Play / Search under a YouTube page's title: the page's songs become the queue, in
+ * order from the top, or shuffled. */
 @Composable
-private fun PlayShuffleSearch(shown: List<BrowseTrack>, onPlay: (BrowseTrack) -> Unit, openSearch: () -> Unit) {
+private fun PlayShuffleSearch(shown: List<BrowseTrack>, onPlay: (List<BrowseTrack>, Int, Boolean) -> Unit, openSearch: () -> Unit) {
     HeroButtonRow {
-        HeroButton(Icons.Rounded.Shuffle, "Shuffle", enabled = shown.isNotEmpty()) { shown.randomOrNull()?.let(onPlay) }
-        HeroButton(Icons.Rounded.PlayArrow, "Play", enabled = shown.isNotEmpty()) { shown.firstOrNull()?.let(onPlay) }
+        HeroButton(Icons.Rounded.Shuffle, "Shuffle", enabled = shown.isNotEmpty()) { onPlay(shown, shown.indices.random(), true) }
+        HeroButton(Icons.Rounded.PlayArrow, "Play", enabled = shown.isNotEmpty()) { onPlay(shown, 0, false) }
         HeroButton(Icons.Rounded.Search, "Search", enabled = shown.isNotEmpty(), onClick = openSearch)
     }
     Spacer(Modifier.height(30.dp))
@@ -224,7 +247,8 @@ private fun PlayShuffleSearch(shown: List<BrowseTrack>, onPlay: (BrowseTrack) ->
 private fun LazyListScope.trackRows(
     tracks: List<BrowseTrack>,
     state: BrowseCollectionUiState,
-    onPlay: (BrowseTrack) -> Unit,
+    onPlay: (List<BrowseTrack>, Int, Boolean) -> Unit,
+    onPlayNext: (BrowseTrack) -> Unit,
     onDownload: (BrowseTrack) -> Unit
 ) {
     itemsIndexed(tracks, key = { _, t -> t.videoId }, contentType = { _, _ -> "track" }) { index, track ->
@@ -234,9 +258,10 @@ private fun LazyListScope.trackRows(
             thumbnailUrl = track.thumbnailUrl,
             isDownloading = track.videoId in state.downloadingIds,
             isDownloaded = track.videoId in state.downloadedIds,
-            isLoadingStream = track.videoId in state.loadingStreamIds,
             onDownloadClick = { onDownload(track) },
-            onPlayClick = { onPlay(track) }
+            // The whole list is the queue, starting here: Next/Previous work as in the library.
+            onPlayClick = { onPlay(tracks, index, false) },
+            onPlayNext = { onPlayNext(track) }
         )
         if (index < tracks.lastIndex) LibraryDivider(start = 88.dp)
     }
@@ -259,25 +284,37 @@ internal fun CollectionCard(item: BrowseCollection, onClick: () -> Unit) {
                 placeholder = if (round) Icons.Rounded.Person else Icons.Rounded.Album
             )
         }
-        Text(
-            item.title,
-            color = Color.White.copy(alpha = 0.94f),
-            fontSize = 15.sp,
-            lineHeight = 18.sp,
-            maxLines = 2,
-            overflow = TextOverflow.Ellipsis,
-            textAlign = if (round) TextAlign.Center else TextAlign.Start,
-            modifier = Modifier.padding(top = 8.dp)
-        )
-        item.subtitle?.let {
+        // Every card's text takes the same height - room for a two-line title and a subtitle
+        // line - so a sideways row of them never changes height as cards with longer or shorter
+        // titles scroll in (that made everything below the row jump). Short titles sit at the top.
+        val textHeight = with(LocalDensity.current) { CardTitleLineHeight.toDp() * 2 + CardSubtitleLineHeight.toDp() } + 8.dp
+        Column(
+            Modifier.fillMaxWidth().height(textHeight).padding(top = 8.dp),
+            horizontalAlignment = if (round) Alignment.CenterHorizontally else Alignment.Start
+        ) {
             Text(
-                it,
-                color = Color.White.copy(alpha = 0.6f),
-                fontSize = 13.sp,
-                maxLines = 1,
+                item.title,
+                color = Color.White.copy(alpha = 0.94f),
+                fontSize = 15.sp,
+                lineHeight = CardTitleLineHeight,
+                maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
                 textAlign = if (round) TextAlign.Center else TextAlign.Start
             )
+            item.subtitle?.let {
+                Text(
+                    it,
+                    color = Color.White.copy(alpha = 0.6f),
+                    fontSize = 13.sp,
+                    lineHeight = CardSubtitleLineHeight,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    textAlign = if (round) TextAlign.Center else TextAlign.Start
+                )
+            }
         }
     }
 }
+
+private val CardTitleLineHeight = 18.sp
+private val CardSubtitleLineHeight = 17.sp

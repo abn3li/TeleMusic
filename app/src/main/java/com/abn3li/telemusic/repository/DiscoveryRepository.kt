@@ -10,15 +10,13 @@ import com.abn3li.telemusic.data.browse.InnertubeBrowseClient
 import com.abn3li.telemusic.data.local.ImportedPlaylistDao
 import com.abn3li.telemusic.data.local.ImportedPlaylistEntity
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.async
-import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.withContext
 
 /** Coroutine-friendly front for [InnertubeBrowseClient] - every call in there blocks on a real
  * network request, so this is the only place that's ever touched from a ViewModel. This class
  * itself is a single app-wide instance (constructed once in TgMusicApp), which is what makes
- * [cachedHome] a real cache and not just a per-screen one. Also owns the imported-playlists
+ * the discovery caches app-wide rather than per-screen. Also owns the imported-playlists
  * table (a user-pinned Discovery entry stays until they remove it - see
  * DiscoveryViewModel.importPlaylist's own doc), since it's the same "things shown in
  * Discovery" concern as the home feed above. */
@@ -26,40 +24,28 @@ class DiscoveryRepository(
     private val importedPlaylistDao: ImportedPlaylistDao,
     private val client: InnertubeBrowseClient = InnertubeBrowseClient()
 ) {
-    // The Search tab's feed asks for it again whenever its ViewModel is rebuilt (a fresh
-    // start, the tab recreated) - a real ~670KB request each time without this cache; with it,
-    // every ask after the first is instant and free.
-    @Volatile private var cachedHome: List<HomeSection>? = null
+    @Volatile private var cachedNewReleases: HomeSection? = null
     @Volatile private var cachedGenres: List<BrowseCollection>? = null
 
-    /** Home + New releases, merged into one feed - an anonymous (no sign-in) request only ever
-     * gets 1-2 sparse sections from the Home page alone, where the real app's Home tab also
-     * surfaces its New releases page inline. Fetched in parallel (two independent requests, not
-     * two round trips back to back) and merged in that order. */
-    suspend fun homeFeed(): List<HomeSection> {
-        cachedHome?.let { return it }
+    /** The one YouTube discovery shelf used on Home. We intentionally do not fetch YouTube's
+     * anonymous Home feed: its other sparse shelves are not displayed anywhere in the app. */
+    suspend fun newReleases(): HomeSection? {
+        cachedNewReleases?.let { return it }
         return withContext(Dispatchers.IO) {
-            coroutineScope {
-                val home = async {
-                    runCatching { BrowseParser.parseHomeFeed(client.browse(InnertubeBrowseClient.HOME_BROWSE_ID)) }
-                        .onFailure { e -> android.util.Log.e("DiscoveryRepo", "homeFeed(): home page fetch/parse failed", e) }
-                        .getOrElse { emptyList() }
-                }
-                val newReleases = async {
-                    runCatching {
-                        BrowseParser.parseGridAsSection(client.browse(InnertubeBrowseClient.NEW_RELEASES_BROWSE_ID), "New releases")
-                    }.onFailure { e -> android.util.Log.e("DiscoveryRepo", "homeFeed(): new releases fetch/parse failed", e) }
-                        .getOrNull()
-                }
-                val merged = home.await() + listOfNotNull(newReleases.await())
-                merged.also { if (it.isNotEmpty()) cachedHome = it }
-            }
+            runCatching {
+                BrowseParser.parseGridAsSection(
+                    client.browse(InnertubeBrowseClient.NEW_RELEASES_BROWSE_ID),
+                    "New releases"
+                )
+            }.onFailure { e -> android.util.Log.e("DiscoveryRepo", "newReleases(): fetch/parse failed", e) }
+                .getOrNull()
+                ?.also { if (it.items.isNotEmpty()) cachedNewReleases = it }
         }
     }
 
     /** The real Genres chips (see BrowseParser.parseGenreChips) - each one opens a real page of
      * playlists for that genre through [browse] like any other card. Cached the same way
-     * [homeFeed] is, for the same reason. */
+     * [newReleases] is, for the same reason. */
     suspend fun genres(): List<BrowseCollection> {
         cachedGenres?.let { return it }
         return withContext(Dispatchers.IO) {
@@ -126,7 +112,14 @@ class DiscoveryRepository(
                     pageContent.tracks.forEach { allTracks[it.videoId] = it }
                     pages++
                 }
-                content = content.copy(tracks = allTracks.values.toList())
+                // An album's rows carry no artist or artwork of their own - both are the album's.
+                val header = content.header
+                content = content.copy(tracks = allTracks.values.map { t ->
+                    t.copy(
+                        artist = t.artist.ifBlank { header?.artist?.takeIf { it.isNotBlank() } ?: "Unknown artist" },
+                        thumbnailUrl = t.thumbnailUrl ?: header?.thumbnailUrl
+                    )
+                })
             }
             content
         }

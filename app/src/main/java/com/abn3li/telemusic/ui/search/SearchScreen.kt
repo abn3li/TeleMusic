@@ -1,496 +1,584 @@
 package com.abn3li.telemusic.ui.search
 
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.foundation.combinedClickable
 import android.net.Uri
+import com.abn3li.telemusic.data.browse.BrowseTrack
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.background
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowForwardIos
 import androidx.compose.material.icons.automirrored.rounded.QueueMusic
+import androidx.compose.material.icons.rounded.Add
+import androidx.compose.material.icons.rounded.Cancel
+import androidx.compose.material.icons.rounded.Check
+import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.Download
+import androidx.compose.material.icons.rounded.PlayArrow
+import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.TextFieldValue
+import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
 import com.abn3li.telemusic.TgMusicApp
 import com.abn3li.telemusic.data.browse.BrowseCollection
 import com.abn3li.telemusic.data.browse.BrowseKind
 import com.abn3li.telemusic.data.download.YtDlpSearchResult
 import com.abn3li.telemusic.data.local.AlbumSummary
 import com.abn3li.telemusic.data.local.ArtistSummary
+import com.abn3li.telemusic.data.local.ImportedPlaylistEntity
 import com.abn3li.telemusic.data.local.PlaylistSummary
 import com.abn3li.telemusic.data.local.SongEntity
 import com.abn3li.telemusic.ui.download.CenteredMessage
 import com.abn3li.telemusic.ui.download.CenteredSpinner
 import com.abn3li.telemusic.ui.download.CollectionCard
+import com.abn3li.telemusic.ui.download.DiscoveryUiState
 import com.abn3li.telemusic.ui.download.DiscoveryViewModel
 import com.abn3li.telemusic.ui.download.ImportPlaylistPrompt
-import com.abn3li.telemusic.ui.download.youTubeDiscovery
-import com.abn3li.telemusic.ui.download.SearchTab
 import com.abn3li.telemusic.ui.download.Thumbnail
-import com.abn3li.telemusic.ui.download.TrackResultRow
 import com.abn3li.telemusic.ui.download.YouTubeDownloadUiState
 import com.abn3li.telemusic.ui.download.YouTubeDownloadViewModel
+import com.abn3li.telemusic.ui.library.AppAccent
 import com.abn3li.telemusic.ui.library.ArtistAvatar
+import com.abn3li.telemusic.ui.library.CalmSpinner
 import com.abn3li.telemusic.ui.library.CoverTile
 import com.abn3li.telemusic.ui.library.DestructiveRed
-import com.abn3li.telemusic.ui.library.FilterPill
 import com.abn3li.telemusic.ui.library.GroupLabelColor
 import com.abn3li.telemusic.ui.library.LargeTitleList
 import com.abn3li.telemusic.ui.library.LibraryCallbacks
 import com.abn3li.telemusic.ui.library.LibraryDivider
+import com.abn3li.telemusic.ui.library.LibraryFieldColor
+import com.abn3li.telemusic.ui.library.LibraryFloatingMenu
+import com.abn3li.telemusic.ui.library.LibraryMenuDivider
+import com.abn3li.telemusic.ui.library.LibraryMenuItem
+import android.widget.Toast
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.material.icons.rounded.QueuePlayNext
+import com.abn3li.telemusic.ui.library.SwipeToPlayNext
 import com.abn3li.telemusic.ui.library.LibrarySearchField
 import com.abn3li.telemusic.ui.library.LibrarySongActions
 import com.abn3li.telemusic.ui.library.LibrarySongRow
 import com.abn3li.telemusic.ui.library.LibraryViewModel
-import com.abn3li.telemusic.ui.library.SearchStickyHeight
-import com.abn3li.telemusic.ui.library.SectionHeader
 import com.abn3li.telemusic.ui.library.rememberLibrarySongActions
+import com.abn3li.telemusic.ui.nowplaying.LocalMiniPlayerInset
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-/** How long typing has to pause before YouTube is asked - each search is four network calls. */
 private const val YOUTUBE_SEARCH_DELAY_MS = 700L
+private const val SEARCH_SHELF_PREVIEW_LIMIT = 7
+private val ResultsHeaderHeight = 112.dp
 
-/** The pills' row under the search field. */
-private val PillsHeight = 46.dp
+private enum class SearchSource { YOUTUBE, LIBRARY }
+private enum class ResultSection { OVERVIEW, SONGS, ALBUMS, ARTISTS, PLAYLISTS }
 
-/** What the library has for a query - found on the phone, so it's there while you type. */
 private data class LibraryMatches(
     val songs: List<SongEntity> = emptyList(),
     val albums: List<AlbumSummary> = emptyList(),
     val artists: List<ArtistSummary> = emptyList(),
     val playlists: List<PlaylistSummary> = emptyList()
-) {
-    val isEmpty get() = songs.isEmpty() && albums.isEmpty() && artists.isEmpty() && playlists.isEmpty()
-}
+) { val isEmpty get() = songs.isEmpty() && albums.isEmpty() && artists.isEmpty() && playlists.isEmpty() }
 
-/**
- * The Search tab. Before typing it shows YouTube Music's feed. Typing searches everything: the
- * library first (live as you type), then YouTube Music below it (asked once typing pauses).
- * YouTube songs the library already has aren't repeated.
- */
 @Composable
 fun SearchScreen(
     libraryViewModel: LibraryViewModel,
     callbacks: LibraryCallbacks,
     onOpenPlaylist: (Long, String) -> Unit,
     onOpenCollection: (BrowseCollection) -> Unit,
-    onPlayStream: (SongEntity, Uri, String) -> Unit
+    onPlayTracks: (tracks: List<BrowseTrack>, index: Int, shuffle: Boolean) -> Unit
 ) {
     val app = LocalContext.current.applicationContext as TgMusicApp
-    // Scoped to this page's back-stack entry: a YouTube page opened from the results and closed
-    // again comes back to the same results, without searching again.
-    val viewModel = viewModel<YouTubeDownloadViewModel>(
-        factory = viewModelFactory {
-            initializer {
-                YouTubeDownloadViewModel(app.applicationContext, app.ytDlpRepository, app.musicRepository, app.settingsStore, app.discoveryRepository, onPlayStream, app.workScope)
-            }
-        }
-    )
-    val state by viewModel.uiState.collectAsState()
+    val search = viewModel<YouTubeDownloadViewModel>(factory = viewModelFactory { initializer {
+        YouTubeDownloadViewModel(app.applicationContext, app.ytDlpRepository, app.musicRepository,
+            app.settingsStore, app.discoveryRepository, app.workScope)
+    } })
+    val state by search.uiState.collectAsState()
     val songs by libraryViewModel.allSongs.collectAsState()
     val albums by libraryViewModel.albums.collectAsState()
     val artists by libraryViewModel.artists.collectAsState()
     val playlists by libraryViewModel.playlistSummaries.collectAsState()
     val actions = rememberLibrarySongActions(libraryViewModel, callbacks.onPlayNext, callbacks.onOpenArtist, callbacks.onOpenAlbum)
-
     val query = state.query.trim()
-    // Library filtering runs off the main thread and a beat after the last key, so a large
-    // library doesn't stutter the typing.
     val library by produceState(LibraryMatches(), query, songs, albums, artists, playlists) {
-        if (query.isEmpty()) {
-            value = LibraryMatches()
-            return@produceState
-        }
+        if (query.isEmpty()) { value = LibraryMatches(); return@produceState }
         delay(120)
         value = withContext(Dispatchers.Default) {
             LibraryMatches(
-                songs = songs.filter {
-                    it.title.contains(query, true) || it.artist.contains(query, true) || it.album?.contains(query, true) == true
-                },
-                albums = albums.filter { it.album.contains(query, true) || it.artist.contains(query, true) },
-                artists = artists.filter { it.artist.contains(query, true) },
-                playlists = playlists.filter { it.name.contains(query, true) }
+                songs.filter { it.title.contains(query, true) || it.artist.contains(query, true) || it.album?.contains(query, true) == true },
+                albums.filter { it.album.contains(query, true) || it.artist.contains(query, true) },
+                artists.filter { it.artist.contains(query, true) },
+                playlists.filter { it.name.contains(query, true) }
             )
         }
     }
-    // Songs already in the library (by YouTube id, or same title and artist) show up there, not
-    // again under YouTube.
-    val owned = remember(songs) {
-        val ids = HashSet<String>()
-        val names = HashSet<String>()
-        songs.forEach { song ->
-            song.youtubeVideoId?.let(ids::add)
-            names += nameKey(song.title, song.artist)
+    // Saveable: opening a result leaves this screen, and Back should land on the same page
+    // (YouTube Music / Your Library) and list (overview / See all) as before.
+    var source by rememberSaveable { mutableStateOf(SearchSource.YOUTUBE) }
+    var section by rememberSaveable { mutableStateOf(ResultSection.OVERVIEW) }
+    // The results field should take over focus only for the Browse -> Results transition. When
+    // this destination is recreated after returning from an album/artist/playlist, this starts
+    // false, so Search is restored without reopening the keyboard.
+    var focusResultsField by remember { mutableStateOf(false) }
+    LaunchedEffect(query, source) {
+        section = ResultSection.OVERVIEW
+        if (query.isNotEmpty() && source == SearchSource.YOUTUBE) {
+            delay(YOUTUBE_SEARCH_DELAY_MS); search.search()
         }
-        ids to names
     }
-    val youTubeSongs = remember(state.results, owned) {
-        state.results.filterNot { it.videoId in owned.first || nameKey(it.title, it.artist) in owned.second }
-    }
-
-    // Ask YouTube once typing pauses; a new key restarts the wait.
-    LaunchedEffect(query) {
-        if (query.isEmpty()) return@LaunchedEffect
-        delay(YOUTUBE_SEARCH_DELAY_MS)
-        viewModel.search()
-    }
-
-    // With nothing typed, the tab is YouTube Music's feed: imported playlists, genres, shelves.
-    val discovery = viewModel<DiscoveryViewModel>(
-        factory = viewModelFactory { initializer { DiscoveryViewModel(app.ytDlpRepository, app.discoveryRepository) } }
-    )
+    val discovery = viewModel<DiscoveryViewModel>(factory = viewModelFactory { initializer {
+        DiscoveryViewModel(app.ytDlpRepository, app.discoveryRepository)
+    } })
     val feed by discovery.uiState.collectAsState()
     var showImport by remember { mutableStateOf(false) }
-    if (showImport) ImportPlaylistPrompt(discovery, onClose = { showImport = false })
+    if (showImport) ImportPlaylistPrompt(discovery) { showImport = false }
+    BackHandler(query.isNotEmpty()) {
+        if (section != ResultSection.OVERVIEW) section = ResultSection.OVERVIEW else search.onQueryChange("")
+    }
+    if (query.isEmpty()) {
+        BrowseScreen(state.query, { value ->
+            if (value.isNotEmpty()) focusResultsField = true
+            search.onQueryChange(value)
+        }, feed, onOpenCollection, { showImport = true },
+            discovery::removeImportedPlaylist, discovery::reload)
+    } else {
+        ResultsScreen(state, source, section, library, actions, callbacks,
+            { source = it }, { section = it }, search::onQueryChange, { search.search(true) },
+            { search.onQueryChange("") }, onOpenPlaylist, onOpenCollection,
+            // Queues every song result from the tapped one, so Next / Previous walk the results.
+            { result ->
+                val tracks = state.results.map { BrowseTrack(it.videoId, it.title, it.artist, it.thumbnailUrl, it.durationSeconds) }
+                onPlayTracks(tracks, state.results.indexOfFirst { it.videoId == result.videoId }.coerceAtLeast(0), false)
+            },
+            { result ->
+                callbacks.onPlayNext(app.musicRepository.queueIdsForStreams(listOf(
+                    BrowseTrack(result.videoId, result.title, result.artist, result.thumbnailUrl, result.durationSeconds))).first())
+                Toast.makeText(app, "Playing next", Toast.LENGTH_SHORT).show()
+            },
+            { result -> app.downloadGate.run { search.onDownloadIconClick(result) } },
+            focusResultsField,
+            { focusResultsField = false })
+    }
+}
 
-    // Back while showing results goes back to the feed first.
-    BackHandler(enabled = state.query.isNotEmpty()) { viewModel.onQueryChange("") }
+@Composable
+private fun BrowseScreen(
+    query: String, onQueryChange: (String) -> Unit, feed: DiscoveryUiState,
+    onOpenCollection: (BrowseCollection) -> Unit, onImport: () -> Unit,
+    onRemove: (ImportedPlaylistEntity) -> Unit, onRetry: () -> Unit
+) {
+    LargeTitleList(title = "Search", stickyContent = {
+        LibrarySearchField(query, "Songs, artists, albums", onQueryChange)
+    }) {
+        item("imported_header") { Header("Your Imported Playlists", action = {
+            Icon(Icons.Rounded.Add, "Import playlist", tint = AppAccent,
+                modifier = Modifier.size(30.dp).clickable(onClick = onImport))
+        }) }
+        if (feed.importedPlaylists.isEmpty()) item("imported_empty") {
+            Text("Tap + to add a YouTube or Spotify playlist.", color = GroupLabelColor,
+                fontSize = 14.sp, modifier = Modifier.padding(horizontal = 18.dp))
+        } else item("imported") {
+            LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp), contentPadding = PaddingValues(horizontal = 18.dp)) {
+                itemsIndexed(feed.importedPlaylists, key = { index, p -> "imported_${index}_${p.browseId}" }) { _, p -> ImportedCard(p, {
+                    onOpenCollection(BrowseCollection(p.browseId, null, p.title, p.subtitle, p.thumbnailUrl, BrowseKind.PLAYLIST))
+                }, { onRemove(p) }) }
+            }
+        }
+        when {
+            feed.isLoading -> item("loading") { CenteredSpinner() }
+            feed.genres.isEmpty() -> item("error") {
+                Box(Modifier.fillMaxWidth().clickable(onClick = onRetry)) { CenteredMessage("Couldn't load YouTube Music. Tap to try again.") }
+            }
+            else -> browseContent(feed.genres, onOpenCollection)
+        }
+    }
+}
 
-    // YouTube's part is still coming while a search runs, or while typing hasn't paused yet.
-    val youTubeLoading = query.isNotEmpty() && (state.isSearching || state.searchedQuery != query)
+private fun LazyListScope.browseContent(genres: List<BrowseCollection>, open: (BrowseCollection) -> Unit) {
+    if (genres.isNotEmpty()) {
+        item("categories_header") { Header("Browse Categories") }
+        itemsIndexed(
+            genres.chunked(2),
+            key = { index, pair -> "genre_row_${index}_${pair.joinToString("|") { it.title }}" }
+        ) { _, pair ->
+            Row(Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 5.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                pair.forEach { genre -> GenreTile(genre.title, GenreColors[genres.indexOf(genre) % GenreColors.size], Modifier.weight(1f)) { open(genre) } }
+                if (pair.size == 1) Spacer(Modifier.weight(1f))
+            }
+        }
+    }
+}
 
-    LargeTitleList(
-        // A bottom-bar tab: no back arrow.
-        title = "Search",
-        stickyHeight = if (query.isEmpty()) SearchStickyHeight else SearchStickyHeight + PillsHeight,
-        stickyContent = {
-            Column {
-                LibrarySearchField(
-                    state.query,
-                    "Your music and YouTube",
-                    viewModel::onQueryChange,
-                    onSearch = { viewModel.search(force = true) }
-                )
-                if (query.isNotEmpty()) {
-                    LazyRow(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        contentPadding = PaddingValues(horizontal = 18.dp),
-                        modifier = Modifier.height(PillsHeight)
-                    ) {
-                        items(SearchTab.entries.toList(), key = { it.name }) { tab ->
-                            FilterPill(tab.label, selected = state.tab == tab, onClick = { viewModel.selectTab(tab) })
-                        }
-                    }
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun ResultsScreen(
+    state: YouTubeDownloadUiState, source: SearchSource, section: ResultSection,
+    library: LibraryMatches, actions: LibrarySongActions, callbacks: LibraryCallbacks,
+    onSource: (SearchSource) -> Unit, onSection: (ResultSection) -> Unit,
+    onQuery: (String) -> Unit, onSearch: () -> Unit, onCancel: () -> Unit,
+    openPlaylist: (Long, String) -> Unit, openCollection: (BrowseCollection) -> Unit,
+    play: (YtDlpSearchResult) -> Unit, playNext: (YtDlpSearchResult) -> Unit, download: (YtDlpSearchResult) -> Unit,
+    requestFocus: Boolean, onFocusHandled: () -> Unit
+) {
+    val loading = state.isSearching || state.searchedQuery != state.query.trim()
+    val pagerState = rememberPagerState(
+        initialPage = if (source == SearchSource.YOUTUBE) 0 else 1,
+        pageCount = { SearchSource.entries.size }
+    )
+    val scope = rememberCoroutineScope()
+    val pagerSource = SearchSource.entries[pagerState.currentPage]
+    LaunchedEffect(pagerState.currentPage) {
+        val selected = SearchSource.entries[pagerState.currentPage]
+        if (selected != source) onSource(selected)
+    }
+    Box(Modifier.fillMaxSize().background(Color.Black)) {
+        HorizontalPager(state = pagerState, modifier = Modifier.fillMaxSize()) { page ->
+            LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(top = ResultsHeaderHeight, bottom = LocalMiniPlayerInset.current + 24.dp)) {
+                if (page == 0) youtubeResults(section, state, loading, onSection, openCollection, play, playNext, download)
+                else libraryResults(section, library, actions, callbacks, onSection, openPlaylist)
+            }
+        }
+        ResultsHeader(state.query, pagerSource, onQuery, onSearch, onCancel, { selected ->
+            scope.launch { pagerState.animateScrollToPage(selected.ordinal) }
+        }, requestFocus, onFocusHandled)
+    }
+}
+
+@Composable
+private fun ResultsHeader(query: String, source: SearchSource, onQuery: (String) -> Unit,
+    onSearch: () -> Unit, onCancel: () -> Unit, onSource: (SearchSource) -> Unit,
+    requestFocus: Boolean, onFocusHandled: () -> Unit) {
+    val focus = remember { FocusRequester() }
+    val focusManager = LocalFocusManager.current
+    val keyboard = LocalSoftwareKeyboardController.current
+    val rootView = LocalView.current
+    var fieldValue by remember {
+        mutableStateOf(TextFieldValue(query, selection = TextRange(query.length)))
+    }
+    LaunchedEffect(query) {
+        if (query != fieldValue.text) {
+            fieldValue = TextFieldValue(query, selection = TextRange(query.length))
+        }
+    }
+    LaunchedEffect(requestFocus) {
+        if (requestFocus) {
+            focus.requestFocus()
+            onFocusHandled()
+        }
+    }
+    // Hiding the keyboard with Back does not normally remove BasicTextField focus. Its blinking
+    // cursor would then keep invalidating this screen while it appears idle. Root-window insets
+    // are used instead of Compose IME insets because the latter remain consumed/unchanged on
+    // some Samsung builds after the keyboard closes.
+    DisposableEffect(rootView, focusManager) {
+        fun isImeVisible() = ViewCompat.getRootWindowInsets(rootView)
+            ?.isVisible(WindowInsetsCompat.Type.ime()) == true
+        var imeWasVisible = isImeVisible()
+        val listener = android.view.ViewTreeObserver.OnGlobalLayoutListener {
+            val visible = isImeVisible()
+            if (visible) imeWasVisible = true
+            else if (imeWasVisible) {
+                imeWasVisible = false
+                focusManager.clearFocus()
+            }
+        }
+        rootView.viewTreeObserver.addOnGlobalLayoutListener(listener)
+        onDispose { rootView.viewTreeObserver.removeOnGlobalLayoutListener(listener) }
+    }
+    Column(Modifier.fillMaxWidth().height(ResultsHeaderHeight).background(Color.Black).padding(horizontal = 18.dp).padding(top = 5.dp, bottom = 9.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            Row(Modifier.weight(1f).height(44.dp).clip(RoundedCornerShape(10.dp)).background(LibraryFieldColor).padding(horizontal = 10.dp),
+                verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Rounded.Search, null, tint = Color.White.copy(.55f), modifier = Modifier.size(19.dp)); Spacer(Modifier.width(8.dp))
+                BasicTextField(fieldValue, { value ->
+                    fieldValue = value
+                    onQuery(value.text)
+                }, Modifier.weight(1f).focusRequester(focus), textStyle = TextStyle(Color.White, fontSize = 17.sp),
+                    cursorBrush = SolidColor(AppAccent), singleLine = true, keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                    keyboardActions = KeyboardActions(onSearch = {
+                        onSearch()
+                        focusManager.clearFocus()
+                        keyboard?.hide()
+                    }))
+                Icon(Icons.Rounded.Cancel, "Clear", tint = Color.White.copy(.45f), modifier = Modifier.size(20.dp).clickable { onQuery("") })
+            }
+            Text("Cancel", color = AppAccent, fontSize = 16.sp, modifier = Modifier.clickable(onClick = onCancel))
+        }
+        Row(Modifier.fillMaxWidth().height(38.dp).clip(RoundedCornerShape(9.dp)).background(LibraryFieldColor).padding(2.dp),
+            horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+            SearchSource.entries.forEach { item ->
+                val selected = item == source
+                Box(Modifier.weight(1f).height(34.dp).clip(RoundedCornerShape(7.dp))
+                    .background(if (selected) Color(0xFF3A3A3E) else Color.Transparent)
+                    .clickable(remember { MutableInteractionSource() }, null) { onSource(item) }, contentAlignment = Alignment.Center) {
+                    Text(if (item == SearchSource.YOUTUBE) "YouTube Music" else "Your Library",
+                        color = if (selected) Color.White else Color.White.copy(.65f), fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
                 }
             }
         }
-    ) {
-        if (query.isEmpty()) {
-            youTubeDiscovery(
-                state = feed,
-                onOpenCollection = onOpenCollection,
-                onImportPlaylistClick = { showImport = true },
-                onRemoveImportedPlaylist = discovery::removeImportedPlaylist,
-                onRetry = discovery::reload
-            )
-            return@LargeTitleList
+    }
+}
+
+private fun LazyListScope.youtubeResults(section: ResultSection, state: YouTubeDownloadUiState, loading: Boolean,
+    show: (ResultSection) -> Unit, open: (BrowseCollection) -> Unit, play: (YtDlpSearchResult) -> Unit, playNext: (YtDlpSearchResult) -> Unit, download: (YtDlpSearchResult) -> Unit) {
+    state.actionError?.let { item("action_error") { Text(it, color = DestructiveRed, fontSize = 14.sp, modifier = Modifier.padding(18.dp, 8.dp)) } }
+    if (loading) { item("loading") { CenteredSpinner() }; return }
+    if (section != ResultSection.OVERVIEW) {
+        item("section_title") { Header(section.title(), compact = true) }
+        when (section) {
+            ResultSection.SONGS -> songRows(state.results, state, play, playNext, download)
+            ResultSection.ALBUMS -> collectionRows(state.albums, "No albums found", open)
+            ResultSection.ARTISTS -> collectionRows(state.artists, "No artists found", open)
+            ResultSection.PLAYLISTS -> collectionRows(state.playlists, "No playlists found", open)
+            else -> Unit
+        }; return
+    }
+    val top = buildList<Any> {
+        state.artists.firstOrNull()?.let(::add); state.results.firstOrNull()?.let(::add)
+        state.albums.firstOrNull()?.let(::add); state.playlists.firstOrNull()?.let(::add)
+    }.take(3)
+    if (top.isEmpty()) { item("empty") { CenteredMessage(state.errorMessage ?: "Nothing found on YouTube Music") }; return }
+    item("top_header") { Header("Top Results", compact = true) }
+    itemsIndexed(top) { index, value ->
+        when (value) {
+            is YtDlpSearchResult -> YoutubeSongRow(value, state, false, "Song · ", play, playNext, download)
+            is BrowseCollection -> CollectionRow(value, open)
         }
-        val tab = state.tab
-        libraryResults(tab, library, actions, callbacks, onOpenPlaylist, onSelectTab = viewModel::selectTab)
-        if (tab == SearchTab.LIBRARY) {
-            if (library.isEmpty) item("library_none") { CenteredMessage("Nothing in your library matches") }
-            return@LargeTitleList
+        if (index < top.lastIndex) LibraryDivider(80.dp)
+    }
+    if (state.results.isNotEmpty()) {
+        item("songs_header") { Header("Songs", { show(ResultSection.SONGS) }) }
+        itemsIndexed(state.results.take(4), key = { index, it -> "song_preview_${index}_${it.videoId}" }) { index, song ->
+            YoutubeSongRow(song, state, true, "", play, playNext, download); if (index < state.results.take(4).lastIndex) LibraryDivider(80.dp)
         }
-        item("yt_title") { SourceHeader("From YouTube") }
-        state.actionError?.let { message ->
-            item("yt_action_error") {
-                Text(message, color = DestructiveRed, fontSize = 14.sp, modifier = Modifier.padding(horizontal = 18.dp, vertical = 6.dp))
+    }
+    youtubeShelf("Albums", ResultSection.ALBUMS, state.albums, show, open)
+    youtubeShelf("Artists", ResultSection.ARTISTS, state.artists, show, open)
+    youtubeShelf("Playlists", ResultSection.PLAYLISTS, state.playlists, show, open)
+}
+
+private fun LazyListScope.libraryResults(section: ResultSection, data: LibraryMatches, actions: LibrarySongActions,
+    callbacks: LibraryCallbacks, show: (ResultSection) -> Unit, openPlaylist: (Long, String) -> Unit) {
+    if (data.isEmpty) { item("empty") { CenteredMessage("Nothing in your library matches") }; return }
+    if (section != ResultSection.OVERVIEW) {
+        item("section_title") { Header(section.title(), compact = true) }
+        when (section) {
+            ResultSection.SONGS -> librarySongs(data.songs, actions, callbacks)
+            ResultSection.ALBUMS -> itemsIndexed(data.albums) { i, a -> CollectionRow(a.album, "Album · ${a.artist}", false, a.albumArtUrl) { callbacks.onOpenAlbum(a.album) }; if (i < data.albums.lastIndex) LibraryDivider(80.dp) }
+            ResultSection.ARTISTS -> itemsIndexed(data.artists) { i, a -> CollectionRow(a.artist, "Artist · ${a.songCount} songs", true, a.albumArtUrl) { callbacks.onOpenArtist(a.artist) }; if (i < data.artists.lastIndex) LibraryDivider(80.dp) }
+            ResultSection.PLAYLISTS -> itemsIndexed(data.playlists) { i, p -> CollectionRow(p.name, "Playlist", false, p.albumArtUrl) { openPlaylist(p.id, p.name) }; if (i < data.playlists.lastIndex) LibraryDivider(80.dp) }
+            else -> Unit
+        }; return
+    }
+    val top = buildList<Any> { data.artists.firstOrNull()?.let(::add); data.songs.firstOrNull()?.let(::add); data.albums.firstOrNull()?.let(::add); data.playlists.firstOrNull()?.let(::add) }.take(3)
+    item("top_header") { Header("Top Results", compact = true) }
+    itemsIndexed(top) { index, value ->
+        when (value) {
+            is SongEntity -> LibrarySongRow(value, actions, { callbacks.onPlay(data.songs.map { it.telegramMessageId }, data.songs.indexOf(value)) },
+                subtitle = "Song · ${value.artist}", horizontalPadding = 18.dp)
+            is AlbumSummary -> CollectionRow(value.album, "Album · ${value.artist}", false, value.albumArtUrl) { callbacks.onOpenAlbum(value.album) }
+            is ArtistSummary -> CollectionRow(value.artist, "Artist · ${value.songCount} songs", true, value.albumArtUrl) { callbacks.onOpenArtist(value.artist) }
+            is PlaylistSummary -> CollectionRow(value.name, "Playlist", false, value.albumArtUrl) { openPlaylist(value.id, value.name) }
+        }; if (index < top.lastIndex) LibraryDivider(80.dp)
+    }
+    if (data.songs.isNotEmpty()) {
+        item("songs_header") { Header("Songs", { show(ResultSection.SONGS) }) }
+        val ids = data.songs.map { it.telegramMessageId }
+        itemsIndexed(data.songs.take(4), key = { _, it -> it.telegramMessageId }) { i, song ->
+            LibrarySongRow(song, actions, { callbacks.onPlay(ids, i) }, horizontalPadding = 18.dp)
+            if (i < data.songs.take(4).lastIndex) LibraryDivider(80.dp)
+        }
+    }
+    libraryShelf("Albums", ResultSection.ALBUMS, data.albums, show) { a -> MediaCard(a.album, a.artist, false, a.albumArtUrl) { callbacks.onOpenAlbum(a.album) } }
+    libraryShelf("Artists", ResultSection.ARTISTS, data.artists, show) { a -> MediaCard(a.artist, "Artist", true, a.albumArtUrl) { callbacks.onOpenArtist(a.artist) } }
+    libraryShelf("Playlists", ResultSection.PLAYLISTS, data.playlists, show) { p -> MediaCard(p.name, "Playlist", false, p.albumArtUrl) { openPlaylist(p.id, p.name) } }
+}
+
+private fun LazyListScope.songRows(songs: List<YtDlpSearchResult>, state: YouTubeDownloadUiState,
+    play: (YtDlpSearchResult) -> Unit, playNext: (YtDlpSearchResult) -> Unit, download: (YtDlpSearchResult) -> Unit) {
+    if (songs.isEmpty()) item("no_songs") { CenteredMessage("No songs found") }
+    itemsIndexed(songs, key = { index, it -> "song_${index}_${it.videoId}" }) { i, song -> YoutubeSongRow(song, state, true, "", play, playNext, download); if (i < songs.lastIndex) LibraryDivider(80.dp) }
+}
+
+private fun LazyListScope.librarySongs(songs: List<SongEntity>, actions: LibrarySongActions, callbacks: LibraryCallbacks) {
+    if (songs.isEmpty()) item("no_songs") { CenteredMessage("No songs found") }
+    val ids = songs.map { it.telegramMessageId }
+    itemsIndexed(songs, key = { _, it -> it.telegramMessageId }) { i, song ->
+        LibrarySongRow(song, actions, { callbacks.onPlay(ids, i) }, horizontalPadding = 18.dp); if (i < songs.lastIndex) LibraryDivider(80.dp)
+    }
+}
+
+private fun LazyListScope.collectionRows(values: List<BrowseCollection>, empty: String, open: (BrowseCollection) -> Unit) {
+    if (values.isEmpty()) item("no_collections") { CenteredMessage(empty) }
+    itemsIndexed(values, key = { index, it -> "collection_${index}_${it.browseId}" }) { i, value -> CollectionRow(value, open); if (i < values.lastIndex) LibraryDivider(80.dp) }
+}
+
+private fun LazyListScope.youtubeShelf(title: String, section: ResultSection, values: List<BrowseCollection>,
+    show: (ResultSection) -> Unit, open: (BrowseCollection) -> Unit) {
+    if (values.isEmpty()) return
+    item("${section.name}_header") { Header(title, { show(section) }) }
+    item("${section.name}_shelf") { CollectionShelf(values.take(SEARCH_SHELF_PREVIEW_LIMIT), open) }
+}
+
+private fun <T> LazyListScope.libraryShelf(title: String, section: ResultSection, values: List<T>,
+    show: (ResultSection) -> Unit, card: @Composable (T) -> Unit) {
+    if (values.isEmpty()) return
+    item("${section.name}_header") { Header(title, { show(section) }) }
+    item("${section.name}_shelf") { LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp), contentPadding = PaddingValues(horizontal = 18.dp)) { items(values) { card(it) } } }
+}
+
+@Composable private fun CollectionShelf(values: List<BrowseCollection>, open: (BrowseCollection) -> Unit) =
+    LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp), contentPadding = PaddingValues(horizontal = 18.dp)) {
+        itemsIndexed(values, key = { index, it -> "shelf_${index}_${it.browseId}" }) { _, item -> CollectionCard(item) { open(item) } }
+    }
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun YoutubeSongRow(result: YtDlpSearchResult, state: YouTubeDownloadUiState, showDownload: Boolean,
+    prefix: String, play: (YtDlpSearchResult) -> Unit, playNext: (YtDlpSearchResult) -> Unit, download: (YtDlpSearchResult) -> Unit) {
+    val downloading = result.videoId in state.downloadingIds; val downloaded = result.videoId in state.downloadedIds
+    var menu by remember(result.videoId) { mutableStateOf(false) }
+    val haptics = LocalHapticFeedback.current
+    // Tap plays, swipe right queues it next, hold opens the menu - like a library song row.
+    SwipeToPlayNext({ playNext(result) }) { swipeModifier ->
+    Row(swipeModifier.fillMaxWidth().heightIn(min = 60.dp).combinedClickable(onClick = { play(result) }, onLongClick = {
+        haptics.performHapticFeedback(HapticFeedbackType.LongPress); menu = true }).padding(start = 18.dp, end = 8.dp, top = 5.dp, bottom = 5.dp), verticalAlignment = Alignment.CenterVertically) {
+        Thumbnail(result.thumbnailUrl, Modifier.size(50.dp), 5, 150)
+        Column(Modifier.weight(1f).padding(start = 12.dp, end = 6.dp)) {
+            Text(result.title, color = Color.White, fontSize = 16.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(prefix + result.artist, color = Color.White.copy(.56f), fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+        if (showDownload) Box(Modifier.size(44.dp), contentAlignment = Alignment.Center) {
+            when { downloading -> CalmSpinner(Modifier.size(20.dp), AppAccent, 2.dp)
+                downloaded -> Icon(Icons.Rounded.Check, "Downloaded", tint = AppAccent, modifier = Modifier.size(22.dp))
+                else -> Icon(Icons.Rounded.Download, "Download", tint = AppAccent, modifier = Modifier.size(23.dp).clickable { download(result) }) }
+        }
+        // Anchors the hold menu at the row's end.
+        Box(Modifier.width(10.dp).height(44.dp), contentAlignment = Alignment.Center) {
+            LibraryFloatingMenu(menu, { menu = false }) {
+                LibraryMenuItem("Play", Icons.Rounded.PlayArrow) { menu = false; play(result) }; LibraryMenuDivider()
+                LibraryMenuItem("Play Next", Icons.Rounded.QueuePlayNext) { menu = false; playNext(result) }; LibraryMenuDivider()
+                LibraryMenuItem(if (downloaded) "Downloaded" else "Download", if (downloaded) Icons.Rounded.Check else Icons.Rounded.Download) {
+                    menu = false; if (!downloaded) download(result)
+                }
             }
         }
-        if (youTubeLoading) {
-            item("yt_loading") { CenteredSpinner() }
-            return@LargeTitleList
-        }
-        youTubeResults(
-            state = state,
-            songs = youTubeSongs,
-            songRow = { result ->
-                TrackResultRow(
-                    title = result.title,
-                    artist = result.artist,
-                    thumbnailUrl = result.thumbnailUrl,
-                    isDownloading = result.videoId in state.downloadingIds,
-                    isDownloaded = result.videoId in state.downloadedIds,
-                    isLoadingStream = result.videoId in state.loadingStreamIds,
-                    onDownloadClick = { app.downloadGate.run { viewModel.onDownloadIconClick(result) } },
-                    onPlayClick = { viewModel.onPlayClick(result) }
-                )
-            },
-            onSelectTab = viewModel::selectTab,
-            onOpenCollection = onOpenCollection
-        )
+    }
     }
 }
 
-private fun nameKey(title: String, artist: String) = title.trim().lowercase() + "\u0000" + artist.trim().lowercase()
+@Composable private fun CollectionRow(value: BrowseCollection, open: (BrowseCollection) -> Unit) =
+    CollectionRow(value.title, "${value.kind.label()}${value.subtitle?.let { " · $it" } ?: ""}", value.kind == BrowseKind.ARTIST, value.thumbnailUrl) { open(value) }
 
-/** "In your library" / "From YouTube": which half of the page this is. */
 @Composable
-private fun SourceHeader(title: String, detail: String? = null) {
-    Row(
-        Modifier.fillMaxWidth().padding(horizontal = 18.dp).padding(top = 18.dp, bottom = 4.dp),
-        verticalAlignment = Alignment.Bottom
-    ) {
-        Text(title, color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.Bold)
-        if (detail != null) {
-            Text(detail, color = GroupLabelColor, fontSize = 14.sp, modifier = Modifier.padding(start = 10.dp, bottom = 3.dp))
-        }
-    }
-}
-
-/** A small kind label inside the library half ("Songs", "Albums"...). */
-@Composable
-private fun KindLabel(title: String) {
-    Text(
-        title.uppercase(),
-        color = GroupLabelColor,
-        fontSize = 13.sp,
-        fontWeight = FontWeight.SemiBold,
-        modifier = Modifier.fillMaxWidth().padding(start = 22.dp, end = 18.dp, top = 14.dp, bottom = 4.dp)
-    )
-}
-
-/**
- * The library half. All shows a few of each kind (the header's arrow opens the Library tab with
- * everything); Library shows everything; a kind's tab shows only that kind.
- */
-private fun LazyListScope.libraryResults(
-    tab: SearchTab,
-    library: LibraryMatches,
-    actions: LibrarySongActions,
-    callbacks: LibraryCallbacks,
-    onOpenPlaylist: (Long, String) -> Unit,
-    onSelectTab: (SearchTab) -> Unit
-) {
-    val all = tab == SearchTab.ALL
-    val songs = when (tab) {
-        SearchTab.ALL -> library.songs.take(4)
-        SearchTab.LIBRARY, SearchTab.SONGS -> library.songs
-        else -> emptyList()
-    }
-    val albums = when (tab) {
-        SearchTab.ALL -> library.albums.take(2)
-        SearchTab.LIBRARY, SearchTab.ALBUMS -> library.albums
-        else -> emptyList()
-    }
-    val artists = when (tab) {
-        SearchTab.ALL -> library.artists.take(2)
-        SearchTab.LIBRARY, SearchTab.ARTISTS -> library.artists
-        else -> emptyList()
-    }
-    val playlists = when (tab) {
-        SearchTab.ALL -> library.playlists.take(2)
-        SearchTab.LIBRARY, SearchTab.PLAYLISTS -> library.playlists
-        else -> emptyList()
-    }
-    if (songs.isEmpty() && albums.isEmpty() && artists.isEmpty() && playlists.isEmpty()) return
-    // Several kinds at once get a label each; a single kind's tab doesn't need one.
-    val labelled = tab == SearchTab.ALL || tab == SearchTab.LIBRARY
-
-    item("lib_title") {
-        if (all) {
-            SectionHeader("In your library") { onSelectTab(SearchTab.LIBRARY) }
-        } else {
-            SourceHeader("In your library")
-        }
-    }
-    if (songs.isNotEmpty()) {
-        if (labelled) item("lib_songs_label") { KindLabel("Songs") }
-        // The whole match list is the queue, even when All shows only its first few.
-        val ids = library.songs.map { it.telegramMessageId }
-        itemsIndexed(songs, key = { _, s -> "lib_song_${s.telegramMessageId}" }, contentType = { _, _ -> "lib_song" }) { index, song ->
-            LibrarySongRow(
-                song = song,
-                actions = actions,
-                onClick = { callbacks.onPlay(ids, index) },
-                subtitle = listOfNotNull(song.artist, song.album?.takeIf { it.isNotBlank() }).joinToString(" · ")
-            )
-            if (index < songs.lastIndex) LibraryDivider(start = 88.dp)
-        }
-    }
-    if (albums.isNotEmpty()) {
-        if (labelled) item("lib_albums_label") { KindLabel("Albums") }
-        itemsIndexed(albums, key = { _, a -> "lib_album_${a.album}\u0000${a.artist}" }, contentType = { _, _ -> "lib_row" }) { index, album ->
-            LibraryResultRow(
-                title = album.album,
-                subtitle = "${album.artist} · ${album.songCount} ${if (album.songCount == 1) "song" else "songs"}",
-                artwork = { CoverTile(album.albumArtUrl, Modifier.size(52.dp), corner = 4) },
-                onClick = { callbacks.onOpenAlbum(album.album) }
-            )
-            if (index < albums.lastIndex) LibraryDivider(start = 88.dp)
-        }
-    }
-    if (artists.isNotEmpty()) {
-        if (labelled) item("lib_artists_label") { KindLabel("Artists") }
-        itemsIndexed(artists, key = { _, a -> "lib_artist_${a.artist}" }, contentType = { _, _ -> "lib_row" }) { index, artist ->
-            LibraryResultRow(
-                title = artist.artist,
-                subtitle = "${artist.songCount} ${if (artist.songCount == 1) "song" else "songs"}",
-                artwork = { ArtistAvatar(artist.albumArtUrl, 52) },
-                onClick = { callbacks.onOpenArtist(artist.artist) }
-            )
-            if (index < artists.lastIndex) LibraryDivider(start = 88.dp)
-        }
-    }
-    if (playlists.isNotEmpty()) {
-        if (labelled) item("lib_playlists_label") { KindLabel("Playlists") }
-        itemsIndexed(playlists, key = { _, p -> "lib_playlist_${p.id}" }, contentType = { _, _ -> "lib_row" }) { index, playlist ->
-            LibraryResultRow(
-                title = playlist.name,
-                subtitle = "Playlist",
-                artwork = { CoverTile(playlist.albumArtUrl, Modifier.size(52.dp), corner = 4, placeholder = Icons.AutoMirrored.Rounded.QueueMusic) },
-                onClick = { onOpenPlaylist(playlist.id, playlist.name) }
-            )
-            if (index < playlists.lastIndex) LibraryDivider(start = 88.dp)
-        }
-    }
-}
-
-/** A library album / artist / playlist: artwork, name, a detail line, and an arrow. */
-@Composable
-private fun LibraryResultRow(title: String, subtitle: String, artwork: @Composable () -> Unit, onClick: () -> Unit) {
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .heightIn(min = 64.dp)
-            .clickable(onClick = onClick)
-            .padding(start = 22.dp, end = 16.dp, top = 6.dp, bottom = 6.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        artwork()
-        Column(Modifier.weight(1f).padding(start = 16.dp, end = 8.dp)) {
+private fun CollectionRow(title: String, subtitle: String, round: Boolean, art: String?, onClick: () -> Unit) {
+    Row(Modifier.fillMaxWidth().heightIn(min = 60.dp).clickable(onClick = onClick).padding(start = 18.dp, end = 16.dp, top = 5.dp, bottom = 5.dp), verticalAlignment = Alignment.CenterVertically) {
+        if (round) ArtistAvatar(art, 50) else CoverTile(art, Modifier.size(50.dp), 5, Icons.AutoMirrored.Rounded.QueueMusic)
+        Column(Modifier.weight(1f).padding(start = 12.dp, end = 8.dp)) {
             Text(title, color = Color.White, fontSize = 16.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Text(subtitle, color = Color.White.copy(alpha = 0.5f), fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(subtitle, color = Color.White.copy(.56f), fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
-        RowArrow()
+        Icon(Icons.AutoMirrored.Rounded.ArrowForwardIos, null, tint = Color.White.copy(.35f), modifier = Modifier.size(14.dp))
     }
 }
 
 @Composable
-private fun RowArrow() {
-    Icon(
-        Icons.AutoMirrored.Rounded.ArrowForwardIos,
-        contentDescription = null,
-        tint = Color.White.copy(alpha = 0.35f),
-        modifier = Modifier.size(14.dp)
-    )
-}
-
-/**
- * The YouTube half for the chosen tab. All shows a few songs, then a shelf each of albums,
- * artists and playlists (the arrow opens that tab); the other tabs list one kind in full.
- */
-private fun LazyListScope.youTubeResults(
-    state: YouTubeDownloadUiState,
-    songs: List<YtDlpSearchResult>,
-    songRow: @Composable (YtDlpSearchResult) -> Unit,
-    onSelectTab: (SearchTab) -> Unit,
-    onOpenCollection: (BrowseCollection) -> Unit
-) {
-    fun songList(list: List<YtDlpSearchResult>) {
-        itemsIndexed(list, key = { _, r -> "yt_song_${r.videoId}" }, contentType = { _, _ -> "track" }) { index, result ->
-            songRow(result)
-            if (index < list.lastIndex) LibraryDivider(start = 88.dp)
-        }
-    }
-    fun rows(list: List<BrowseCollection>, empty: String) {
-        if (list.isEmpty()) item("yt_empty_rows") { CenteredMessage(empty) }
-        itemsIndexed(list, key = { _, c -> "yt_row_${c.browseId}" }, contentType = { _, _ -> "collection" }) { index, collection ->
-            CollectionResultRow(collection) { onOpenCollection(collection) }
-            if (index < list.lastIndex) LibraryDivider(start = 88.dp)
-        }
-    }
-    fun shelf(title: String, tab: SearchTab, list: List<BrowseCollection>) {
-        if (list.isEmpty()) return
-        item("yt_shelf_title_${tab.name}") { SectionHeader(title) { onSelectTab(tab) } }
-        item("yt_shelf_${tab.name}") {
-            LazyRow(horizontalArrangement = Arrangement.spacedBy(14.dp), contentPadding = PaddingValues(horizontal = 18.dp)) {
-                items(list, key = { it.browseId }) { card -> CollectionCard(card) { onOpenCollection(card) } }
-            }
-        }
-    }
-
-    when (state.tab) {
-        SearchTab.ALL -> {
-            if (songs.isEmpty() && state.albums.isEmpty() && state.artists.isEmpty() && state.playlists.isEmpty()) {
-                item("yt_nothing") { CenteredMessage("Nothing found on YouTube") }
-                return
-            }
-            if (songs.isNotEmpty()) {
-                item("yt_songs_title") { SectionHeader("Songs") { onSelectTab(SearchTab.SONGS) } }
-                songList(songs.take(4))
-            }
-            shelf("Albums", SearchTab.ALBUMS, state.albums)
-            shelf("Artists", SearchTab.ARTISTS, state.artists)
-            shelf("Playlists", SearchTab.PLAYLISTS, state.playlists)
-        }
-        SearchTab.SONGS -> {
-            if (songs.isEmpty()) {
-                // Everything YouTube found is already in the library: say so rather than "nothing".
-                val message = if (state.results.isNotEmpty()) "Already in your library" else state.errorMessage ?: "No songs found"
-                item("yt_no_songs") { CenteredMessage(message) }
-            }
-            songList(songs)
-        }
-        SearchTab.ALBUMS -> rows(state.albums, "No albums found")
-        SearchTab.ARTISTS -> rows(state.artists, "No artists found")
-        SearchTab.PLAYLISTS -> rows(state.playlists, "No playlists found")
-        SearchTab.LIBRARY -> Unit
+private fun MediaCard(title: String, subtitle: String, round: Boolean, art: String?, onClick: () -> Unit) {
+    Column(Modifier.width(142.dp).clickable(onClick = onClick), horizontalAlignment = if (round) Alignment.CenterHorizontally else Alignment.Start) {
+        if (round) ArtistAvatar(art, 142) else CoverTile(art, Modifier.fillMaxWidth().aspectRatio(1f), 8)
+        Text(title, color = Color.White.copy(.94f), fontSize = 15.sp, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 8.dp))
+        Text(subtitle, color = Color.White.copy(.56f), fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
 }
 
-/** An album / artist / playlist on YouTube: artwork (round for an artist), title, what it is,
- * and an arrow - it opens a page rather than playing. */
 @Composable
-private fun CollectionResultRow(collection: BrowseCollection, onClick: () -> Unit) {
-    val round = collection.kind == BrowseKind.ARTIST
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .heightIn(min = 64.dp)
-            .clickable(onClick = onClick)
-            .padding(start = 22.dp, end = 16.dp, top = 6.dp, bottom = 6.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Thumbnail(collection.thumbnailUrl, Modifier.size(52.dp), corner = if (round) 26 else 4, requestPx = 150)
-        Column(Modifier.weight(1f).padding(start = 16.dp, end = 8.dp)) {
-            Text(collection.title, color = Color.White, fontSize = 16.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            // "Artist • 12M monthly audience" in the Artists tab: the tab already says what it is.
-            collection.subtitle?.removePrefix("Artist • ")?.let {
-                Text(it, color = Color.White.copy(alpha = 0.5f), fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+private fun ImportedCard(p: ImportedPlaylistEntity, open: () -> Unit, remove: () -> Unit) {
+    Column(Modifier.width(142.dp).clickable(onClick = open)) {
+        Box { Thumbnail(p.thumbnailUrl, Modifier.fillMaxWidth().aspectRatio(1f), 8, 300)
+            Box(Modifier.align(Alignment.TopEnd).padding(6.dp).size(24.dp).clip(CircleShape).background(Color.Black.copy(.62f)).clickable(onClick = remove), contentAlignment = Alignment.Center) {
+                Icon(Icons.Rounded.Close, "Remove", tint = Color.White, modifier = Modifier.size(15.dp))
             }
         }
-        RowArrow()
+        Text(p.title, color = Color.White.copy(.94f), fontSize = 15.sp, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 8.dp))
     }
 }
+
+@Composable private fun GenreTile(title: String, color: Color, modifier: Modifier, click: () -> Unit) =
+    Box(modifier.height(96.dp).clip(RoundedCornerShape(10.dp)).background(color).clickable(onClick = click).padding(12.dp), contentAlignment = Alignment.BottomStart) {
+        Text(title, color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.Bold, maxLines = 2, overflow = TextOverflow.Ellipsis)
+    }
+
+@Composable
+private fun Header(title: String, seeAll: (() -> Unit)? = null, action: (@Composable () -> Unit)? = null, compact: Boolean = false) {
+    Row(Modifier.fillMaxWidth().padding(horizontal = 18.dp).padding(top = if (compact) 16.dp else 22.dp, bottom = if (compact) 6.dp else 10.dp), verticalAlignment = Alignment.CenterVertically) {
+        Text(title, color = Color.White, fontSize = 21.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+        seeAll?.let { Text("See All", color = AppAccent, fontSize = 15.sp, modifier = Modifier.clickable(onClick = it)) }; action?.invoke()
+    }
+}
+
+private fun ResultSection.title() = name.lowercase().replaceFirstChar { it.uppercase() }
+private fun BrowseKind.label() = when (this) { BrowseKind.ARTIST -> "Artist"; BrowseKind.ALBUM -> "Album"; BrowseKind.PLAYLIST -> "Playlist"; BrowseKind.OTHER -> "YouTube Music" }
+private val GenreColors = listOf(Color(0xFF8A2846), Color(0xFF3C3489), Color(0xFF6B3D0F), Color(0xFF7A1F1F), Color(0xFF0F5E4A), Color(0xFF1D4F7A), Color(0xFF72243E), Color(0xFF3D4A1C))

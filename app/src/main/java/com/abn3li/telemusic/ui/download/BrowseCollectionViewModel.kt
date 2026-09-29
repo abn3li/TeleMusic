@@ -34,8 +34,6 @@ data class BrowseCollectionUiState(
     val errorMessage: String? = null,
     val downloadingIds: Set<String> = emptySet(),
     val downloadedIds: Set<String> = emptySet(),
-    // Same idea as downloadingIds - a row streams (not downloads) while its videoId is in here.
-    val loadingStreamIds: Set<String> = emptySet(),
     // Same folder-prompt flow YouTubeDownloadViewModel uses - kept here too since a user could
     // reach a downloadable track from Discovery without ever visiting the search screen first.
     // Non-null while "Import to Library" is running - (done, total) so the button can show real
@@ -44,7 +42,9 @@ data class BrowseCollectionUiState(
     val importProgress: Pair<Int, Int>? = null,
     // The real library playlist this collection became, once imported - lets the button switch
     // to "Open in Library" instead of staying an inert "Imported" label forever.
-    val importedPlaylistId: Long? = null
+    val importedPlaylistId: Long? = null,
+    // True once the page was saved as an album instead (Library > Albums, no playlist).
+    val importedAsAlbum: Boolean = false
 )
 
 /** Backs a single browse destination - a playlist's, chart's, or artist's own page reached by
@@ -60,7 +60,6 @@ class BrowseCollectionViewModel(
     private val ytDlpRepository: YtDlpRepository,
     private val musicRepository: MusicRepository,
     private val settingsStore: AppSettingsStore,
-    private val onPlayStream: (SongEntity, Uri, String) -> Unit,
     // Downloads and Import to Library run here, not in viewModelScope: they must finish even
     // when the screen closes and this ViewModel is cleared - never a half-imported playlist.
     private val workScope: CoroutineScope
@@ -90,45 +89,6 @@ class BrowseCollectionViewModel(
         }
     }
 
-    /** Entry point from a row's Play tap - see YouTubeDownloadViewModel.onPlayClick's own doc,
-     * this is the identical flow for a Discovery/playlist track instead of a search result. */
-    fun onPlayClick(track: BrowseTrack) {
-        if (track.videoId in _uiState.value.loadingStreamIds) return
-        viewModelScope.launch {
-            _uiState.update { it.copy(loadingStreamIds = it.loadingStreamIds + track.videoId, errorMessage = null) }
-            val outcome = ytDlpRepository.resolveStreamUrl(track.videoId, DownloadQuality.BEST.formatSelector)
-            val stream = outcome.getOrNull()?.takeIf { it.streamUrl.isNotBlank() }
-            if (stream != null) {
-                val song = SongEntity(
-                    telegramMessageId = ytDlpStableSongId(track.videoId),
-                    telegramFileId = 0,
-                    title = stream.title,
-                    artist = stream.artist,
-                    durationSeconds = stream.durationSeconds,
-                    // The row's own square album art (YouTube Music search/browse), not the
-                    // resolve's thumbnail: the light resolve skips the watch page, so its
-                    // thumbnail is the video frame - album art letterboxed with bars.
-                    albumArtUrl = com.abn3li.telemusic.data.browse.googleArtworkAtSize(
-                        track.thumbnailUrl?.takeIf { it.isNotBlank() } ?: stream.thumbnailUrl,
-                        com.abn3li.telemusic.data.browse.SAVED_ARTWORK_SIZE
-                    ),
-                    isLocalImport = true
-                )
-                onPlayStream(song, stream.streamUrl.toUri(), track.videoId)
-            }
-            _uiState.update {
-                it.copy(
-                    loadingStreamIds = it.loadingStreamIds - track.videoId,
-                    errorMessage = if (stream == null) {
-                        "Couldn't play \"${track.title}\": ${outcome.exceptionOrNull()?.message ?: "no stream found"}"
-                    } else {
-                        it.errorMessage
-                    }
-                )
-            }
-        }
-    }
-
     /** Entry point from a row's Download tap (after the app-wide download-location prompt, see
      * DownloadLocationGate) - always grabs the best real audio available (see DownloadQuality's
      * own doc). */
@@ -148,13 +108,25 @@ class BrowseCollectionViewModel(
      * a steadily-advancing count rather than a burst of out-of-order DB writes. Already-imported
      * tracks (re-importing the same playlist, or a track shared with another one) are added to
      * the new playlist as-is, untouched. */
-    fun importToLibrary() {
-        if (_uiState.value.importProgress != null || _uiState.value.importedPlaylistId != null) return
-        val tracks = _uiState.value.tracks
+    fun importToLibrary(asAlbum: Boolean = false) {
+        val current = _uiState.value
+        if (current.importProgress != null || current.importedPlaylistId != null || current.importedAsAlbum) return
+        val tracks = current.tracks
         if (tracks.isEmpty()) return
+        val name = current.header?.title ?: current.title
         workScope.launch {
             _uiState.update { it.copy(importProgress = 0 to tracks.size) }
-            val playlistId = musicRepository.createPlaylist(_uiState.value.header?.title ?: _uiState.value.title)
+            if (asAlbum) {
+                // Each song gets this album's name, so they group under Library > Albums.
+                tracks.forEachIndexed { index, track ->
+                    musicRepository.importPlaylistTrackAsStreamable(track, name)
+                    _uiState.update { it.copy(importProgress = (index + 1) to tracks.size) }
+                }
+                musicRepository.backfillThumbnails()
+                _uiState.update { it.copy(importProgress = null, importedAsAlbum = true) }
+                return@launch
+            }
+            val playlistId = musicRepository.createPlaylist(name)
             tracks.forEachIndexed { index, track ->
                 val song = musicRepository.importPlaylistTrackAsStreamable(track)
                 musicRepository.addSongToPlaylist(playlistId, song)

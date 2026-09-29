@@ -7,35 +7,21 @@ import com.abn3li.telemusic.ui.library.AppAlert
 import com.abn3li.telemusic.ui.library.AlertAction
 import com.abn3li.telemusic.ui.library.AlertTextField
 import com.abn3li.telemusic.ui.library.AlertNote
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.LazyListScope
-import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.itemsIndexed
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.CheckCircle
-import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Download
-import androidx.compose.material.icons.rounded.Folder
 import androidx.compose.material.icons.rounded.MusicNote
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material3.Icon
@@ -52,20 +38,16 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import com.abn3li.telemusic.TgMusicApp
-import com.abn3li.telemusic.data.browse.BrowseCollection
-import com.abn3li.telemusic.data.browse.BrowseKind
-import com.abn3li.telemusic.data.local.ImportedPlaylistEntity
 import com.abn3li.telemusic.ui.library.AppAccent
 import com.abn3li.telemusic.ui.library.DestructiveRed
-import com.abn3li.telemusic.ui.library.FilterPill
 import com.abn3li.telemusic.ui.library.GroupLabelColor
+import com.abn3li.telemusic.ui.library.SwipeToPlayNext
 
 /** The Search tab's paste-a-link dialog, wired to [viewModel]: a YouTube playlist link is pinned into
  * Discovery, a Spotify link is imported into the Library. */
@@ -89,159 +71,6 @@ internal fun ImportPlaylistPrompt(viewModel: DiscoveryViewModel, onClose: () -> 
     )
 }
 
-/**
- * YouTube Music's feed on the Search tab (before anything is typed): playlists imported by link (+ adds one), genres, then YouTube Music's
- * own home shelves.
- */
-internal fun LazyListScope.youTubeDiscovery(
-    state: DiscoveryUiState,
-    onOpenCollection: (BrowseCollection) -> Unit,
-    onImportPlaylistClick: () -> Unit,
-    onRemoveImportedPlaylist: (ImportedPlaylistEntity) -> Unit,
-    onRetry: () -> Unit
-) = discovery(
-    isLoading = state.isLoading,
-    sections = state.sections,
-    genres = state.genres,
-    importedPlaylists = state.importedPlaylists,
-    onOpenCollection = onOpenCollection,
-    onImportPlaylistClick = onImportPlaylistClick,
-    onRemoveImportedPlaylist = onRemoveImportedPlaylist,
-    onRetry = onRetry
-)
-
-private fun LazyListScope.discovery(
-    isLoading: Boolean,
-    sections: List<com.abn3li.telemusic.data.browse.HomeSection>,
-    genres: List<BrowseCollection>,
-    importedPlaylists: List<ImportedPlaylistEntity>,
-    onOpenCollection: (BrowseCollection) -> Unit,
-    onImportPlaylistClick: () -> Unit,
-    onRemoveImportedPlaylist: (ImportedPlaylistEntity) -> Unit,
-    onRetry: () -> Unit
-) {
-    item("imported_header") {
-        ShelfHeader("Imported Playlists") {
-            Icon(
-                Icons.Rounded.Add,
-                contentDescription = "Import playlist",
-                tint = AppAccent,
-                modifier = Modifier.size(28.dp).clickable(onClick = onImportPlaylistClick)
-            )
-        }
-    }
-    if (importedPlaylists.isEmpty()) {
-        item("imported_empty") {
-            Text(
-                "Tap + to add a YouTube playlist by its link.",
-                color = GroupLabelColor,
-                fontSize = 14.sp,
-                modifier = Modifier.padding(horizontal = 18.dp)
-            )
-        }
-    } else {
-        item("imported_row") {
-            LazyRow(horizontalArrangement = Arrangement.spacedBy(14.dp), contentPadding = PaddingValues(horizontal = 18.dp)) {
-                items(importedPlaylists, key = { it.browseId }) { playlist ->
-                    ShelfCard(
-                        title = playlist.title,
-                        subtitle = playlist.subtitle,
-                        thumbnailUrl = playlist.thumbnailUrl,
-                        onClick = {
-                            onOpenCollection(
-                                BrowseCollection(
-                                    browseId = playlist.browseId,
-                                    params = null,
-                                    title = playlist.title,
-                                    subtitle = playlist.subtitle,
-                                    thumbnailUrl = playlist.thumbnailUrl,
-                                    kind = BrowseKind.PLAYLIST
-                                )
-                            )
-                        },
-                        onRemove = { onRemoveImportedPlaylist(playlist) }
-                    )
-                }
-            }
-        }
-    }
-    when {
-        isLoading -> item("discovery_loading") { CenteredSpinner() }
-        sections.isEmpty() && genres.isEmpty() -> item("discovery_error") {
-            Box(Modifier.fillMaxWidth().clickable(onClick = onRetry)) {
-                CenteredMessage("Couldn't load YouTube Music. Tap to try again.")
-            }
-        }
-        else -> {
-            if (genres.isNotEmpty()) {
-                item("genres_header") { ShelfHeader("Genres") }
-                item("genres_row") {
-                    LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp), contentPadding = PaddingValues(horizontal = 18.dp)) {
-                        items(genres, key = { it.title }) { genre ->
-                            FilterPill(genre.title, selected = false, onClick = { onOpenCollection(genre) })
-                        }
-                    }
-                }
-            }
-            // Keyed by title + index: YouTube's feed can contain two shelves with the same title.
-            itemsIndexed(sections, key = { index, section -> "yt_shelf_${section.title}_$index" }, contentType = { _, _ -> "shelf" }) { _, section ->
-                ShelfHeader(section.title)
-                LazyRow(horizontalArrangement = Arrangement.spacedBy(14.dp), contentPadding = PaddingValues(horizontal = 18.dp)) {
-                    items(section.items, key = { it.browseId }) { card ->
-                        ShelfCard(card.title, card.subtitle, card.thumbnailUrl, onClick = { onOpenCollection(card) })
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-internal fun ShelfHeader(title: String, action: (@Composable () -> Unit)? = null) {
-    Row(
-        Modifier.fillMaxWidth().padding(horizontal = 18.dp).padding(top = 18.dp, bottom = 10.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Text(title, color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
-        action?.invoke()
-    }
-}
-
-@Composable
-private fun ShelfCard(title: String, subtitle: String?, thumbnailUrl: String?, onClick: () -> Unit, onRemove: (() -> Unit)? = null) {
-    Column(Modifier.width(142.dp).clickable(onClick = onClick)) {
-        Box {
-            Thumbnail(thumbnailUrl, Modifier.fillMaxWidth().aspectRatio(1f), corner = 8, requestPx = 300)
-            if (onRemove != null) {
-                Box(
-                    Modifier
-                        .align(Alignment.TopEnd)
-                        .padding(6.dp)
-                        .size(24.dp)
-                        .clip(CircleShape)
-                        .background(Color.Black.copy(alpha = 0.6f))
-                        .clickable(onClick = onRemove),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(Icons.Rounded.Close, contentDescription = "Remove", tint = Color.White, modifier = Modifier.size(15.dp))
-                }
-            }
-        }
-        Text(
-            title,
-            color = Color.White.copy(alpha = 0.94f),
-            fontSize = 15.sp,
-            lineHeight = 18.sp,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.padding(top = 8.dp)
-        )
-        if (subtitle != null) {
-            Text(subtitle, color = Color.White.copy(alpha = 0.56f), fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-        }
-    }
-}
-
 /** Remote artwork decoded at [requestPx], with a music-note placeholder. */
 @Composable
 internal fun Thumbnail(url: String?, modifier: Modifier, corner: Int, requestPx: Int) {
@@ -255,7 +84,7 @@ internal fun Thumbnail(url: String?, modifier: Modifier, corner: Int, requestPx:
     }
 }
 
-/** A search result / browse track: artwork, title, artist, Play and Download. */
+/** A browse track: artwork, title, artist, Play and Download. */
 @Composable
 internal fun TrackResultRow(
     title: String,
@@ -263,15 +92,17 @@ internal fun TrackResultRow(
     thumbnailUrl: String?,
     isDownloading: Boolean,
     isDownloaded: Boolean,
-    isLoadingStream: Boolean,
     onDownloadClick: () -> Unit,
-    onPlayClick: () -> Unit
+    onPlayClick: () -> Unit,
+    onPlayNext: () -> Unit
 ) {
+    // Swipe right to queue it next, like a library song row.
+    SwipeToPlayNext(onPlayNext) { swipeModifier ->
     Row(
-        Modifier
+        swipeModifier
             .fillMaxWidth()
             .heightIn(min = 64.dp)
-            .clickable(enabled = !isLoadingStream, onClick = onPlayClick)
+            .clickable(onClick = onPlayClick)
             .padding(start = 22.dp, end = 10.dp, top = 6.dp, bottom = 6.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -282,20 +113,16 @@ internal fun TrackResultRow(
         }
         // Fixed 44dp slots so the row doesn't shift when a button turns into a spinner.
         Box(Modifier.size(44.dp), contentAlignment = Alignment.Center) {
-            if (isLoadingStream) {
-                CalmSpinner(color = AppAccent, strokeWidth = 2.dp, modifier = Modifier.size(20.dp))
-            } else {
-                Icon(
-                    Icons.Rounded.PlayArrow,
-                    contentDescription = "Play",
-                    tint = Color.White,
-                    modifier = Modifier.size(26.dp).clickable(
-                        interactionSource = remember { MutableInteractionSource() },
-                        indication = null,
-                        onClick = onPlayClick
-                    )
+            Icon(
+                Icons.Rounded.PlayArrow,
+                contentDescription = "Play",
+                tint = Color.White,
+                modifier = Modifier.size(26.dp).clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null,
+                    onClick = onPlayClick
                 )
-            }
+            )
         }
         Box(Modifier.size(44.dp), contentAlignment = Alignment.Center) {
             when {
@@ -313,6 +140,7 @@ internal fun TrackResultRow(
                 )
             }
         }
+    }
     }
 }
 

@@ -34,19 +34,26 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.lifecycle.viewmodel.initializer
+import androidx.lifecycle.viewmodel.viewModelFactory
+import com.abn3li.telemusic.TgMusicApp
+import com.abn3li.telemusic.data.browse.BrowseCollection
 import com.abn3li.telemusic.data.local.SongEntity
+import com.abn3li.telemusic.ui.download.CollectionCard
+import com.abn3li.telemusic.ui.download.NewReleasesViewModel
 
 private val MixDaily = Color(0xFF72243E)
 private val MixRediscover = Color(0xFF3C3489)
 
 /**
- * The Home tab: shortcut tiles, then Recently Played, Made for You, Recently Added and Top
- * Artists - all from [LibraryViewModel.home] (worked out once per library change). YouTube
- * Music's feed lives on the Search tab. Nothing here animates or polls.
+ * The Home tab: shortcuts and the user's library sections from [LibraryViewModel.home] (worked
+ * out once per library change), with YouTube Music's New releases shelf last.
  */
 @Composable
 fun HomeScreen(
@@ -54,8 +61,15 @@ fun HomeScreen(
     callbacks: LibraryCallbacks,
     onOpenSettings: () -> Unit,
     onOpenPlaylist: (Long, String) -> Unit,
-    onOpenSmartPlaylist: (SmartPlaylistKind) -> Unit
+    onOpenSmartPlaylist: (SmartPlaylistKind) -> Unit,
+    onOpenCollection: (BrowseCollection) -> Unit
 ) {
+    val app = LocalContext.current.applicationContext as TgMusicApp
+    val newReleasesViewModel = viewModel<NewReleasesViewModel>(factory = viewModelFactory { initializer {
+        NewReleasesViewModel(app.discoveryRepository)
+    } })
+    val newReleases by newReleasesViewModel.uiState.collectAsState()
+    LaunchedEffect(Unit) { newReleasesViewModel.retryIfMissing() }
     val home by viewModel.home.collectAsState()
     val artists by viewModel.artists.collectAsState()
     val pinned by viewModel.pinnedPlaylists.collectAsState()
@@ -158,6 +172,21 @@ fun HomeScreen(
                             Text(artist.artist, color = Color.White.copy(alpha = 0.9f), fontSize = 12.5.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         }
                     }
+                }
+            }
+        }
+
+        newReleases.section?.takeIf { it.items.isNotEmpty() }?.let { releases ->
+            item("new_releases_header") { HomeSectionHeader("New releases") }
+            item("new_releases") {
+                LazyRow(
+                    contentPadding = PaddingValues(horizontal = 16.dp),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    itemsIndexed(
+                        releases.items,
+                        key = { index, item -> "release_${index}_${item.browseId}_${item.params.orEmpty()}" }
+                    ) { _, item -> CollectionCard(item) { onOpenCollection(item) } }
                 }
             }
         }

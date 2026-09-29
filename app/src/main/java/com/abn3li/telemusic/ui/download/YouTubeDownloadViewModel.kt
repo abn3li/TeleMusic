@@ -43,19 +43,13 @@ data class YouTubeDownloadUiState(
     val artists: List<BrowseCollection> = emptyList(),
     val playlists: List<BrowseCollection> = emptyList(),
     val errorMessage: String? = null,
-    // Why the last Play or Download failed - kept apart from the search's own message, so it
+    // Why the last Download failed - kept apart from the search's own message, so it
     // shows in every tab rather than only when the Songs list is empty.
     val actionError: String? = null,
     // Both keyed by videoId - a result mid-download shows a spinner in place of its download
     // icon, and a finished one shows a checkmark instead, without needing a full re-search.
     val downloadingIds: Set<String> = emptySet(),
-    val downloadedIds: Set<String> = emptySet(),
-    // Set the moment a download is tapped but no folder is saved yet - the screen reacts by
-    // launching the system folder picker. The result waiting behind that prompt is kept here
-    // rather than re-requested, so picking a folder resumes the exact song the user tapped.
-    // A row streams (not downloads) while its videoId is in here - shows a spinner in place of
-    // its Play icon, same idea as downloadingIds/downloadedIds above but for onPlayClick.
-    val loadingStreamIds: Set<String> = emptySet()
+    val downloadedIds: Set<String> = emptySet()
 )
 
 /**
@@ -69,9 +63,6 @@ class YouTubeDownloadViewModel(
     private val musicRepository: MusicRepository,
     private val settingsStore: AppSettingsStore,
     private val discoveryRepository: DiscoveryRepository,
-    // Hands off to the shared NowPlayingViewModel.playEphemeral() - constructed at the nav root
-    // (see NavGraph.kt), not something this screen-scoped ViewModel has a reference to itself.
-    private val onPlayStream: (SongEntity, Uri, String) -> Unit,
     // Downloads run here, not in viewModelScope: they must finish (and land in the library)
     // even when the screen closes and this ViewModel is cleared.
     private val workScope: CoroutineScope
@@ -134,49 +125,6 @@ class YouTubeDownloadViewModel(
                         errorMessage = if (found.isEmpty()) "No songs found" else null
                     )
                 }
-            }
-        }
-    }
-
-    /** Entry point from a row's Play tap - streams straight from a resolved googlevideo.com URL
-     * (same Opus quality selector as a real download, see DownloadQuality's own doc) and keeps
-     * nothing on disk afterward, unlike the Download button below which saves a real library
-     * row. Builds an in-memory-only SongEntity (never inserted into Room - see
-     * NowPlayingViewModel.playEphemeral's own doc) so the mini player/Now Playing screen can
-     * display it exactly like any other song with zero new UI code. */
-    fun onPlayClick(result: YtDlpSearchResult) {
-        if (result.videoId in _uiState.value.loadingStreamIds) return
-        viewModelScope.launch {
-            _uiState.update { it.copy(loadingStreamIds = it.loadingStreamIds + result.videoId, actionError = null) }
-            val outcome = ytDlpRepository.resolveStreamUrl(result.videoId, DownloadQuality.BEST.formatSelector)
-            val stream = outcome.getOrNull()?.takeIf { it.streamUrl.isNotBlank() }
-            if (stream != null) {
-                val song = SongEntity(
-                    telegramMessageId = ytDlpStableSongId(result.videoId),
-                    telegramFileId = 0,
-                    title = stream.title,
-                    artist = stream.artist,
-                    durationSeconds = stream.durationSeconds,
-                    // The row's own square album art (YouTube Music search/browse), not the
-                    // resolve's thumbnail: the light resolve skips the watch page, so its
-                    // thumbnail is the video frame - album art letterboxed with bars.
-                    albumArtUrl = com.abn3li.telemusic.data.browse.googleArtworkAtSize(
-                        result.thumbnailUrl?.takeIf { it.isNotBlank() } ?: stream.thumbnailUrl,
-                        com.abn3li.telemusic.data.browse.SAVED_ARTWORK_SIZE
-                    ),
-                    isLocalImport = true
-                )
-                onPlayStream(song, stream.streamUrl.toUri(), result.videoId)
-            }
-            _uiState.update {
-                it.copy(
-                    loadingStreamIds = it.loadingStreamIds - result.videoId,
-                    actionError = if (stream == null) {
-                        "Couldn't play \"${result.title}\": ${outcome.exceptionOrNull()?.message ?: "no stream found"}"
-                    } else {
-                        it.actionError
-                    }
-                )
             }
         }
     }

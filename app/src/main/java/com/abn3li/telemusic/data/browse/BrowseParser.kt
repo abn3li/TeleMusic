@@ -203,7 +203,7 @@ object BrowseParser {
     fun parseSearchSongs(response: JSONObject): List<BrowseTrack> {
         val tracks = LinkedHashMap<String, BrowseTrack>()
         collectRenderers(response, "musicResponsiveListItemRenderer").forEach { renderer ->
-            parseTrackRow(renderer)?.let { tracks.putIfAbsent(it.videoId, it) }
+            parseTrackRow(renderer)?.let { tracks.putIfAbsent(it.videoId, it.copy(artist = it.artist.ifBlank { "Unknown artist" })) }
         }
         return tracks.values.toList()
     }
@@ -296,7 +296,7 @@ object BrowseParser {
             shelf.opt("contents").arr()?.let { rows ->
                 for (i in 0 until rows.length()) {
                     rows.optJSONObject(i)?.opt("musicResponsiveListItemRenderer").obj()
-                        ?.let { parseTrackRow(it) }?.let { songs.putIfAbsent(it.videoId, it) }
+                        ?.let { parseTrackRow(it) }?.let { songs.putIfAbsent(it.videoId, it.copy(artist = it.artist.ifBlank { name.ifBlank { "Unknown artist" } })) }
                 }
             }
             topSongs = songs.values.toList()
@@ -380,7 +380,9 @@ object BrowseParser {
         return BrowseTrack(
             videoId = videoId,
             title = title,
-            artist = artist.ifBlank { "Unknown artist" },
+            // Blank on an album's own track list: those rows leave the artist to the album
+            // header, and the caller fills it from there (see DiscoveryRepository.browse).
+            artist = artist,
             thumbnailUrl = thumbnails.best(),
             durationSeconds = durationSecs
         )

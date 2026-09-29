@@ -34,12 +34,19 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.filterNotNull
+import kotlinx.coroutines.flow.emitAll
+import kotlinx.coroutines.sync.withLock
 import java.io.File
 
 enum class SortField(val label: String) { TITLE("Name"), ARTIST("Artist"), ALBUM("Album"), DATE_ADDED("Date added") }
 
 // ~10 minutes at the 1s poll interval below - see markStreamedFileCached's own doc.
 private const val MAX_CACHE_POLL_ATTEMPTS = 600
+
+// Stream-only YouTube songs held in memory for the queue - see queueIdsForStreams.
+private const val MAX_STREAM_ONLY_SONGS = 3000
+private const val MAX_RECENT_STREAMS = 30
 
 // Thumbnails saved per database transaction - see backfillThumbnails.
 private const val THUMBNAIL_BATCH = 25
@@ -123,7 +130,111 @@ class MusicRepository(
     fun observeLibrary(sortField: SortField, ascending: Boolean): Flow<List<SongEntity>> =
         songDao.observeAll().map { it.sortedByField(sortField, ascending) }
 
-    suspend fun getSongById(id: Long): SongEntity? = songDao.getById(id)
+    suspend fun getSongById(id: Long): SongEntity? =
+        songDao.getById(id) ?: streamOnlySongs[id] ?: recentStreams().firstOrNull { it.telegramMessageId == id }
+
+    // YouTube songs played from search or a YouTube album/playlist/artist page that aren't in the
+    // library: kept in memory so they can sit in the normal queue (Next/Previous, the
+    // notification, auto-advance) like any library song. They're saved to the library only when
+    // they're Liked, added to a playlist or downloaded (see [saveIfStreamOnly]).
+    private val streamOnlySongs = java.util.concurrent.ConcurrentHashMap<Long, SongEntity>()
+
+    /** The queue ids for [tracks], in order - a song already in the library is played from its
+     * row (so a downloaded one plays from the file); the rest are held as stream-only songs. */
+    fun queueIdsForStreams(tracks: List<BrowseTrack>): List<Long> {
+        // Bounded: a very long session drops the oldest held songs, never the ones being queued.
+        if (streamOnlySongs.size > MAX_STREAM_ONLY_SONGS) streamOnlySongs.clear()
+        return tracks.map { track ->
+            val id = ytDlpStableSongId(track.videoId)
+            streamOnlySongs.getOrPut(id) {
+                SongEntity(
+                    telegramMessageId = id,
+                    telegramFileId = 0,
+                    title = track.title,
+                    artist = track.artist,
+                    durationSeconds = track.durationSeconds,
+                    albumArtUrl = com.abn3li.telemusic.data.browse.googleArtworkAtSize(track.thumbnailUrl, com.abn3li.telemusic.data.browse.SAVED_ARTWORK_SIZE),
+                    youtubeVideoId = track.videoId,
+                    metadataEnriched = true
+                )
+            }
+            id
+        }
+    }
+
+    // The last YouTube songs played that aren't in the library, newest first, for Home's
+    // Recently Played. Kept in a small file (not the songs table, so they stay out of the
+    // library); read once, then written only when a stream-only song starts playing.
+    private val recentStreamsFile = File(appContext.filesDir, "recent_streams.json")
+    private val recentStreamsState = MutableStateFlow<List<SongEntity>?>(null)
+    private val recentStreamsLock = kotlinx.coroutines.sync.Mutex()
+
+    private suspend fun recentStreams(): List<SongEntity> {
+        recentStreamsState.value?.let { return it }
+        return recentStreamsLock.withLock {
+            recentStreamsState.value ?: withContext(Dispatchers.IO) { readRecentStreams() }.also { recentStreamsState.value = it }
+        }
+    }
+
+    /** Stream-only YouTube songs played lately, newest first (see [recentStreamsFile]). */
+    fun observeRecentStreams(): Flow<List<SongEntity>> = kotlinx.coroutines.flow.flow {
+        recentStreams()
+        emitAll(recentStreamsState.filterNotNull())
+    }
+
+    private suspend fun recordStreamPlayed(song: SongEntity, at: Long) {
+        if (song.youtubeVideoId == null) return
+        recentStreamsLock.withLock {
+            val current = recentStreamsState.value ?: withContext(Dispatchers.IO) { readRecentStreams() }
+            val updated = (listOf(song.copy(lastPlayedAtMillis = at)) + current.filter { it.telegramMessageId != song.telegramMessageId })
+                .take(MAX_RECENT_STREAMS)
+            recentStreamsState.value = updated
+            withContext(Dispatchers.IO) { writeRecentStreams(updated) }
+        }
+    }
+
+    private fun readRecentStreams(): List<SongEntity> = runCatching {
+        if (!recentStreamsFile.exists()) return emptyList()
+        val array = org.json.JSONArray(recentStreamsFile.readText())
+        (0 until array.length()).mapNotNull { i ->
+            val o = array.optJSONObject(i) ?: return@mapNotNull null
+            val videoId = o.optString("videoId").takeIf { it.isNotBlank() } ?: return@mapNotNull null
+            SongEntity(
+                telegramMessageId = ytDlpStableSongId(videoId),
+                telegramFileId = 0,
+                title = o.optString("title"),
+                artist = o.optString("artist"),
+                album = o.optString("album").takeIf { it.isNotBlank() },
+                durationSeconds = o.optInt("duration"),
+                albumArtUrl = o.optString("art").takeIf { it.isNotBlank() },
+                youtubeVideoId = videoId,
+                metadataEnriched = true,
+                lastPlayedAtMillis = o.optLong("playedAt")
+            )
+        }
+    }.getOrElse { e -> Log.w("MusicRepository", "recent streams unreadable", e); emptyList() }
+
+    private fun writeRecentStreams(songs: List<SongEntity>) {
+        val array = org.json.JSONArray()
+        songs.forEach { s ->
+            array.put(org.json.JSONObject()
+                .put("videoId", s.youtubeVideoId).put("title", s.title).put("artist", s.artist)
+                .put("album", s.album ?: "").put("duration", s.durationSeconds)
+                .put("art", s.albumArtUrl ?: "").put("playedAt", s.lastPlayedAtMillis))
+        }
+        runCatching {
+            val tmp = File(recentStreamsFile.path + ".tmp")
+            tmp.writeText(array.toString())
+            tmp.renameTo(recentStreamsFile) || run { recentStreamsFile.writeText(array.toString()); true }
+        }.onFailure { Log.w("MusicRepository", "recent streams not saved", it) }
+    }
+
+    /** A stream-only song gets a real library row first, so a Like or playlist entry has
+     * something to attach to. A no-op for songs already in the library. */
+    private suspend fun saveIfStreamOnly(songId: Long) {
+        if (songDao.getById(songId) != null) return
+        streamOnlySongs[songId]?.let { songDao.upsert(it) }
+    }
 
     /** Sets [songId]'s album only if it has none yet (Spotify imports - see SpotifyImporter). */
     suspend fun setAlbumIfMissing(songId: Long, album: String) = songDao.setAlbumIfMissing(songId, album)
@@ -131,12 +242,15 @@ class MusicRepository(
     fun search(query: String): Flow<List<SongEntity>> = songDao.search(query)
 
     /** Android Auto's "Recently Played" browse category - see MusicService's MediaLibrarySession. */
-    suspend fun getRecentlyPlayed(limit: Int = 50): List<SongEntity> = songDao.getRecentlyPlayed(limit)
+    suspend fun getRecentlyPlayed(limit: Int = 50): List<SongEntity> =
+        (songDao.getRecentlyPlayed(limit) + recentStreams())
+            .sortedByDescending { it.lastPlayedAtMillis }.distinctBy { it.telegramMessageId }.take(limit)
 
     fun observeFavorites(sortField: SortField, ascending: Boolean): Flow<List<SongEntity>> =
         songDao.observeFavorites().map { it.sortedByField(sortField, ascending) }
 
     suspend fun setFavorite(song: SongEntity, isFavorite: Boolean) {
+        if (isFavorite) saveIfStreamOnly(song.telegramMessageId)
         songDao.setFavorite(song.telegramMessageId, isFavorite)
         // The large widget shows the Like star (a no-op when no widget is placed).
         com.abn3li.telemusic.widget.MusicWidgets.refresh(appContext)
@@ -452,7 +566,10 @@ class MusicRepository(
     fun observeSongsInPlaylist(playlistId: Long): Flow<List<SongEntity>> = playlistDao.observeSongsInPlaylist(playlistId)
     suspend fun createPlaylist(name: String): Long = playlistDao.insert(PlaylistEntity(name = name))
     suspend fun deletePlaylist(playlistId: Long) = playlistDao.delete(playlistId)
-    suspend fun addSongToPlaylist(playlistId: Long, song: SongEntity) = playlistDao.addSong(PlaylistSongCrossRef(playlistId, song.telegramMessageId))
+    suspend fun addSongToPlaylist(playlistId: Long, song: SongEntity) {
+        saveIfStreamOnly(song.telegramMessageId)
+        playlistDao.addSong(PlaylistSongCrossRef(playlistId, song.telegramMessageId))
+    }
     /** Adds with an explicit sort time - playlists list newest first, so an import gives its first
      * song the latest time to keep the source's order. */
     suspend fun addSongToPlaylistAt(playlistId: Long, songId: Long, addedAtMillis: Long) =
@@ -1010,7 +1127,11 @@ class MusicRepository(
         get() = settingsStore.showSongIndex
         set(value) { settingsStore.showSongIndex = value }
 
-    suspend fun stampLastPlayed(song: SongEntity) = songDao.stampLastPlayed(song.telegramMessageId, System.currentTimeMillis())
+    suspend fun stampLastPlayed(song: SongEntity) {
+        val now = System.currentTimeMillis()
+        // No library row to stamp: a YouTube song played from search or an album page.
+        if (songDao.stampLastPlayed(song.telegramMessageId, now) == 0) recordStreamPlayed(song, now)
+    }
 
     suspend fun getFreshFileIdForSong(song: SongEntity): Int {
         // No real Telegram message behind a local import OR a YouTube download - telegramFileId

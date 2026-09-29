@@ -17,6 +17,12 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.Orientation
 import androidx.compose.foundation.gestures.draggable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.awaitHorizontalTouchSlopOrCancellation
+import androidx.compose.foundation.gestures.horizontalDrag
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.foundation.gestures.rememberDraggableState
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
@@ -62,6 +68,7 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -141,67 +148,20 @@ internal fun LibrarySongRow(
 ) {
     val context = LocalContext.current
     val haptics = LocalHapticFeedback.current
-    val scope = rememberCoroutineScope()
-    var rowWidth by remember { mutableIntStateOf(0) }
     var rowTopInWindow by remember { mutableFloatStateOf(0f) }
     // Plain holder, not state: only read at the moment of a long-press.
     val coordinates = remember { arrayOfNulls<LayoutCoordinates>(1) }
-    val swipe = remember { Animatable(0f) }
     var menuOpen by remember { mutableStateOf(false) }
-    val trigger = rowWidth * 0.2f
 
-    val swipeState = rememberDraggableState { delta ->
-        if (rowWidth == 0) return@rememberDraggableState
-        val before = swipe.value
-        val after = (before + delta).coerceIn(0f, rowWidth.toFloat())
-        if ((before >= trigger) != (after >= trigger)) haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-        scope.launch { swipe.snapTo(after) }
-    }
-
-    Box(
-        Modifier
-            .fillMaxWidth()
-            .clipToBounds()
-            .onSizeChanged { rowWidth = it.width }
-            .onPlaced { coordinates[0] = it }
-    ) {
-        if (swipe.value > 0f) {
-            val progress = if (rowWidth > 0) swipe.value / rowWidth else 0f
-            Box(Modifier.matchParentSize()) {
-                Box(
-                    Modifier
-                        .fillMaxHeight()
-                        .width(with(LocalDensity.current) { swipe.value.toDp() })
-                        .background(AppAccent),
-                    contentAlignment = Alignment.CenterStart
-                ) {
-                    Icon(
-                        Icons.Rounded.QueuePlayNext,
-                        contentDescription = null,
-                        tint = Color.Black,
-                        modifier = Modifier
-                            .padding(start = 22.dp)
-                            .size(28.dp)
-                            .graphicsLayer { scaleX = 0.82f + progress * 0.18f; scaleY = scaleX }
-                    )
-                }
-            }
-        }
+    SwipeToPlayNext(
+        onPlayNext = {
+            actions.onPlayNext(song)
+            Toast.makeText(context, "Playing next", Toast.LENGTH_SHORT).show()
+        },
+        modifier = Modifier.onPlaced { coordinates[0] = it }
+    ) { swipeModifier ->
         Row(
-            Modifier
-                .graphicsLayer { translationX = swipe.value }
-                .background(Color.Black)
-                .draggable(
-                    state = swipeState,
-                    orientation = Orientation.Horizontal,
-                    onDragStopped = {
-                        if (trigger > 0f && swipe.value >= trigger) {
-                            actions.onPlayNext(song)
-                            Toast.makeText(context, "Playing next", Toast.LENGTH_SHORT).show()
-                        }
-                        swipe.animateTo(0f, spring(dampingRatio = 0.72f, stiffness = 420f))
-                    }
-                )
+            swipeModifier
                 .heightIn(min = RowMinHeight)
                 .fillMaxWidth()
                 .combinedClickable(
@@ -239,6 +199,83 @@ internal fun LibrarySongRow(
 
     if (menuOpen) {
         SongContextMenu(song = song, actions = actions, anchorTopPx = rowTopInWindow, onDismiss = { menuOpen = false })
+    }
+}
+
+/**
+ * Swipe a row right to "Play next": an accent strip grows under it with the queue icon, a tick
+ * at the trigger point (a fifth of the row), and the row springs back on release. [content]
+ * puts the given modifier on its row. Nothing runs until a finger moves.
+ */
+@Composable
+internal fun SwipeToPlayNext(
+    onPlayNext: () -> Unit,
+    modifier: Modifier = Modifier,
+    rowBackground: Color = Color.Black,
+    content: @Composable (Modifier) -> Unit
+) {
+    val haptics = LocalHapticFeedback.current
+    val scope = rememberCoroutineScope()
+    var rowWidth by remember { mutableIntStateOf(0) }
+    val swipe = remember { Animatable(0f) }
+    val playNext by rememberUpdatedState(onPlayNext)
+    // Read inside the gesture, never captured: the row's width can change after it starts.
+    fun trigger() = rowWidth * 0.2f
+    fun dragBy(delta: Float) {
+        val before = swipe.value
+        val after = (before + delta).coerceIn(0f, rowWidth.toFloat())
+        if ((before >= trigger()) != (after >= trigger())) haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+        scope.launch { swipe.snapTo(after) }
+    }
+    Box(modifier.fillMaxWidth().clipToBounds().onSizeChanged { rowWidth = it.width }) {
+        if (swipe.value > 0f) {
+            val progress = if (rowWidth > 0) swipe.value / rowWidth else 0f
+            Box(Modifier.matchParentSize()) {
+                Box(
+                    Modifier
+                        .fillMaxHeight()
+                        .width(with(LocalDensity.current) { swipe.value.toDp() })
+                        .background(AppAccent),
+                    contentAlignment = Alignment.CenterStart
+                ) {
+                    Icon(
+                        Icons.Rounded.QueuePlayNext,
+                        contentDescription = null,
+                        tint = Color.Black,
+                        modifier = Modifier
+                            .padding(start = 22.dp)
+                            .size(28.dp)
+                            .graphicsLayer { scaleX = 0.82f + progress * 0.18f; scaleY = scaleX }
+                    )
+                }
+            }
+        }
+        content(
+            Modifier
+                .graphicsLayer { translationX = swipe.value }
+                .background(rowBackground)
+                // Claims only a rightward swipe: a leftward one is left to whatever holds the
+                // row (the Search pager flips back to YouTube Music with it).
+                .pointerInput(Unit) {
+                    awaitEachGesture {
+                        val down = awaitFirstDown(requireUnconsumed = false)
+                        var start = 0f
+                        val claimed = awaitHorizontalTouchSlopOrCancellation(down.id) { change, over ->
+                            if (over > 0f) { change.consume(); start = over }
+                        } ?: return@awaitEachGesture
+                        if (rowWidth == 0) return@awaitEachGesture
+                        dragBy(start)
+                        horizontalDrag(claimed.id) { change ->
+                            dragBy(change.positionChange().x)
+                            change.consume()
+                        }
+                        scope.launch {
+                            if (trigger() > 0f && swipe.value >= trigger()) playNext()
+                            swipe.animateTo(0f, spring(dampingRatio = 0.72f, stiffness = 420f))
+                        }
+                    }
+                }
+        )
     }
 }
 

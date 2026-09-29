@@ -87,11 +87,6 @@ class NowPlayingViewModel(
     private var prefetchJob: Job? = null
     private var lyricsJob: Job? = null
     private var lyricsSourceJob: Job? = null
-    // Set by playEphemeral() for a YouTube "Play" stream, cleared the moment a real song loads -
-    // downloadCurrentSong() needs this to actually download the video (see its own doc for why
-    // the ordinary downloadExplicitly() path can't: there's no Telegram message behind this row
-    // at all, only a video id, which nothing else in NowPlayingUiState/SongEntity carries).
-    private var pendingEphemeralVideoId: String? = null
 
     // The Queue page's two sections. Kept out of NowPlayingUiState so the queue list only
     // recomposes on a real queue change, never on the 300ms position tick.
@@ -353,40 +348,6 @@ class NowPlayingViewModel(
         refreshQueue()
     }
 
-    /** Plays a single song that was never added to the library - the YouTube "Play" button (see
-     * YouTubeDownloadViewModel.onPlayClick), which streams a resolved googlevideo.com URL and
-     * keeps nothing afterward, unlike the actual Download button which saves a real library row.
-     * [song] is an in-memory SongEntity built just for display (never inserted into Room) - see
-     * SongEntity.isLocalImport's own doc for why telegramFileId is meaningless (0) here too.
-     *
-     * The shared queue is cleared, not left as whatever it was before: with it untouched, the
-     * mini player's Skip Next button (always enabled, not gated on hasNext - see MiniPlayer.kt)
-     * would silently resume the OLD library queue instead of doing nothing, since nextSong()
-     * reads straight from `queue` rather than the hasNext flag this sets to false.
-     *
-     * [videoId] is kept around (not part of [song]/[NowPlayingUiState] - it's not a real library
-     * field) purely so [downloadCurrentSong] can actually save this song for real if the user
-     * taps Download while it's playing - see that function's own doc. */
-    fun playEphemeral(song: SongEntity, streamUri: Uri, videoId: String) {
-        loadJob?.cancel()
-        cancelLyricsFetch()
-        queue.clear()
-        pendingEphemeralVideoId = videoId
-        _uiState.value = _uiState.value.copy(
-            song = song,
-            lyricLines = emptyList(),
-            currentPositionMs = 0L,
-            durationMs = (song.durationSeconds * 1000L).coerceAtLeast(1L),
-            loadingSongId = null,
-            hasNext = false,
-            hasPrevious = false,
-            errorMessage = null,
-            isDownloading = false
-        )
-        playbackController.playUri(streamUri, song.telegramMessageId, song.title, song.artist, song.displayArtwork, youtubeVideoId = videoId)
-        refreshQueue()
-    }
-
     /** Opening Lyrics: saved lyrics (or a recent "none found") answer without searching. */
     fun fetchLyricsOnDemand() {
         val song = _uiState.value.song ?: return
@@ -545,16 +506,6 @@ class NowPlayingViewModel(
     fun downloadCurrentSong() {
         val song = _uiState.value.song ?: return
         if (song.isExplicitDownload) return
-        // A real local import always has a real localFilePath (see SongEntity's own doc) - the
-        // only way isLocalImport is ever true with localFilePath null is playEphemeral's
-        // in-memory-only stream song (never inserted into Room). That case still needs a real
-        // download (see downloadEphemeralSong below) - it just can't go through the ordinary
-        // downloadExplicitly() path, which assumes a Telegram message behind the row.
-        val videoId = pendingEphemeralVideoId
-        if (song.isLocalImport && song.localFilePath == null) {
-            if (videoId != null) downloadEphemeralSong(song, videoId)
-            return
-        }
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(isDownloading = true)
             val failure = runCatching { repository.downloadExplicitly(song) }.exceptionOrNull()
@@ -585,39 +536,9 @@ class NowPlayingViewModel(
         }
     }
 
-    /** The real download behind Now Playing's Download button for a YouTube song currently
-     * streaming via [playEphemeral] - same yt-dlp download + library-import flow
-     * YouTubeDownloadViewModel's Download button uses (see its startDownload's own doc), just
-     * triggered from Now Playing instead of the search results row. Saves a real library row,
-     * exactly like tapping Download from search would have - this song just happened to be
-     * played first instead. */
-    private fun downloadEphemeralSong(song: SongEntity, videoId: String) {
-        viewModelScope.launch {
-            _uiState.value = _uiState.value.copy(isDownloading = true)
-            val destDir = File(context.filesDir, "youtube_downloads")
-            val songId = ytDlpStableSongId(videoId)
-            val outcome = withContext(Dispatchers.IO) {
-                ytDlpRepository.download(videoId, destDir, songId.toString(), DownloadQuality.BEST.formatSelector)
-            }
-            outcome.onSuccess { downloaded ->
-                repository.importDownloadedSong(downloaded, songId, videoId)
-                repository.backfillThumbnails()
-            }
-            if (_uiState.value.song?.telegramMessageId == song.telegramMessageId) {
-                val updated = outcome.getOrNull()?.let { repository.getSongById(songId) }
-                _uiState.value = _uiState.value.copy(
-                    song = updated ?: _uiState.value.song,
-                    isDownloading = false,
-                    errorMessage = outcome.exceptionOrNull()?.let { e -> "Couldn't download \"${song.title}\": ${e.message}" }
-                )
-            }
-        }
-    }
-
     private fun loadCurrentQueuePosition(songIdOverride: Long? = null) {
         loadJob?.cancel()
         cancelLyricsFetch()
-        pendingEphemeralVideoId = null
         // Silence whatever was playing right away, before any slow work (YouTube stream
         // resolution, Telegram prebuffer wait). Pause, not stop: a stopped (idle) player makes
         // Media3 take the system notification down until the next song starts.
@@ -821,23 +742,8 @@ class NowPlayingViewModel(
         val song = _uiState.value.song ?: return
         viewModelScope.launch {
             val newFav = !song.isFavorite
-            // A stream played from search or Discovery isn't in the library, so there was no
-            // row for the Like to land on - it lit up and was lost. Liking it adds it to the
-            // library first (a streamable row, like Import to Library), then likes that.
-            val videoId = pendingEphemeralVideoId
-            if (newFav && song.isLocalImport && song.localFilePath == null && videoId != null) {
-                withContext(Dispatchers.IO) {
-                    repository.importPlaylistTrackAsStreamable(
-                        BrowseTrack(
-                            videoId = videoId,
-                            title = song.title,
-                            artist = song.artist,
-                            thumbnailUrl = song.albumArtUrl,
-                            durationSeconds = song.durationSeconds
-                        )
-                    )
-                }
-            }
+            // A YouTube song played from search isn't in the library yet - setFavorite saves it
+            // first (see MusicRepository.saveIfStreamOnly), so the Like lands on a real row.
             repository.setFavorite(song, newFav)
             _uiState.value = _uiState.value.copy(song = song.copy(isFavorite = newFav))
         }

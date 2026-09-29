@@ -144,7 +144,7 @@ interface SongDao {
     suspend fun getAllReferencedLocalFilePaths(): List<String>
 
     @Query("UPDATE songs SET lastPlayedAtMillis = :timestamp WHERE telegramMessageId = :id")
-    suspend fun stampLastPlayed(id: Long, timestamp: Long)
+    suspend fun stampLastPlayed(id: Long, timestamp: Long): Int
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsert(song: SongEntity)

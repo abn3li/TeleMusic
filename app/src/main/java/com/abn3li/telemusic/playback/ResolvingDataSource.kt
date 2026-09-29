@@ -10,8 +10,8 @@ import com.abn3li.telemusic.data.telegram.TdlibManager
 /**
  * Routes each DataSpec to the right underlying DataSource by URI scheme: tdlib:// and local
  * file:// go to [TdlibDataSource] (this app's own Telegram-streaming source), and plain
- * http(s):// - a resolved YouTube stream URL from the "Play" button (see
- * YouTubeDownloadViewModel.onPlayClick) - goes to a real [DefaultHttpDataSource].
+ * http(s):// - a resolved YouTube stream URL (see
+ * MusicRepository.resolveDirectPlaybackUri) - goes to a real [DefaultHttpDataSource].
  *
  * DefaultDataSource.Factory only ever takes ONE "base" factory for every scheme it doesn't
  * already special-case itself (file/asset/content/rawresource) - tdlib:// and http(s):// both

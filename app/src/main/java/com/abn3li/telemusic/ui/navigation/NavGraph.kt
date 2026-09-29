@@ -8,6 +8,7 @@ import com.abn3li.telemusic.ui.library.AppAlert
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.compose.rememberLauncherForActivityResult
 import android.net.Uri
+import android.widget.Toast
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
 import androidx.compose.foundation.background
@@ -56,6 +57,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.abn3li.telemusic.TgMusicApp
+import com.abn3li.telemusic.data.browse.BrowseTrack
 import com.abn3li.telemusic.ui.download.BrowseCollectionScreen
 import com.abn3li.telemusic.ui.onboarding.OnboardingScreen
 import com.abn3li.telemusic.ui.search.SearchScreen
@@ -164,6 +166,15 @@ fun TgMusicNavGraph(navController: NavHostController = rememberNavController()) 
         )
     }
 
+    // YouTube songs (search results, albums, playlists) play through the normal queue as
+    // stream-only songs, so Next / Previous move through the whole list.
+    val playStreams: (List<BrowseTrack>, Int, Boolean) -> Unit = remember(playerViewModel) {
+        { tracks, index, shuffle ->
+            val ids = app.musicRepository.queueIdsForStreams(tracks)
+            if (shuffle) playerViewModel.playCollection(ids, true) else playerViewModel.playFromQueue(ids, index)
+        }
+    }
+
     val playerState by playerViewModel.stableUiState.collectAsState()
     val playingFrom by playerViewModel.playingFrom.collectAsState()
     val collectionPlayback = remember(playingFrom, playerState.song, playerState.isPlaying, playerState.isShuffleEnabled) {
@@ -228,7 +239,8 @@ fun TgMusicNavGraph(navController: NavHostController = rememberNavController()) 
                         callbacks = libraryCallbacks,
                         onOpenSettings = { navController.navigate(Routes.SETTINGS) },
                         onOpenPlaylist = { id, name -> navController.navigate(Routes.playlist(id, name)) },
-                        onOpenSmartPlaylist = { kind -> navController.navigate(Routes.smartPlaylist(kind)) }
+                        onOpenSmartPlaylist = { kind -> navController.navigate(Routes.smartPlaylist(kind)) },
+                        onOpenCollection = { c -> navController.navigate(Routes.youtubeBrowse(c.browseId, c.title, c.params)) }
                     )
                 }
                 composable(Routes.SEARCH) {
@@ -237,7 +249,7 @@ fun TgMusicNavGraph(navController: NavHostController = rememberNavController()) 
                         callbacks = libraryCallbacks,
                         onOpenPlaylist = { id, name -> navController.navigate(Routes.playlist(id, name)) },
                         onOpenCollection = { c -> navController.navigate(Routes.youtubeBrowse(c.browseId, c.title, c.params)) },
-                        onPlayStream = { song, uri, videoId -> playerViewModel.playEphemeral(song, uri, videoId) }
+                        onPlayTracks = playStreams
                     )
                 }
                 composable(Routes.SPOTIFY) {
@@ -290,7 +302,11 @@ fun TgMusicNavGraph(navController: NavHostController = rememberNavController()) 
                         params = params,
                         onBack = { navController.popBackStack() },
                         onOpenCollection = { c -> navController.navigate(Routes.youtubeBrowse(c.browseId, c.title, c.params)) },
-                        onPlayStream = { song, uri, videoId -> playerViewModel.playEphemeral(song, uri, videoId) }
+                        onPlayTracks = playStreams,
+                        onPlayNext = { track ->
+                            playerViewModel.playNext(app.musicRepository.queueIdsForStreams(listOf(track)).first())
+                            Toast.makeText(app, "Playing next", Toast.LENGTH_SHORT).show()
+                        }
                     )
                 }
                 composable(Routes.SYNC) { SyncScreen(onBack = { navController.popBackStack() }) }

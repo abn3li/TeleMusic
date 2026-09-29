@@ -8,18 +8,14 @@ import com.abn3li.telemusic.data.download.YtDlpRepository
 import com.abn3li.telemusic.data.local.ImportedPlaylistEntity
 import com.abn3li.telemusic.repository.DiscoveryRepository
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.async
-import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
 data class DiscoveryUiState(
-    // YouTube Music's own home shelves and genres (cached by DiscoveryRepository, so a second
-    // visit is instant).
+    // Search browse content (cached by DiscoveryRepository, so a second visit is instant).
     val isLoading: Boolean = true,
-    val sections: List<HomeSection> = emptyList(),
     val genres: List<BrowseCollection> = emptyList(),
     // The user's pinned-by-URL playlists, straight from Room: an import or remove shows up here
     // on its own.
@@ -27,7 +23,7 @@ data class DiscoveryUiState(
     val importPlaylistError: String? = null
 )
 
-/** The Search tab's YouTube Music feed: its shelves, genres, and playlists imported by link. */
+/** The Search tab's categories and playlists imported by link. */
 class DiscoveryViewModel(
     private val ytDlpRepository: YtDlpRepository,
     private val discoveryRepository: DiscoveryRepository
@@ -46,16 +42,13 @@ class DiscoveryViewModel(
         }
     }
 
-    /** Fetches the feed and genres. The Search tab keeps this ViewModel while you switch tabs,
+    /** Fetches genres. The Search tab keeps this ViewModel while you switch tabs,
      * so a start without a connection is retried from the error message ([reload]). */
     private fun load() {
         loadJob = viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true) }
-            coroutineScope {
-                val sections = async { discoveryRepository.homeFeed() }
-                val genres = async { discoveryRepository.genres() }
-                _uiState.update { it.copy(isLoading = false, sections = sections.await(), genres = genres.await()) }
-            }
+            val genres = discoveryRepository.genres()
+            _uiState.update { it.copy(isLoading = false, genres = genres) }
         }
     }
 
@@ -97,5 +90,31 @@ class DiscoveryViewModel(
 
     fun clearImportPlaylistError() {
         _uiState.update { it.copy(importPlaylistError = null) }
+    }
+}
+
+data class NewReleasesUiState(
+    val isLoading: Boolean = true,
+    val section: HomeSection? = null
+)
+
+/** Owns the single remote shelf displayed on Home. */
+class NewReleasesViewModel(
+    private val discoveryRepository: DiscoveryRepository
+) : ViewModel() {
+    private val _uiState = MutableStateFlow(NewReleasesUiState())
+    val uiState: StateFlow<NewReleasesUiState> = _uiState
+
+    private var loadJob: Job? = null
+
+    init { retryIfMissing() }
+
+    /** Loads the shelf if it isn't there yet - called on each visit to Home, so one that failed
+     * (offline start) shows up once the connection is back. Nothing runs once it has loaded. */
+    fun retryIfMissing() {
+        if (_uiState.value.section != null || loadJob?.isActive == true) return
+        loadJob = viewModelScope.launch {
+            _uiState.value = NewReleasesUiState(isLoading = false, section = discoveryRepository.newReleases())
+        }
     }
 }
