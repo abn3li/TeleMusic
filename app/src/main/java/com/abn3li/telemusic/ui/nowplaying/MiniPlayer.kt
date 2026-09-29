@@ -85,7 +85,7 @@ internal val MiniPlayerBarHeight: Dp = 56.dp
 internal val MiniPlayerSideMargin: Dp = 12.dp
 internal val MiniPlayerCorner: Dp = 16.dp
 
-private val MiniPlayerColor = Color(0xF2202023)
+private val MiniPlayerColor = Color(0xFF202023)
 private val SwipeEasing = CubicBezierEasing(0.25f, 1f, 0.5f, 1f)
 private const val SKIP_DISTANCE_FRACTION = 0.18f
 private const val SKIP_VELOCITY = 1400f

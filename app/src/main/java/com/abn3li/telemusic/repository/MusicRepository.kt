@@ -186,6 +186,9 @@ class MusicRepository(
         if (song.youtubeVideoId == null) return
         recentStreamsLock.withLock {
             val current = recentStreamsState.value ?: withContext(Dispatchers.IO) { readRecentStreams() }
+            // The player and the playback service both stamp a song as it starts: record it once.
+            val newest = current.firstOrNull()
+            if (newest?.telegramMessageId == song.telegramMessageId && at - newest.lastPlayedAtMillis < 30_000) return@withLock
             val updated = (listOf(song.copy(lastPlayedAtMillis = at)) + current.filter { it.telegramMessageId != song.telegramMessageId })
                 .take(MAX_RECENT_STREAMS)
             recentStreamsState.value = updated

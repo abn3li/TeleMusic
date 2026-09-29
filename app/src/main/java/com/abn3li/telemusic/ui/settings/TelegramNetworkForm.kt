@@ -128,13 +128,20 @@ internal fun rememberTelegramNetworkForm(store: AppSettingsStore): TelegramNetwo
     return form
 }
 
-/** The DNS resolver row, its options and the custom-servers field - rows for a GroupCard. */
+/** The DNS resolver row, its options and the custom-servers field - rows for a GroupCard.
+ * [onChange] runs after each edit, for a screen that saves as you go: `typing` is true for a
+ * keystroke in the servers field, false for picking a resolver. */
 @Composable
-internal fun ColumnScope.DnsResolverRows(form: TelegramNetworkForm, icon: (@Composable () -> Unit)? = null) {
+internal fun ColumnScope.DnsResolverRows(
+    form: TelegramNetworkForm,
+    icon: (@Composable () -> Unit)? = null,
+    title: String = "Resolver",
+    onChange: (typing: Boolean) -> Unit = {}
+) {
     // Options line up with the row's title: past the icon when there is one.
     val indent = if (icon != null) 57 else 15
     GroupRow(
-        title = "Resolver",
+        title = title,
         icon = icon,
         onClick = { form.dnsOptionsOpen = !form.dnsOptionsOpen },
         trailing = { GroupValue(form.dns.displayName.substringBefore(" (")) }
@@ -151,24 +158,32 @@ internal fun ColumnScope.DnsResolverRows(form: TelegramNetworkForm, icon: (@Comp
                 ) {
                     form.dns = resolver
                     form.dnsOptionsOpen = false
+                    onChange(false)
                 }
             }
         }
     }
     if (form.dns == DnsResolver.CUSTOM) {
-        GroupDivider()
-        GroupTextField(value = form.customDns, onValueChange = { form.customDns = it }, placeholder = "1.1.1.1,8.8.8.8", label = "Servers")
+        GroupDivider(start = indent.dp)
+        GroupTextField(value = form.customDns, onValueChange = { form.customDns = it; onChange(true) }, placeholder = "1.1.1.1,8.8.8.8", label = "Servers")
     }
 }
 
 /** The Use Proxy switch and, when on, the link/server/port/secret fields - rows for a GroupCard.
- * [onMessage] gets the result of filling from a proxy link. */
+ * [onMessage] gets the result of filling from a proxy link. [onChange] runs after each edit:
+ * `connectNow` is true for the switch and a filled-in link, false while typing a field. */
 @Composable
-internal fun ColumnScope.ProxyRows(form: TelegramNetworkForm, onMessage: (String) -> Unit, icon: (@Composable () -> Unit)? = null) {
+internal fun ColumnScope.ProxyRows(
+    form: TelegramNetworkForm,
+    onMessage: (String) -> Unit,
+    icon: (@Composable () -> Unit)? = null,
+    onChange: (connectNow: Boolean) -> Unit = {}
+) {
     val clipboardManager = LocalClipboardManager.current
-    GroupRow(title = "Use Proxy", icon = icon, trailing = { GroupSwitch(form.proxyEnabled, { form.proxyEnabled = it }) })
+    val indent = if (icon != null) 57 else 15
+    GroupRow(title = "Use Proxy", icon = icon, trailing = { GroupSwitch(form.proxyEnabled, { form.proxyEnabled = it; onChange(true) }) })
     if (form.proxyEnabled) {
-        GroupDivider()
+        GroupDivider(start = indent.dp)
         GroupTextField(
             value = form.proxyLinkInput,
             onValueChange = { form.proxyLinkInput = it },
@@ -181,25 +196,24 @@ internal fun ColumnScope.ProxyRows(form: TelegramNetworkForm, onMessage: (String
                     modifier = Modifier.size(22.dp).clickable {
                         val clipText = clipboardManager.getText()?.text
                         val textToParse = if (!clipText.isNullOrBlank()) clipText else form.proxyLinkInput
-                        onMessage(
-                            if (form.fillFromProxyLink(textToParse)) "Filled in from the proxy link."
-                            else "That isn't a valid Telegram proxy link."
-                        )
+                        val filled = form.fillFromProxyLink(textToParse)
+                        onMessage(if (filled) "Filled in from the proxy link." else "That isn't a valid Telegram proxy link.")
+                        if (filled) onChange(true)
                     }
                 )
             }
         )
-        GroupDivider()
-        GroupTextField(value = form.proxyServer, onValueChange = { form.proxyServer = it }, placeholder = "Hostname or IP", label = "Server")
-        GroupDivider()
+        GroupDivider(start = indent.dp)
+        GroupTextField(value = form.proxyServer, onValueChange = { form.proxyServer = it; onChange(false) }, placeholder = "Hostname or IP", label = "Server")
+        GroupDivider(start = indent.dp)
         GroupTextField(
             value = form.proxyPortText,
-            onValueChange = { form.proxyPortText = it.filter { c -> c.isDigit() } },
+            onValueChange = { form.proxyPortText = it.filter { c -> c.isDigit() }; onChange(false) },
             placeholder = "443",
             label = "Port",
             keyboardType = KeyboardType.Number
         )
-        GroupDivider()
-        GroupTextField(value = form.proxySecret, onValueChange = { form.proxySecret = it }, placeholder = "Hex secret", label = "Secret")
+        GroupDivider(start = indent.dp)
+        GroupTextField(value = form.proxySecret, onValueChange = { form.proxySecret = it; onChange(false) }, placeholder = "Hex secret", label = "Secret")
     }
 }

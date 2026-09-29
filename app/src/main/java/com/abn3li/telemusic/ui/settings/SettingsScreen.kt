@@ -8,6 +8,12 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.layout.Column
+import com.abn3li.telemusic.ui.library.GroupLabelColor
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.material.icons.outlined.Info
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.height
@@ -94,13 +100,78 @@ fun SettingsScreen(onBack: () -> Unit, onOpenSpotify: () -> Unit, onLoggedOut: (
     var cacheLimit by remember { mutableStateOf(app.settingsStore.maxCacheSizeBytes) }
     var cacheOptionsOpen by remember { mutableStateOf(false) }
 
-    // DNS and proxy as typed; each section below saves and applies its own part.
+    // DNS and proxy save as they're changed - no Save buttons. Before Telegram is set up (Sync
+    // tab) there's nothing to connect or restart.
     val network = rememberTelegramNetworkForm(app.settingsStore)
-    var dnsMessage by remember { mutableStateOf<String?>(null) }
-    // Before Telegram is set up (Sync tab) there's nothing to connect or restart: just save.
     val telegramRunning = app.tdlibManager.isStarted
     var proxyStatusMessage by remember { mutableStateOf<String?>(null) }
-    var isApplyingProxy by remember { mutableStateOf(false) }
+    // TDLib reads DNS only when it starts: a changed one offers a restart.
+    val launchDns = remember { dnsAtLaunch ?: (app.settingsStore.dnsResolver to app.settingsStore.customDnsIps).also { dnsAtLaunch = it } }
+    var savedDns by remember { mutableStateOf(app.settingsStore.dnsResolver to app.settingsStore.customDnsIps) }
+    val dnsNeedsRestart = telegramRunning && savedDns != launchDns
+    // Proxy fields typed but not connected yet - connected on leaving Settings.
+    var proxyEditsPending by remember { mutableStateOf(false) }
+
+    // DNS is written with a blocking commit() (see AppSettingsStore.dnsResolver), so never on the
+    // main thread while typing: a picked resolver saves in the background, typed servers save
+    // once on leaving Settings or on Restart.
+    var dnsEditsPending by remember { mutableStateOf(false) }
+    fun writeDns(resolver: com.abn3li.telemusic.data.settings.DnsResolver, custom: String) {
+        app.settingsStore.dnsResolver = resolver
+        app.settingsStore.customDnsIps = custom
+    }
+    fun saveDns(typing: Boolean) {
+        savedDns = network.dns to network.customDns
+        if (typing) { dnsEditsPending = true; return }
+        dnsEditsPending = false
+        val (resolver, custom) = savedDns
+        scope.launch {
+            withContext(Dispatchers.IO) { writeDns(resolver, custom) }
+            network.markSaved(app.settingsStore)
+        }
+    }
+
+    fun saveProxy(connectNow: Boolean) {
+        val enabled = network.proxyEnabled
+        val server = network.proxyServer
+        val port = network.proxyPort
+        val secret = network.proxySecret
+        app.settingsStore.updateProxy(enabled, server, port, secret)
+        network.markSaved(app.settingsStore)
+        if (!telegramRunning) return
+        if (!connectNow) { proxyEditsPending = true; return }
+        proxyEditsPending = false
+        if (enabled && server.isBlank()) { proxyStatusMessage = null; return }
+        scope.launch {
+            proxyStatusMessage = if (enabled) "Connecting…" else null
+            val success = app.tdlibManager.applyProxy(enabled, server, port, secret)
+            proxyStatusMessage = when {
+                !enabled -> "Using a direct connection."
+                success -> "Proxy connected."
+                else -> "Couldn't connect to the proxy."
+            }
+        }
+    }
+
+    // Typed proxy details connect once, when leaving Settings, not on every keystroke.
+    val latestProxyPending by rememberUpdatedState(proxyEditsPending)
+    val latestDnsPending by rememberUpdatedState(dnsEditsPending)
+    DisposableEffect(Unit) {
+        onDispose {
+            if (latestDnsPending) {
+                val resolver = network.dns
+                val custom = network.customDns
+                app.workScope.launch(Dispatchers.IO) { writeDns(resolver, custom) }
+            }
+            if (latestProxyPending) {
+                val enabled = network.proxyEnabled
+                val server = network.proxyServer
+                val port = network.proxyPort
+                val secret = network.proxySecret
+                app.workScope.launch { app.tdlibManager.applyProxy(enabled, server, port, secret) }
+            }
+        }
+    }
 
     var showClearCacheConfirm by remember { mutableStateOf(false) }
     var showClearLibraryConfirm by remember { mutableStateOf(false) }
@@ -180,7 +251,7 @@ fun SettingsScreen(onBack: () -> Unit, onOpenSpotify: () -> Unit, onLoggedOut: (
                     }
                 )
             }
-            GroupFooter("Glow makes lyrics shine over the artwork. Blur softens the lines around the one being sung (Android 12+) and uses more GPU. The background drifts slowly while music plays.")
+            SettingsNote("These effects may increase CPU and GPU usage.")
         }
 
         item("library") {
@@ -226,7 +297,6 @@ fun SettingsScreen(onBack: () -> Unit, onOpenSpotify: () -> Unit, onLoggedOut: (
                     }
                 }
             }
-            GroupFooter("Auto-fetch looks up titles, artists, covers and lyrics. With a folder, each downloaded song is saved there once and plays from there; App Storage keeps downloads private to TeleMusic. Changing it applies to new downloads.")
         }
 
         item("storage") {
@@ -261,69 +331,39 @@ fun SettingsScreen(onBack: () -> Unit, onOpenSpotify: () -> Unit, onLoggedOut: (
                 GroupDivider()
                 GroupActionRow("Reset Library", color = DestructiveRed) { showClearLibraryConfirm = true }
             }
-            GroupFooter(
-                storageActionStatus
-                    ?: "Streamed songs are cached up to the limit, oldest first. Downloads are never removed. Reset Library deletes all songs, playlists and audio."
-            )
+            storageActionStatus?.let { GroupFooter(it) }
         }
 
-        item("dns") {
-            GroupHeader("DNS")
+        item("connection") {
+            GroupHeader("Connection")
             GroupCard {
-                DnsResolverRows(network, icon = { GroupIcon(Icons.Rounded.Dns, TileGreen) })
-                GroupDivider()
-                GroupActionRow(if (telegramRunning) "Apply & Restart App" else "Save") {
-                    app.settingsStore.dnsResolver = network.dns
-                    app.settingsStore.customDnsIps = network.customDns
-                    network.markSaved(app.settingsStore)
-                    if (!telegramRunning) {
-                        dnsMessage = "Saved. Telegram uses it once you set it up in the Sync tab."
-                        return@GroupActionRow
-                    }
-                    app.tdlibManager.applyDns(network.dns, network.customDns)
-                    // Restart the process so TDLib starts fresh with the new DNS.
-                    val intent = context.packageManager.getLaunchIntentForPackage(context.packageName)
-                    context.startActivity(Intent.makeRestartActivityTask(intent?.component))
-                    Runtime.getRuntime().exit(0)
-                }
-            }
-            GroupFooter(dnsMessage ?: "Bypasses ISP DNS blocking and can speed up connecting. Presets from Telegram, Telegram X and Nagram X.")
-        }
-
-        item("proxy") {
-            GroupHeader("MTProto Proxy")
-            GroupCard {
-                ProxyRows(network, onMessage = { proxyStatusMessage = it }, icon = { GroupIcon(Icons.Rounded.VpnKey, TileIndigo) })
-                GroupDivider()
-                GroupActionRow(if (telegramRunning) "Save & Connect" else "Save", loading = isApplyingProxy) {
-                    val enabled = network.proxyEnabled
-                    val server = network.proxyServer
-                    val port = network.proxyPort
-                    val secret = network.proxySecret
-                    app.settingsStore.updateProxy(enabled, server, port, secret)
-                    network.markSaved(app.settingsStore)
-                    if (!telegramRunning) {
-                        proxyStatusMessage = "Saved. Telegram uses it once you set it up in the Sync tab."
-                        return@GroupActionRow
-                    }
-                    scope.launch {
-                        isApplyingProxy = true
-                        proxyStatusMessage = "Connecting…"
-                        val success = app.tdlibManager.applyProxy(enabled, server, port, secret)
-                        isApplyingProxy = false
-                        proxyStatusMessage = when {
-                            !enabled -> "Using a direct connection."
-                            success -> "Proxy connected."
-                            else -> "Couldn't connect to the proxy."
-                        }
+                DnsResolverRows(network, icon = { GroupIcon(Icons.Rounded.Dns, TileGreen) }, title = "DNS", onChange = ::saveDns)
+                GroupDivider(start = 57.dp)
+                ProxyRows(
+                    network,
+                    onMessage = { proxyStatusMessage = it },
+                    icon = { GroupIcon(Icons.Rounded.VpnKey, TileIndigo) },
+                    onChange = ::saveProxy
+                )
+                if (dnsNeedsRestart) {
+                    GroupDivider()
+                    GroupActionRow("Restart to Apply DNS") {
+                        // Written right here, synchronously: the process ends next.
+                        writeDns(network.dns, network.customDns)
+                        app.tdlibManager.applyDns(network.dns, network.customDns)
+                        // Restart the process so TDLib starts fresh with the new DNS.
+                        val intent = context.packageManager.getLaunchIntentForPackage(context.packageName)
+                        context.startActivity(Intent.makeRestartActivityTask(intent?.component))
+                        Runtime.getRuntime().exit(0)
                     }
                 }
             }
-            GroupFooter(
-                proxyStatusMessage ?: "Use an MTProto proxy if Telegram is blocked or restricted where you are.",
-                color = if (proxyStatusMessage?.startsWith("Couldn't") == true || proxyStatusMessage?.startsWith("That") == true) DestructiveRed
-                else androidx.compose.ui.graphics.Color(0xFF8E8D93)
-            )
+            proxyStatusMessage?.let { message ->
+                GroupFooter(
+                    message,
+                    color = if (message.startsWith("Couldn't") || message.startsWith("That")) DestructiveRed else GroupLabelColor
+                )
+            }
         }
 
         // Nothing to log out of until Telegram is set up in the Sync tab.
@@ -475,6 +515,22 @@ fun SettingsScreen(onBack: () -> Unit, onOpenSpotify: () -> Unit, onLoggedOut: (
         )
     }
 }
+
+/** A small, secondary note under a group: a muted info icon and one line of text. */
+@Composable
+private fun SettingsNote(text: String) {
+    Row(
+        Modifier.fillMaxWidth().padding(start = 32.dp, end = 32.dp, top = 7.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(Icons.Outlined.Info, contentDescription = null, tint = GroupLabelColor.copy(alpha = 0.8f), modifier = Modifier.size(13.dp))
+        Spacer(Modifier.width(5.dp))
+        Text(text, color = GroupLabelColor, fontSize = 12.sp, lineHeight = 15.sp)
+    }
+}
+
+/** The DNS Telegram started with in this process - see SettingsScreen's restart row. */
+private var dnsAtLaunch: Pair<com.abn3li.telemusic.data.settings.DnsResolver, String>? = null
 
 @Composable
 private fun LinkRow(title: String, value: String, icon: androidx.compose.ui.graphics.vector.ImageVector, tile: Color, onClick: () -> Unit) {

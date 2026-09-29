@@ -37,13 +37,14 @@ import coil.imageLoader
 import coil.request.ImageRequest
 import coil.request.SuccessResult
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import kotlin.random.Random
 
 private const val BACKDROP_SIZE_PX = 96
 private const val KEN_BURNS_STEP_MS = 9_000
-private const val KEN_BURNS_FRAME_MS = 16L
+// Minimum gap between drift updates: on a 120Hz screen that's every second frame (60fps), on
+// a 60Hz screen every frame. Just under 1/60s so a frame arriving a hair early still counts.
+private const val KEN_BURNS_FRAME_NANOS = 15_500_000L
 
 private val backdropCache = LruCache<String, ImageBitmap>(8)
 
@@ -82,9 +83,12 @@ fun FloatingArtworkBackground(
     var offsetY by remember { mutableFloatStateOf(0f) }
     var rotation by remember { mutableFloatStateOf(0f) }
 
-    // Driven at ~60fps instead of every display frame (up to 120Hz): 30fps looked choppy, while
-    // 120 would repaint the whole screen twice as often for no visible gain. withFrameNanos
-    // suspends while the app is in the background, so this stops there on its own.
+    // Driven at a steady ~60fps instead of every display frame (up to 120Hz): 30fps looked
+    // choppy, while 120 would repaint the whole screen twice as often for no visible gain. It
+    // skips whole frames rather than sleeping between them - a fixed delay() plus the wait for
+    // the next frame alternated 16ms and 25ms steps (~44fps), which read as stutter. Frames it
+    // skips change no state, so they draw nothing. withFrameNanos suspends while the app is in
+    // the background, so this stops there on its own.
     LaunchedEffect(animate) {
         if (!animate) return@LaunchedEffect
         while (true) {
@@ -96,16 +100,18 @@ fun FloatingArtworkBackground(
                 Random.nextFloat() * 16f - 8f
             )
             val startNanos = withFrameNanos { it }
+            var lastUpdate = startNanos
             var fraction = 0f
             while (fraction < 1f) {
                 val now = withFrameNanos { it }
+                if (now - lastUpdate < KEN_BURNS_FRAME_NANOS) continue
+                lastUpdate = now
                 fraction = ((now - startNanos) / 1_000_000f / KEN_BURNS_STEP_MS).coerceIn(0f, 1f)
                 val eased = FastOutSlowInEasing.transform(fraction)
                 scale = from[0] + (to[0] - from[0]) * eased
                 offsetX = from[1] + (to[1] - from[1]) * eased
                 offsetY = from[2] + (to[2] - from[2]) * eased
                 rotation = from[3] + (to[3] - from[3]) * eased
-                delay(KEN_BURNS_FRAME_MS)
             }
         }
     }

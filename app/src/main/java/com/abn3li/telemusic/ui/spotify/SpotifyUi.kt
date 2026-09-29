@@ -113,7 +113,6 @@ fun SpotifySettingsGroup(onOpenPlaylists: () -> Unit, onHelp: () -> Unit) {
                 trailing = { GroupValue(if (library.loaded) (library.playlists.size + 1).toString() else null) }
             )
         }
-        GroupFooter("Import your Liked Songs and playlists as TeleMusic playlists.")
     } else {
         GroupCard {
             GroupTextField(

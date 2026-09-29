@@ -1,8 +1,18 @@
 package com.abn3li.telemusic.ui.navigation
 
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.semantics.Role
+import androidx.compose.foundation.layout.Spacer
 import kotlinx.coroutines.flow.first
 import com.abn3li.telemusic.ui.library.HomeScreen
-import androidx.compose.material.icons.filled.Home
 import com.abn3li.telemusic.ui.library.AlertAction
 import com.abn3li.telemusic.ui.library.AppAlert
 import androidx.activity.result.contract.ActivityResultContracts
@@ -24,11 +34,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.LibraryMusic
-import androidx.compose.material.icons.filled.Search
-import androidx.compose.material.icons.filled.Sync
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
@@ -40,7 +45,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -399,90 +403,102 @@ private fun AppBottomNavBar(
 ) {
     val items = remember {
         listOf(
-            NavigationItem(Routes.HOME, "Home", Icons.Default.Home),
-            NavigationItem(Routes.SEARCH, "Search", Icons.Default.Search),
-            NavigationItem(Routes.SYNC, "Sync", Icons.Default.Sync),
-            NavigationItem(Routes.LIBRARY, "Library", Icons.Default.LibraryMusic)
+            NavigationItem(Routes.HOME, "Home", NavIcons.Home, NavIcons.HomeFilled),
+            NavigationItem(Routes.SEARCH, "Search", NavIcons.Search),
+            NavigationItem(Routes.SYNC, "Sync", NavIcons.Sync),
+            NavigationItem(Routes.LIBRARY, "Library", NavIcons.Library)
         )
     }
 
-    // Docked, container-less bar (Flamingo style): the buttons sit on a fade to black so the
-    // page scrolls away underneath instead of being cut off by a solid edge.
-    Box(
+    // Docked, no container: the items sit on a fade to black, so the page scrolls away under
+    // them instead of being cut off by a solid edge. Nothing is drawn behind the selected one -
+    // colour and a slight lift are the only selection cue.
+    Column(
         modifier = modifier
             .fillMaxWidth()
-            .height(NavBarFadeHeight)
-            .background(
-                Brush.verticalGradient(
-                    0f to Color.Transparent,
-                    0.3f to Color.Black.copy(alpha = 0.6f),
-                    0.55f to Color.Black.copy(alpha = 0.92f),
-                    1f to Color.Black
-                )
-            ),
-        contentAlignment = Alignment.BottomCenter
+            .background(NavFade)
+            .windowInsetsPadding(WindowInsets.navigationBars)
     ) {
+        Spacer(Modifier.height(NavBarFadeHeight - NavBarHeight))
         Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(NavBarHeight)
-                .padding(horizontal = 8.dp),
-            horizontalArrangement = Arrangement.SpaceAround,
+            modifier = Modifier.fillMaxWidth().height(NavBarHeight),
             verticalAlignment = Alignment.CenterVertically
         ) {
             items.forEach { item ->
-                val isSelected = currentRoute == item.route
-                Box(
-                    modifier = Modifier
-                        .weight(1f)
-                        .fillMaxHeight()
-                        .clickable(
-                            interactionSource = remember { MutableInteractionSource() },
-                            indication = null,
-                            onClick = { onNavigate(item.route) }
-                        ),
-                    contentAlignment = Alignment.Center
-                ) {
-                    if (isSelected) {
-                        Box(
-                            modifier = Modifier
-                                .align(Alignment.BottomCenter)
-                                .padding(bottom = 2.dp)
-                                .size(4.dp)
-                                .clip(CircleShape)
-                                .background(AppAccent)
-                        )
-                    }
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.spacedBy(4.dp)
-                    ) {
-                        Icon(
-                            imageVector = item.icon,
-                            contentDescription = item.label,
-                            tint = if (isSelected) AppAccent else Color(0xFF7B8390),
-                            modifier = Modifier.size(26.dp)
-                        )
-                        Text(
-                            text = item.label,
-                            color = if (isSelected) AppAccent else Color(0xFF7B8390),
-                            fontSize = 12.sp,
-                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
-                        )
-                    }
-                }
+                NavBarItem(
+                    item = item,
+                    selected = currentRoute == item.route,
+                    onClick = { onNavigate(item.route) },
+                    modifier = Modifier.weight(1f)
+                )
             }
         }
     }
 }
 
+/** One tab: the whole cell is the touch target, with no ripple; icon and label ease between grey
+ * and the accent, and the icon grows by 5%. Animations run only while the selection changes. */
+@Composable
+private fun NavBarItem(item: NavigationItem, selected: Boolean, onClick: () -> Unit, modifier: Modifier = Modifier) {
+    val color by animateColorAsState(
+        targetValue = if (selected) AppAccent else NavInactive,
+        animationSpec = tween(durationMillis = 180),
+        label = "navColor"
+    )
+    val scale by animateFloatAsState(
+        targetValue = if (selected) 1.05f else 1f,
+        animationSpec = spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessMediumLow),
+        label = "navScale"
+    )
+    Column(
+        modifier = modifier
+            .fillMaxHeight()
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+                role = Role.Tab,
+                onClick = onClick
+            ),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
+    ) {
+        Icon(
+            imageVector = if (selected) item.selectedIcon else item.icon,
+            contentDescription = item.label,
+            tint = color,
+            modifier = Modifier
+                .size(NavIconSize)
+                .graphicsLayer { scaleX = scale; scaleY = scale }
+        )
+        Spacer(Modifier.height(3.dp))
+        Text(
+            text = item.label,
+            color = color,
+            fontSize = 11.sp,
+            lineHeight = 13.sp,
+            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
+            maxLines = 1
+        )
+    }
+}
+
 private val NavBarHeight = 64.dp
-private val NavBarFadeHeight = 96.dp
+// Only a short soft edge above the items: a taller fade reads as a grey shadow over light artwork.
+private val NavBarFadeHeight = 80.dp
+private val NavFade = Brush.verticalGradient(
+    0f to Color.Transparent,
+    0.2f to Color.Black.copy(alpha = 0.95f),
+    0.32f to Color.Black,
+    1f to Color.Black
+)
+private val NavIconSize = 25.dp
+private val NavInactive = Color(0xFF8E8E93)
 
 private data class NavigationItem(
     val route: String,
     val label: String,
-    val icon: ImageVector
+    val icon: ImageVector,
+    val selectedIcon: ImageVector = icon
 )
 
 /** The one-time "where should downloads go?" question, shown the first time any download is
