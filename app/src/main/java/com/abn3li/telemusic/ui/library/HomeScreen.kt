@@ -26,6 +26,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -296,7 +297,9 @@ private fun ContinueListeningCard(song: SongEntity, playing: Boolean, onClick: (
             .padding(horizontal = 16.dp)
             .padding(top = 4.dp)
             .fillMaxWidth()
-            .height(176.dp)
+            // Grows past its usual size when a long (or Arabic, taller) title takes two lines,
+            // so the Resume button is never cut off at the bottom edge.
+            .heightIn(min = 176.dp)
             .clip(RoundedCornerShape(18.dp))
             // A faint edge, so the card's shape shows on a black OLED page whatever the cover.
             .border(1.dp, Color.White.copy(alpha = 0.1f), RoundedCornerShape(18.dp))
@@ -305,7 +308,7 @@ private fun ContinueListeningCard(song: SongEntity, playing: Boolean, onClick: (
         BlurredArtwork(song.displayArtwork, Modifier.matchParentSize(), minBrightness = CARD_MIN_BRIGHTNESS)
         // Just enough shade for the white text over a bright cover.
         Box(Modifier.matchParentSize().background(Color.Black.copy(alpha = 0.2f)))
-        Row(Modifier.fillMaxSize().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+        Row(Modifier.fillMaxWidth().heightIn(min = 176.dp).padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
             SongArtwork(song, 126.dp, 10.dp)
             Column(Modifier.weight(1f).padding(start = 14.dp)) {
                 Text("CONTINUE LISTENING", color = Color.White.copy(alpha = 0.7f), fontSize = 10.5.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.9.sp)
