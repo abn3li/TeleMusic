@@ -28,13 +28,17 @@ class DiscoveryViewModel(
     private val ytDlpRepository: YtDlpRepository,
     private val discoveryRepository: DiscoveryRepository
 ) : ViewModel() {
-    private val _uiState = MutableStateFlow(DiscoveryUiState())
+    // Starts with the categories when they're already in memory (they are, from app start on any
+    // phone that has loaded them once), so opening Search shows them at once - no spinner.
+    private val _uiState = MutableStateFlow(
+        discoveryRepository.genresIfLoaded().let { DiscoveryUiState(isLoading = it == null, genres = it.orEmpty()) }
+    )
     val uiState: StateFlow<DiscoveryUiState> = _uiState
     // Above init: init starts the first load, and a later initializer would wipe this back to null.
     private var loadJob: Job? = null
 
     init {
-        load()
+        if (_uiState.value.isLoading) load()
         viewModelScope.launch {
             discoveryRepository.observeImportedPlaylists().collect { imported ->
                 _uiState.update { it.copy(importedPlaylists = imported) }
@@ -95,10 +99,12 @@ class DiscoveryViewModel(
 
 data class NewReleasesUiState(
     val isLoading: Boolean = true,
-    val section: HomeSection? = null
+    val section: HomeSection? = null,
+    // Listener-made playlists for Home; null until read, empty when the region has none.
+    val community: HomeSection? = null
 )
 
-/** Owns the single remote shelf displayed on Home. */
+/** Owns the remote shelves displayed on Home: New releases and community playlists. */
 class NewReleasesViewModel(
     private val discoveryRepository: DiscoveryRepository
 ) : ViewModel() {
@@ -106,15 +112,24 @@ class NewReleasesViewModel(
     val uiState: StateFlow<NewReleasesUiState> = _uiState
 
     private var loadJob: Job? = null
+    private var communityJob: Job? = null
 
     init { retryIfMissing() }
 
-    /** Loads the shelf if it isn't there yet - called on each visit to Home, so one that failed
-     * (offline start) shows up once the connection is back. Nothing runs once it has loaded. */
+    /** Loads each shelf that isn't there yet - called on each visit to Home, so one that failed
+     * (offline start) shows up once the connection is back. Nothing runs once both have loaded. */
     fun retryIfMissing() {
-        if (_uiState.value.section != null || loadJob?.isActive == true) return
-        loadJob = viewModelScope.launch {
-            _uiState.value = NewReleasesUiState(isLoading = false, section = discoveryRepository.newReleases())
+        if (_uiState.value.section == null && loadJob?.isActive != true) {
+            loadJob = viewModelScope.launch {
+                val section = discoveryRepository.newReleases()
+                _uiState.update { it.copy(isLoading = false, section = section) }
+            }
+        }
+        if (_uiState.value.community == null && communityJob?.isActive != true) {
+            communityJob = viewModelScope.launch {
+                val community = discoveryRepository.communityPlaylists()
+                _uiState.update { it.copy(community = community) }
+            }
         }
     }
 }

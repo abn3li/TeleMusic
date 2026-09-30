@@ -1,5 +1,9 @@
 package com.abn3li.telemusic.repository
 
+import com.abn3li.telemusic.data.browse.BrowseKind
+import org.json.JSONObject
+import org.json.JSONArray
+import java.io.File
 import com.abn3li.telemusic.data.browse.BrowseCollection
 import com.abn3li.telemusic.data.browse.BrowseContent
 import com.abn3li.telemusic.data.browse.BrowseParser
@@ -22,13 +26,16 @@ import kotlinx.coroutines.withContext
  * Discovery" concern as the home feed above. */
 class DiscoveryRepository(
     private val importedPlaylistDao: ImportedPlaylistDao,
+    // Where the Search tab's categories are kept between runs (see [genres]).
+    private val genresFile: File,
     private val client: InnertubeBrowseClient = InnertubeBrowseClient()
 ) {
     @Volatile private var cachedNewReleases: HomeSection? = null
     @Volatile private var cachedGenres: List<BrowseCollection>? = null
+    @Volatile private var cachedCommunity: HomeSection? = null
 
-    /** The one YouTube discovery shelf used on Home. We intentionally do not fetch YouTube's
-     * anonymous Home feed: its other sparse shelves are not displayed anywhere in the app. */
+    /** YouTube Music's new releases, for Home. Of the anonymous home feed itself only the
+     * community playlists are used (see [communityPlaylists]); its other shelves aren't shown. */
     suspend fun newReleases(): HomeSection? {
         cachedNewReleases?.let { return it }
         return withContext(Dispatchers.IO) {
@@ -43,17 +50,84 @@ class DiscoveryRepository(
         }
     }
 
+    /** Listener-made playlists YouTube Music is showing for this region, for Home. They sit in
+     * the home feed - on its first page or one of the next few - so this reads at most
+     * [COMMUNITY_FEED_PAGES] pages, once; the result (even an empty one, where a region has no
+     * such shelf) is kept for the rest of the run. Null only when the feed couldn't be read, so
+     * the next visit to Home tries again. */
+    suspend fun communityPlaylists(): HomeSection? {
+        cachedCommunity?.let { return it }
+        return withContext(Dispatchers.IO) {
+            runCatching {
+                val found = LinkedHashMap<String, BrowseCollection>()
+                var page = client.browse(InnertubeBrowseClient.HOME_BROWSE_ID)
+                var pages = 1
+                while (true) {
+                    BrowseParser.parseCommunityPlaylists(page).forEach { found.putIfAbsent(it.browseId, it) }
+                    if (found.isNotEmpty() || pages >= COMMUNITY_FEED_PAGES) break
+                    val token = BrowseParser.findContinuationToken(page) ?: break
+                    page = client.browseContinuation(token)
+                    pages++
+                }
+                HomeSection(COMMUNITY_TITLE, found.values.toList())
+            }.onFailure { e -> android.util.Log.e("DiscoveryRepo", "communityPlaylists(): fetch/parse failed", e) }
+                .getOrNull()
+                ?.also { cachedCommunity = it }
+        }
+    }
+
+    /** The Search tab's categories if they're already in memory - lets the page start with them
+     * instead of a spinner. */
+    fun genresIfLoaded(): List<BrowseCollection>? = cachedGenres
+
     /** The real Genres chips (see BrowseParser.parseGenreChips) - each one opens a real page of
-     * playlists for that genre through [browse] like any other card. Cached the same way
-     * [newReleases] is, for the same reason. */
+     * playlists for that genre through [browse] like any other card. Kept in memory, and saved
+     * on the phone: after the first time they show at once, offline too. Only a phone that has
+     * never loaded them waits for the network here. */
     suspend fun genres(): List<BrowseCollection> {
         cachedGenres?.let { return it }
         return withContext(Dispatchers.IO) {
-            runCatching { BrowseParser.parseGenreChips(client.browse(InnertubeBrowseClient.GENRES_BROWSE_ID)) }
-                .onFailure { e -> android.util.Log.e("DiscoveryRepo", "genres(): fetch/parse failed", e) }
-                .getOrElse { emptyList() }
-                .also { if (it.isNotEmpty()) cachedGenres = it }
+            readSavedGenres()?.also { cachedGenres = it } ?: fetchGenres()
         }
+    }
+
+    /** Called once when the app starts, in the background: puts the saved categories in memory
+     * right away, then refreshes them from YouTube Music for next time. One request per run. */
+    suspend fun preloadGenres() = withContext(Dispatchers.IO) {
+        if (cachedGenres == null) readSavedGenres()?.let { cachedGenres = it }
+        if (genresRefreshed) return@withContext
+        genresRefreshed = true
+        fetchGenres()
+    }
+
+    @Volatile private var genresRefreshed = false
+
+    /** From the network; a good answer replaces what's in memory and on the phone, a failed one
+     * (offline) leaves both as they were. */
+    private fun fetchGenres(): List<BrowseCollection> =
+        runCatching { BrowseParser.parseGenreChips(client.browse(InnertubeBrowseClient.GENRES_BROWSE_ID)) }
+            .onFailure { e -> android.util.Log.e("DiscoveryRepo", "genres(): fetch/parse failed", e) }
+            .getOrElse { emptyList() }
+            .also { if (it.isNotEmpty()) { cachedGenres = it; saveGenres(it) } }
+            .ifEmpty { cachedGenres.orEmpty() }
+
+    private fun readSavedGenres(): List<BrowseCollection>? = runCatching {
+        if (!genresFile.exists()) return null
+        val array = JSONArray(genresFile.readText())
+        (0 until array.length()).mapNotNull { i ->
+            val o = array.optJSONObject(i) ?: return@mapNotNull null
+            val browseId = o.optString("browseId").takeIf { it.isNotBlank() } ?: return@mapNotNull null
+            val title = o.optString("title").takeIf { it.isNotBlank() } ?: return@mapNotNull null
+            BrowseCollection(browseId, o.optString("params").takeIf { it.isNotBlank() }, title, null, null, BrowseKind.OTHER)
+        }.takeIf { it.isNotEmpty() }
+    }.getOrNull()
+
+    private fun saveGenres(genres: List<BrowseCollection>) {
+        runCatching {
+            val array = JSONArray()
+            genres.forEach { array.put(JSONObject().put("browseId", it.browseId).put("params", it.params ?: "").put("title", it.title)) }
+            genresFile.writeText(array.toString())
+        }.onFailure { e -> android.util.Log.w("DiscoveryRepo", "genres not saved", e) }
     }
 
     /** Songs for a search, from YouTube Music's own Songs tab - one request. */
@@ -73,6 +147,10 @@ class DiscoveryRepository(
     }
 
     suspend fun browse(browseId: String, params: String?): BrowseContent = withContext(Dispatchers.IO) {
+        // Home's "See All" for community playlists: the list already fetched, shown as a grid.
+        if (browseId == COMMUNITY_BROWSE_ID) {
+            return@withContext BrowseContent(collections = communityPlaylists()?.items.orEmpty())
+        }
         runCatching {
             val raw = client.browse(browseId, params)
             // An artist's page is its own shape: top songs plus shelves, no track list to page.
@@ -136,5 +214,12 @@ class DiscoveryRepository(
 
     suspend fun removeImportedPlaylist(browseId: String) = withContext(Dispatchers.IO) {
         importedPlaylistDao.delete(browseId)
+    }
+
+    companion object {
+        const val COMMUNITY_TITLE = "Community Playlists"
+        /** Not a YouTube id: opens the community playlists already loaded for Home (see [browse]). */
+        const val COMMUNITY_BROWSE_ID = "telemusic_community_playlists"
+        private const val COMMUNITY_FEED_PAGES = 4
     }
 }

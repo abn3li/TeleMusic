@@ -315,6 +315,7 @@ private fun SyncedLyrics(
                     if (activeIndex < 0 && firstTime >= INTRO_COUNTDOWN_MIN_MS) {
                         CountdownDots(
                             progressState = progressState,
+                            isPlaying = isPlaying,
                             startMs = 0L,
                             endMs = firstTime,
                             modifier = Modifier.padding(start = 28.dp, bottom = 8.dp)
@@ -331,6 +332,7 @@ private fun SyncedLyrics(
                             val endMs = lines.getOrNull(index + 1)?.timeMs ?: (line.timeMs + 5000L)
                             CountdownDots(
                                 progressState = progressState,
+                                isPlaying = isPlaying,
                                 startMs = line.timeMs,
                                 endMs = endMs,
                                 modifier = Modifier.padding(start = 28.dp, top = 14.dp, bottom = 14.dp)
@@ -631,6 +633,7 @@ private fun LyricLineText(
 @Composable
 private fun CountdownDots(
     progressState: State<PlaybackProgress>,
+    isPlaying: Boolean,
     startMs: Long,
     endMs: Long,
     modifier: Modifier = Modifier
@@ -638,17 +641,22 @@ private fun CountdownDots(
     val span = (endMs - startMs).coerceAtLeast(1L)
     val target = ((progressState.value.currentPositionMs - startMs).toFloat() / span).coerceIn(0f, 1f)
     val fill by animateFloatAsState(target, tween(300, easing = LinearEasing), label = "countdownFill")
-    val breathing = rememberInfiniteTransition(label = "countdownBreath")
-    val breath by breathing.animateFloat(
-        initialValue = 0.92f,
-        targetValue = 1.06f,
-        animationSpec = infiniteRepeatable(tween(1400, easing = LyricEasing), RepeatMode.Reverse),
-        label = "countdownBreathScale"
-    )
+    // Breathes only while the song plays: paused, an endless animation here kept the whole
+    // screen redrawing every frame with nothing moving.
+    val breath: State<Float> = if (isPlaying) {
+        rememberInfiniteTransition(label = "countdownBreath").animateFloat(
+            initialValue = 0.92f,
+            targetValue = 1.06f,
+            animationSpec = infiniteRepeatable(tween(1400, easing = LyricEasing), RepeatMode.Reverse),
+            label = "countdownBreathScale"
+        )
+    } else {
+        remember { mutableFloatStateOf(1f) }
+    }
     Row(
         modifier.graphicsLayer {
-            scaleX = breath
-            scaleY = breath
+            scaleX = breath.value
+            scaleY = breath.value
             transformOrigin = TransformOrigin(0f, 0.5f)
         },
         horizontalArrangement = Arrangement.spacedBy(9.dp)

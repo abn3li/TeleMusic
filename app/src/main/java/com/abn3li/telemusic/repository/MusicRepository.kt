@@ -1,5 +1,6 @@
 package com.abn3li.telemusic.repository
 
+import coil.imageLoader
 import androidx.room.withTransaction
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -47,9 +48,12 @@ private const val MAX_CACHE_POLL_ATTEMPTS = 600
 // Stream-only YouTube songs held in memory for the queue - see queueIdsForStreams.
 private const val MAX_STREAM_ONLY_SONGS = 3000
 private const val MAX_RECENT_STREAMS = 30
+private const val STAMP_REPEAT_WINDOW_MS = 10_000L
 
 // Thumbnails saved per database transaction - see backfillThumbnails.
-private const val THUMBNAIL_BATCH = 25
+private const val THUMBNAIL_BATCH = 60
+// This many covers in a row failing to connect means the phone is offline: stop the pass.
+private const val THUMBNAIL_OFFLINE_STREAK = 3
 
 /** What playing a song resolves to - see MusicRepository.resolvePlayback. */
 sealed interface PlaybackResolution {
@@ -370,6 +374,7 @@ class MusicRepository(
             youtubeVideoId = videoId
         )
         songDao.upsert(song)
+        keepArtworkForOffline(song.albumArtUrl)
         val extension = File(result.filePath).extension.ifBlank { "m4a" }
         val exportedUri = exportToDownloadFolderIfConfigured(File(result.filePath), sanitizedFileName(result.title, result.artist, extension))
         if (exportedUri != null) {
@@ -776,11 +781,12 @@ class MusicRepository(
 
     /** Generates a small local thumbnail for [songId] from [artUrl] if it doesn't have one yet. */
     private suspend fun ensureThumbnail(songId: Long, artUrl: String) {
-        val path = thumbnailGenerator.generate(songId, artUrl)
-        if (path != null) {
-            songDao.setThumbnailPath(songId, path)
-        } else {
+        val result = thumbnailGenerator.generate(songId, artUrl)
+        if (result.path != null) {
+            songDao.setThumbnailPath(songId, result.path)
+        } else if (!result.retryLater) {
             // Mark failed so getSongsMissingThumbnail() never queries this failed URL again!
+            // (Not when it only failed for lack of a connection - that one is retried.)
             songDao.setThumbnailPath(songId, "none")
         }
     }
@@ -794,19 +800,55 @@ class MusicRepository(
     suspend fun <T> inTransaction(block: suspend () -> T): T = database.withTransaction(block)
 
     suspend fun backfillThumbnails() {
+        // Once: thumbnails used to be marked failed for good even when the phone was just
+        // offline, leaving those songs without artwork offline forever. Give them one retry.
+        if (!settingsStore.failedThumbnailsRetried) {
+            songDao.clearFailedThumbnails()
+            settingsStore.failedThumbnailsRetried = true
+        }
         val missing = songDao.getSongsMissingThumbnail()
         if (missing.isEmpty()) return
         // Saved in batches, not one by one: every write to the songs table makes each open
         // screen reload the whole library, so 700 single writes (a big Spotify import) meant 700
         // full reloads - 25-40% CPU for minutes. One transaction per batch = one reload.
+        var unreachable = 0
         for (batch in missing.chunked(THUMBNAIL_BATCH)) {
-            val paths = batch.map { song ->
-                val artUrl = song.albumArtUrl
-                val path = if (artUrl.isNullOrBlank()) null else thumbnailGenerator.generate(song.telegramMessageId, artUrl)
-                if (!artUrl.isNullOrBlank()) delay(100)
-                song.telegramMessageId to (path ?: "none") // "none" = failed, never retried
+            val paths = ArrayList<Pair<Long, String>>(batch.size)
+            for (song in batch) {
+                val artUrl = song.albumArtUrl ?: continue
+                val result = thumbnailGenerator.generate(song.telegramMessageId, artUrl)
+                if (result.retryLater) {
+                    // Couldn't be reached: left for the next run, not marked failed. One such
+                    // song (a cover file that's gone, a dead host) is just skipped - only
+                    // several in a row mean there's no connection, which ends the pass rather
+                    // than failing the same way a few hundred more times.
+                    if (++unreachable >= THUMBNAIL_OFFLINE_STREAK) break
+                    continue
+                }
+                unreachable = 0
+                delay(100)
+                paths += song.telegramMessageId to (result.path ?: "none") // "none" = dead link, never retried
             }
-            database.withTransaction { paths.forEach { (id, path) -> songDao.setThumbnailPath(id, path) } }
+            if (paths.isNotEmpty()) database.withTransaction { paths.forEach { (id, path) -> songDao.setThumbnailPath(id, path) } }
+            if (unreachable >= THUMBNAIL_OFFLINE_STREAK) return
+        }
+    }
+
+    /** Saves a downloaded song's covers into the image cache (the saved size used around the
+     * app, and the large one Now Playing shows), so they're there offline even if the song was
+     * never opened while online. Once per download; a no-op for local files. */
+    private fun keepArtworkForOffline(artUrl: String?) {
+        if (artUrl.isNullOrBlank() || !artUrl.startsWith("http")) return
+        val full = com.abn3li.telemusic.data.browse.googleArtworkAtSize(artUrl, com.abn3li.telemusic.data.browse.FULL_ARTWORK_SIZE)
+        setOfNotNull(artUrl, full).forEach { url ->
+            appContext.imageLoader.enqueue(
+                coil.request.ImageRequest.Builder(appContext)
+                    .data(url)
+                    .diskCacheKey(url)
+                    .memoryCachePolicy(coil.request.CachePolicy.DISABLED)
+                    .size(64) // only the file on disk matters here, not a full-size decode
+                    .build()
+            )
         }
     }
 
@@ -1130,8 +1172,17 @@ class MusicRepository(
         get() = settingsStore.showSongIndex
         set(value) { settingsStore.showSongIndex = value }
 
+    // The player and the playback service both stamp a song as it starts. Each stamp is a write
+    // to the songs table, and every such write makes the open screens re-read the whole library
+    // and Home recompute - so the second stamp of the same start is dropped.
+    @Volatile private var lastStampedSongId = 0L
+    @Volatile private var lastStampedAt = 0L
+
     suspend fun stampLastPlayed(song: SongEntity) {
         val now = System.currentTimeMillis()
+        if (song.telegramMessageId == lastStampedSongId && now - lastStampedAt < STAMP_REPEAT_WINDOW_MS) return
+        lastStampedSongId = song.telegramMessageId
+        lastStampedAt = now
         // No library row to stamp: a YouTube song played from search or an album page.
         if (songDao.stampLastPlayed(song.telegramMessageId, now) == 0) recordStreamPlayed(song, now)
     }

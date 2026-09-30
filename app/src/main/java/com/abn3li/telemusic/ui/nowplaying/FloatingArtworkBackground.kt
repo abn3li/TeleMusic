@@ -1,5 +1,6 @@
 package com.abn3li.telemusic.ui.nowplaying
 
+import kotlinx.coroutines.delay
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Canvas
@@ -86,11 +87,14 @@ fun FloatingArtworkBackground(
     // Driven at a steady ~60fps instead of every display frame (up to 120Hz): 30fps looked
     // choppy, while 120 would repaint the whole screen twice as often for no visible gain. It
     // skips whole frames rather than sleeping between them - a fixed delay() plus the wait for
-    // the next frame alternated 16ms and 25ms steps (~44fps), which read as stutter. Frames it
-    // skips change no state, so they draw nothing. withFrameNanos suspends while the app is in
+    // the next frame alternated 16ms and 25ms steps (~44fps), which read as stutter, and a
+    // shorter sleep to skip the in-between frame measured worse still (half the frames late).
+    // Frames it skips change no state, so they draw nothing. withFrameNanos suspends while the app is in
     // the background, so this stops there on its own.
-    LaunchedEffect(animate) {
-        if (!animate) return@LaunchedEffect
+    // Nothing to drift without a cover: a song with no artwork used to run this loop anyway.
+    val hasBackdrop = backdrop != null
+    LaunchedEffect(animate, hasBackdrop) {
+        if (!animate || !hasBackdrop) return@LaunchedEffect
         while (true) {
             val from = floatArrayOf(scale, offsetX, offsetY, rotation)
             val to = floatArrayOf(

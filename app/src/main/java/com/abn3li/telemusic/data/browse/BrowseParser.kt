@@ -32,6 +32,24 @@ object BrowseParser {
         return sections
     }
 
+    /** Playlists made by listeners, from the home feed's own community shelves ("Trending
+     * community playlists", "From the community"). Works on the feed's first page and on its
+     * continuation pages alike, since it looks for the shelves wherever they sit. */
+    fun parseCommunityPlaylists(response: JSONObject): List<BrowseCollection> {
+        val playlists = LinkedHashMap<String, BrowseCollection>()
+        collectRenderers(response, "musicCarouselShelfRenderer").forEach { carousel ->
+            val title = carousel.opt("header").obj()?.opt("musicCarouselShelfBasicHeaderRenderer").obj()
+                ?.opt("title").obj()?.runs().orEmpty()
+            if (!title.contains("community", ignoreCase = true)) return@forEach
+            val cards = carousel.opt("contents").arr() ?: return@forEach
+            for (i in 0 until cards.length()) {
+                val card = cards.optJSONObject(i)?.opt("musicTwoRowItemRenderer").obj()?.let { parseTwoRowCollection(it) }
+                if (card != null && card.kind == BrowseKind.PLAYLIST) playlists.putIfAbsent(card.browseId, card)
+            }
+        }
+        return playlists.values.toList()
+    }
+
     /** A whole browse page whose content is one (or more) plain grids rather than carousels -
      * "New releases" is shaped this way (a single gridRenderer, no carousel, no title of its
      * own), unlike the Home feed's carousels. [fallbackTitle] stands in since the page itself
@@ -111,7 +129,7 @@ object BrowseParser {
         }
         val title = renderer.opt("title").obj()?.runs().orEmpty()
         if (title.isBlank()) return null
-        val subtitle = renderer.opt("subtitle").obj()?.runs()
+        val subtitle = renderer.opt("subtitle").obj()?.runs()?.let(::isolateParts)
 
         val aspectRatio = renderer.optString("aspectRatio")
         // An explicit VIDEO-shaped aspect ratio is a hard skip; anything else falls through to
@@ -181,7 +199,7 @@ object BrowseParser {
                 ?.opt("text").obj()?.runs().orEmpty()
             if (title.isBlank()) return@forEach
             val subtitle = flexColumns?.optJSONObject(1)?.opt("musicResponsiveListItemFlexColumnRenderer").obj()
-                ?.opt("text").obj()?.runs()?.trim()?.takeIf { it.isNotBlank() }
+                ?.opt("text").obj()?.runs()?.trim()?.takeIf { it.isNotBlank() }?.let(::isolateParts)
             val thumbnails = renderer.opt("thumbnail").obj()?.opt("musicThumbnailRenderer").obj()
                 ?.opt("thumbnail").obj()?.opt("thumbnails").arr()
             out.putIfAbsent(
@@ -500,4 +518,11 @@ object BrowseParser {
         val ratio = width.toDouble() / height.toDouble()
         return ratio > 1.2
     }
+
+    /** "كرار • 5M views" drawn as written. Unwrapped, the bidi algorithm pulls the "5" into the
+     * Arabic name before it and the line reads "5 • كرارM views"; isolating each " • " part (FSI
+     * ... PDI, invisible) keeps every part in its own direction and the parts in their order. */
+    private fun isolateParts(text: String): String =
+        if (text.none { Character.getDirectionality(it).let { d -> d == Character.DIRECTIONALITY_RIGHT_TO_LEFT || d == Character.DIRECTIONALITY_RIGHT_TO_LEFT_ARABIC } }) text
+        else text.split(" • ").joinToString(" • ") { "\u2068$it\u2069" }
 }

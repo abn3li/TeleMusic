@@ -34,6 +34,11 @@ interface SongDao {
     @Query("UPDATE songs SET thumbnailPath = :path WHERE telegramMessageId = :id")
     suspend fun setThumbnailPath(id: Long, path: String)
 
+    /** Gives songs whose thumbnail was marked failed ("none") another try - see
+     * MusicRepository.backfillThumbnails. */
+    @Query("UPDATE songs SET thumbnailPath = NULL WHERE thumbnailPath = 'none' AND albumArtUrl IS NOT NULL AND albumArtUrl != ''")
+    suspend fun clearFailedThumbnails()
+
     // Full-size local artwork path (ThumbnailGenerator.saveFullArtwork) for embedded/Telegram-
     // provided art that has no online URL of its own - see displayArtwork's own doc for why this
     // reuses the albumArtUrl column rather than adding a new one (every artwork-display site

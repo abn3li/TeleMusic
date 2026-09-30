@@ -1,5 +1,6 @@
 package com.abn3li.telemusic.ui.nowplaying
 
+import com.abn3li.telemusic.data.local.listArtwork
 import com.abn3li.telemusic.data.browse.FULL_ARTWORK_SIZE
 import com.abn3li.telemusic.data.browse.googleArtworkAtSize
 import com.abn3li.telemusic.ui.library.AppAlert
@@ -687,11 +688,14 @@ private fun PlayerPageArea(
             modifier = Modifier.fillMaxSize(0.3f)
         )
         if (!song?.displayArtwork.isNullOrEmpty()) {
+            // Offline with the big cover not saved: the small list thumbnail beats a blank.
+            var fullFailed by remember(fullArtwork) { mutableStateOf(false) }
             AsyncImage(
-                model = artworkRequest,
+                model = if (fullFailed) song?.listArtwork else artworkRequest,
                 contentDescription = "Album artwork",
                 contentScale = ContentScale.Crop,
-                modifier = Modifier.fillMaxSize()
+                modifier = Modifier.fillMaxSize(),
+                onError = { fullFailed = true }
             )
         }
     }

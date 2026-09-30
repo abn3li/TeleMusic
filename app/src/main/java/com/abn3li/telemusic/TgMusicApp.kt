@@ -55,7 +55,7 @@ class TgMusicApp : Application(), ImageLoaderFactory {
         playbackController = PlaybackController(this)
         playbackController.connect(onReady = {})
         ytDlpRepository = YtDlpRepository(this)
-        discoveryRepository = com.abn3li.telemusic.repository.DiscoveryRepository(db.importedPlaylistDao())
+        discoveryRepository = com.abn3li.telemusic.repository.DiscoveryRepository(db.importedPlaylistDao(), java.io.File(filesDir, "search_categories.json"))
 
         musicRepository = MusicRepository(
             songDao = db.songDao(), playlistDao = db.playlistDao(), tdlibManager = tdlibManager,
@@ -88,6 +88,9 @@ class TgMusicApp : Application(), ImageLoaderFactory {
         appScope.launch { musicRepository.migrateDownloadsToSingleCopy() }
         appScope.launch { musicRepository.upgradeYouTubeArtwork() }
         appScope.launch { musicRepository.backfillLyricsCache() }
+        // The Search tab's categories: ready from the saved copy before Search is opened, then
+        // refreshed once in the background (nothing waits on it).
+        appScope.launch { discoveryRepository.preloadGenres() }
         // Widgets show the last played song until something plays (no-op with no widget).
         com.abn3li.telemusic.widget.MusicWidgets.refresh(this)
     }
@@ -153,5 +156,9 @@ class TgMusicApp : Application(), ImageLoaderFactory {
                 .build()
         }
         .allowRgb565(true)
+        // Cover links never change what they point to, so a saved copy is always good. Left on,
+        // an "expired" cover is re-checked online first - and offline that check fails, so
+        // downloaded songs showed no artwork.
+        .respectCacheHeaders(false)
         .build()
 }

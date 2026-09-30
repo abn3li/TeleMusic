@@ -141,6 +141,11 @@ class AppSettingsStore(context: Context) {
         get() = prefs.getBoolean(KEY_LYRICS_CACHE_BACKFILLED, false)
         set(value) = prefs.edit().putBoolean(KEY_LYRICS_CACHE_BACKFILLED, value).apply()
 
+    /** Thumbnails marked failed while the phone was merely offline got their one retry. */
+    var failedThumbnailsRetried: Boolean
+        get() = prefs.getBoolean("failed_thumbnails_retried", false)
+        set(value) = prefs.edit().putBoolean("failed_thumbnails_retried", value).apply()
+
     /** The one-time upgrade of saved 120 px YouTube artwork links to the sharp size has run. */
     var youTubeArtworkUpgraded: Boolean
         get() = prefs.getBoolean(KEY_YT_ARTWORK_UPGRADED, false)

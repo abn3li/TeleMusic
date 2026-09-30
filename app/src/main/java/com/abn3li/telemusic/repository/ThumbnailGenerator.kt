@@ -1,5 +1,7 @@
 package com.abn3li.telemusic.repository
 
+import java.io.IOException
+import coil.request.ErrorResult
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
@@ -28,10 +30,14 @@ class ThumbnailGenerator(private val context: Context) {
     // 160x160 `directory` above for everything.
     private val fullArtDirectory by lazy { File(context.filesDir, "artwork").apply { mkdirs() } }
 
-    suspend fun generate(songId: Long, sourceUrl: String): String? = withContext(Dispatchers.IO) {
+    /** [path] of the saved thumbnail, or null; [retryLater] when it failed only because the
+     * network couldn't be reached (offline, timeout) - worth another try, unlike a dead link. */
+    class Result(val path: String?, val retryLater: Boolean)
+
+    suspend fun generate(songId: Long, sourceUrl: String): Result = withContext(Dispatchers.IO) {
         val file = File(directory, "$songId.jpg")
         if (file.exists() && file.length() > 0) {
-            return@withContext file.absolutePath
+            return@withContext Result(file.absolutePath, false)
         }
         runCatching {
             val request = ImageRequest.Builder(context)
@@ -39,11 +45,14 @@ class ThumbnailGenerator(private val context: Context) {
                 .size(160, 160)
                 .allowHardware(false) // need software pixels to compress to a file below
                 .build()
-            val bitmap = (context.imageLoader.execute(request).drawable as? BitmapDrawable)?.bitmap
-                ?: return@withContext null
+            val result = context.imageLoader.execute(request)
+            val bitmap = (result.drawable as? BitmapDrawable)?.bitmap
+                // A bad status (404...) is Coil's HttpException, not an IOException: only a
+                // connection that never got through counts as "try again later".
+                ?: return@withContext Result(null, (result as? ErrorResult)?.throwable is IOException)
             FileOutputStream(file).use { out -> bitmap.compress(Bitmap.CompressFormat.JPEG, 82, out) }
-            file.absolutePath
-        }.getOrNull()
+            Result(file.absolutePath, false)
+        }.getOrElse { Result(null, false) }
     }
 
     /**

@@ -1,5 +1,11 @@
 package com.abn3li.telemusic.ui.library
 
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.snapshotFlow
+import androidx.compose.runtime.saveable.rememberSaveable
+import com.abn3li.telemusic.data.browse.BrowseKind
+import com.abn3li.telemusic.repository.DiscoveryRepository
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.background
@@ -176,6 +182,30 @@ fun HomeScreen(
             }
         }
 
+        newReleases.community?.takeIf { it.items.isNotEmpty() }?.let { community ->
+            // A few up front; See All opens the rest as a grid.
+            val more = community.items.size > COMMUNITY_SHELF_SIZE
+            item("community_header") {
+                HomeSectionHeader(
+                    community.title,
+                    onSeeAll = if (more) {
+                        { onOpenCollection(BrowseCollection(DiscoveryRepository.COMMUNITY_BROWSE_ID, null, community.title, null, null, BrowseKind.OTHER)) }
+                    } else null
+                )
+            }
+            item("community") {
+                LazyRow(
+                    contentPadding = PaddingValues(horizontal = 16.dp),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    itemsIndexed(
+                        community.items.take(COMMUNITY_SHELF_SIZE),
+                        key = { index, item -> "community_${index}_${item.browseId}" }
+                    ) { _, item -> CollectionCard(item) { onOpenCollection(item) } }
+                }
+            }
+        }
+
         newReleases.section?.takeIf { it.items.isNotEmpty() }?.let { releases ->
             item("new_releases_header") { HomeSectionHeader("New releases") }
             item("new_releases") {
@@ -195,15 +225,24 @@ fun HomeScreen(
     }
 }
 
+private const val COMMUNITY_SHELF_SIZE = 5
+
 @Composable
-private fun HomeSectionHeader(title: String) {
-    Text(
-        title,
-        color = Color.White,
-        fontSize = 21.sp,
-        fontWeight = FontWeight.Bold,
-        modifier = Modifier.fillMaxWidth().padding(start = 18.dp, end = 18.dp, top = 24.dp, bottom = 10.dp)
-    )
+private fun HomeSectionHeader(title: String, onSeeAll: (() -> Unit)? = null) {
+    Row(
+        Modifier.fillMaxWidth().padding(start = 18.dp, end = 18.dp, top = 24.dp, bottom = 10.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(title, color = Color.White, fontSize = 21.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+        if (onSeeAll != null) {
+            Text(
+                "See All",
+                color = AppAccent,
+                fontSize = 15.sp,
+                modifier = Modifier.clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onSeeAll)
+            )
+        }
+    }
 }
 
 @Composable
@@ -228,10 +267,18 @@ private fun SongShelf(songs: List<SongEntity>, callbacks: LibraryCallbacks) {
     val ids = remember(songs) { songs.map { it.telegramMessageId } }
     val rowState = rememberLazyListState()
     // A newly played/added song is inserted at the front; a keyed row stays anchored on the old
-    // first item, leaving the new one hidden off-screen to the left. Snap back to the start when
-    // the front changes - unless the user has scrolled along the row. Runs only on that change.
+    // first item, leaving the new ones hidden off-screen to the left. Snap back to the start when
+    // the front changes - unless the user scrolled along the row. "Scrolled" is judged only when
+    // a scroll ends, so the row being pushed along by new songs (several can arrive while Home
+    // isn't showing) doesn't count as the user having moved it.
+    var atStart by rememberSaveable { mutableStateOf(true) }
+    LaunchedEffect(rowState) {
+        snapshotFlow { rowState.isScrollInProgress }.collect { scrolling ->
+            if (!scrolling) atStart = rowState.firstVisibleItemIndex == 0
+        }
+    }
     LaunchedEffect(songs.firstOrNull()?.telegramMessageId) {
-        if (rowState.firstVisibleItemIndex <= 1) rowState.scrollToItem(0)
+        if (atStart) rowState.scrollToItem(0)
     }
     LazyRow(state = rowState, contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
         itemsIndexed(songs, key = { _, s -> s.telegramMessageId }) { index, song ->

@@ -1,5 +1,9 @@
 package com.abn3li.telemusic.ui.navigation
 
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.Dispatchers
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.Spring
@@ -172,10 +176,15 @@ fun TgMusicNavGraph(navController: NavHostController = rememberNavController()) 
 
     // YouTube songs (search results, albums, playlists) play through the normal queue as
     // stream-only songs, so Next / Previous move through the whole list.
+    val playScope = rememberCoroutineScope()
     val playStreams: (List<BrowseTrack>, Int, Boolean) -> Unit = remember(playerViewModel) {
         { tracks, index, shuffle ->
-            val ids = app.musicRepository.queueIdsForStreams(tracks)
-            if (shuffle) playerViewModel.playCollection(ids, true) else playerViewModel.playFromQueue(ids, index)
+            // The queue entries are built off the main thread: a playlist of hundreds of songs
+            // would otherwise hold up the tap.
+            playScope.launch {
+                val ids = withContext(Dispatchers.Default) { app.musicRepository.queueIdsForStreams(tracks) }
+                if (shuffle) playerViewModel.playCollection(ids, true) else playerViewModel.playFromQueue(ids, index)
+            }
         }
     }
 
@@ -483,12 +492,12 @@ private fun NavBarItem(item: NavigationItem, selected: Boolean, onClick: () -> U
 }
 
 private val NavBarHeight = 64.dp
-// Only a short soft edge above the items: a taller fade reads as a grey shadow over light artwork.
-private val NavBarFadeHeight = 80.dp
+// The 2.2 fade, unchanged: the page scrolls away under the items into black.
+private val NavBarFadeHeight = 96.dp
 private val NavFade = Brush.verticalGradient(
     0f to Color.Transparent,
-    0.2f to Color.Black.copy(alpha = 0.95f),
-    0.32f to Color.Black,
+    0.3f to Color.Black.copy(alpha = 0.6f),
+    0.55f to Color.Black.copy(alpha = 0.92f),
     1f to Color.Black
 )
 private val NavIconSize = 25.dp
