@@ -253,7 +253,9 @@ fun TgMusicNavGraph(navController: NavHostController = rememberNavController()) 
                         onOpenSettings = { navController.navigate(Routes.SETTINGS) },
                         onOpenPlaylist = { id, name -> navController.navigate(Routes.playlist(id, name)) },
                         onOpenSmartPlaylist = { kind -> navController.navigate(Routes.smartPlaylist(kind)) },
-                        onOpenCollection = { c -> navController.navigate(Routes.youtubeBrowse(c.browseId, c.title, c.params)) }
+                        onOpenCollection = { c -> navController.navigate(Routes.youtubeBrowse(c.browseId, c.title, c.params)) },
+                        nowPlayingId = playerState.song?.telegramMessageId,
+                        isPlaying = playerState.isPlaying
                     )
                 }
                 composable(Routes.SEARCH) {

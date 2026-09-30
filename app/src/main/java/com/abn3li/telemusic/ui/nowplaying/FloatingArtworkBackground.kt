@@ -1,5 +1,6 @@
 package com.abn3li.telemusic.ui.nowplaying
 
+import androidx.compose.ui.graphics.asAndroidBitmap
 import kotlinx.coroutines.delay
 import android.content.Context
 import android.graphics.Bitmap
@@ -153,6 +154,63 @@ fun FloatingArtworkBackground(
                 .background(Color.Black)
         )
     }
+}
+
+/** A still, blurred copy of [artwork] filling [modifier] - Home's "Continue Listening" card.
+ * The same small blurred bitmap Now Playing's backdrop uses, built once per cover and shared
+ * through its cache; nothing moves, so it costs nothing after that. A dark cover is lifted to at
+ * least [minBrightness] (its colour kept, just brighter), so on a black OLED page the card never
+ * sinks into the background; bright covers are left as they are. */
+@Composable
+internal fun BlurredArtwork(artwork: String?, modifier: Modifier = Modifier, minBrightness: Float = 0f) {
+    val context = LocalContext.current
+    var backdrop by remember(artwork) { mutableStateOf(artwork?.let { backdropCache.get(it) }) }
+    LaunchedEffect(artwork) {
+        if (artwork.isNullOrEmpty() || backdrop != null) return@LaunchedEffect
+        val built = withContext(Dispatchers.IO) { buildBackdrop(context, artwork) } ?: return@LaunchedEffect
+        backdropCache.put(artwork, built)
+        backdrop = built
+    }
+    // Worked out once per cover from the 96px bitmap (a few thousand pixels), not per frame.
+    val lift = remember(backdrop, minBrightness) { backdrop?.let { brightnessLift(it, minBrightness) } }
+    Box(modifier.background(Color(0xFF2A2A2E))) {
+        backdrop?.let {
+            Image(
+                bitmap = it,
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                filterQuality = FilterQuality.High,
+                colorFilter = lift,
+                modifier = Modifier.fillMaxSize().graphicsLayer { scaleX = 1.4f; scaleY = 1.4f }
+            )
+        }
+    }
+}
+
+/** Null when [bitmap] is already at least [floor] bright on average; otherwise a filter that
+ * scales its colours up (up to 3x, which keeps the hue) and, for a cover that's nearly black
+ * even then, adds a little light on top. */
+private fun brightnessLift(bitmap: ImageBitmap, floor: Float): androidx.compose.ui.graphics.ColorFilter? {
+    if (floor <= 0f) return null
+    val android = bitmap.asAndroidBitmap()
+    val pixels = IntArray(android.width * android.height)
+    android.getPixels(pixels, 0, android.width, 0, 0, android.width, android.height)
+    var sum = 0.0
+    for (p in pixels) sum += 0.2126 * ((p shr 16) and 0xFF) + 0.7152 * ((p shr 8) and 0xFF) + 0.0722 * (p and 0xFF)
+    val luminance = (sum / pixels.size / 255.0).toFloat()
+    if (luminance >= floor) return null
+    val scale = (floor / luminance.coerceAtLeast(0.01f)).coerceIn(1f, 3f)
+    val offset = ((floor - luminance * scale).coerceAtLeast(0f) * 255f)
+    return androidx.compose.ui.graphics.ColorFilter.colorMatrix(
+        androidx.compose.ui.graphics.ColorMatrix(
+            floatArrayOf(
+                scale, 0f, 0f, 0f, offset,
+                0f, scale, 0f, 0f, offset,
+                0f, 0f, scale, 0f, offset,
+                0f, 0f, 0f, 1f, 0f
+            )
+        )
+    )
 }
 
 private suspend fun buildBackdrop(context: Context, artwork: String): ImageBitmap? {

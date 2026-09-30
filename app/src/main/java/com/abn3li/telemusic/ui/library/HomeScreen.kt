@@ -1,5 +1,12 @@
 package com.abn3li.telemusic.ui.library
 
+import androidx.compose.foundation.border
+import com.abn3li.telemusic.data.local.displayArtwork
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.material.icons.rounded.PlayArrow
+import androidx.compose.material.icons.rounded.Pause
+import androidx.compose.foundation.layout.fillMaxSize
+import com.abn3li.telemusic.ui.nowplaying.BlurredArtwork
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.snapshotFlow
@@ -68,7 +75,10 @@ fun HomeScreen(
     onOpenSettings: () -> Unit,
     onOpenPlaylist: (Long, String) -> Unit,
     onOpenSmartPlaylist: (SmartPlaylistKind) -> Unit,
-    onOpenCollection: (BrowseCollection) -> Unit
+    onOpenCollection: (BrowseCollection) -> Unit,
+    // The song loaded in the player, if any - lets "Continue Listening" pause/resume it in place.
+    nowPlayingId: Long? = null,
+    isPlaying: Boolean = false
 ) {
     val app = LocalContext.current.applicationContext as TgMusicApp
     val newReleasesViewModel = viewModel<NewReleasesViewModel>(factory = viewModelFactory { initializer {
@@ -95,23 +105,33 @@ fun HomeScreen(
             )
         }
     ) {
-        item("shortcuts") {
-            Column(Modifier.padding(horizontal = 16.dp).padding(top = 4.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    ShortcutTile("Liked Songs", { IconTile(SmartPlaylistKind.LIKED.icon(), 34) }, Modifier.weight(1f)) {
-                        onOpenSmartPlaylist(SmartPlaylistKind.LIKED)
-                    }
-                    ShortcutTile("Telegram Songs", { IconTile(SmartPlaylistKind.TELEGRAM.icon(), 34) }, Modifier.weight(1f)) {
-                        onOpenSmartPlaylist(SmartPlaylistKind.TELEGRAM)
-                    }
+        // The last song played, large, with its own blurred colours: one tap back into it.
+        home.recentlyPlayed.firstOrNull()?.let { last ->
+            item("continue") {
+                val isCurrent = last.telegramMessageId == nowPlayingId
+                ContinueListeningCard(last, isCurrent && isPlaying) {
+                    if (isCurrent) callbacks.onTogglePlayPause()
+                    else callbacks.onPlay(home.recentlyPlayed.map { it.telegramMessageId }, 0)
                 }
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    ShortcutTile("Downloaded", { IconTile(SmartPlaylistKind.DOWNLOADED.icon(), 34) }, Modifier.weight(1f)) {
-                        onOpenSmartPlaylist(SmartPlaylistKind.DOWNLOADED)
-                    }
-                    ShortcutTile("Shuffle All", { IconTile(Icons.Rounded.Shuffle, 34) }, Modifier.weight(1f)) {
-                        if (home.allIds.isNotEmpty()) callbacks.onPlayCollection(home.allIds, true)
-                    }
+            }
+        }
+
+        item("shortcuts") {
+            Row(
+                Modifier.padding(horizontal = 16.dp).padding(top = 12.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                ShortcutButton("Liked", SmartPlaylistKind.LIKED.icon(), Modifier.weight(1f)) {
+                    onOpenSmartPlaylist(SmartPlaylistKind.LIKED)
+                }
+                ShortcutButton("Telegram", SmartPlaylistKind.TELEGRAM.icon(), Modifier.weight(1f)) {
+                    onOpenSmartPlaylist(SmartPlaylistKind.TELEGRAM)
+                }
+                ShortcutButton("Downloaded", SmartPlaylistKind.DOWNLOADED.icon(), Modifier.weight(1f)) {
+                    onOpenSmartPlaylist(SmartPlaylistKind.DOWNLOADED)
+                }
+                ShortcutButton("Shuffle", Icons.Rounded.Shuffle, Modifier.weight(1f)) {
+                    if (home.allIds.isNotEmpty()) callbacks.onPlayCollection(home.allIds, true)
                 }
             }
         }
@@ -140,9 +160,10 @@ fun HomeScreen(
             }
         }
 
-        if (home.recentlyPlayed.isNotEmpty()) {
+        // The rest of Recently Played - the newest is the card at the top.
+        if (home.recentlyPlayed.size > 1) {
             item("recent_played_header") { HomeSectionHeader("Recently Played") }
-            item("recent_played") { SongShelf(home.recentlyPlayed, callbacks) }
+            item("recent_played") { SongShelf(home.recentlyPlayed.drop(1), callbacks) }
         }
 
         if (home.dailyMix.isNotEmpty() || home.rediscover.isNotEmpty()) {
@@ -150,10 +171,10 @@ fun HomeScreen(
             item("mixes") {
                 LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     if (home.dailyMix.isNotEmpty()) item("daily") {
-                        MixCard("Daily Mix", "Your most played", MixDaily) { callbacks.onPlayCollection(home.dailyMix.map { it.telegramMessageId }, false) }
+                        MixCard("Daily Mix", "Your most played", MixDaily, home.dailyMix) { callbacks.onPlayCollection(home.dailyMix.map { it.telegramMessageId }, false) }
                     }
                     if (home.rediscover.isNotEmpty()) item("rediscover") {
-                        MixCard("Rediscover", "Not played in a while", MixRediscover) { callbacks.onPlayCollection(home.rediscover.map { it.telegramMessageId }, false) }
+                        MixCard("Rediscover", "Not played in a while", MixRediscover, home.rediscover) { callbacks.onPlayCollection(home.rediscover.map { it.telegramMessageId }, false) }
                     }
                 }
             }
@@ -227,6 +248,9 @@ fun HomeScreen(
 
 private const val COMMUNITY_SHELF_SIZE = 5
 
+// How bright (average, 0-1) a dark cover's blurred card is lifted to - see BlurredArtwork.
+private const val CARD_MIN_BRIGHTNESS = 0.2f
+
 @Composable
 private fun HomeSectionHeader(title: String, onSeeAll: (() -> Unit)? = null) {
     Row(
@@ -245,19 +269,60 @@ private fun HomeSectionHeader(title: String, onSeeAll: (() -> Unit)? = null) {
     }
 }
 
+/** One of the four shortcuts: a pink icon over a short label, in one compact row. */
 @Composable
-private fun ShortcutTile(label: String, icon: @Composable () -> Unit, modifier: Modifier, onClick: () -> Unit) {
-    Row(
+private fun ShortcutButton(label: String, icon: ImageVector, modifier: Modifier, onClick: () -> Unit) {
+    Column(
         modifier
-            .clip(RoundedCornerShape(10.dp))
+            .height(64.dp)
+            .clip(RoundedCornerShape(14.dp))
             .background(LibraryFieldColor)
-            .clickable(onClick = onClick)
-            .padding(8.dp),
-        verticalAlignment = Alignment.CenterVertically
+            .clickable(onClick = onClick),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
     ) {
-        icon()
-        Spacer(Modifier.width(10.dp))
-        Text(label, color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Icon(icon, contentDescription = null, tint = AppAccent, modifier = Modifier.size(22.dp))
+        Spacer(Modifier.height(5.dp))
+        Text(label, color = Color.White.copy(alpha = 0.92f), fontSize = 11.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+    }
+}
+
+/** "Continue Listening": the last song's cover on a blurred copy of itself, its name, and a
+ * Resume (or Pause, while it plays) button. The whole card is the button. */
+@Composable
+private fun ContinueListeningCard(song: SongEntity, playing: Boolean, onClick: () -> Unit) {
+    Box(
+        Modifier
+            .padding(horizontal = 16.dp)
+            .padding(top = 4.dp)
+            .fillMaxWidth()
+            .height(176.dp)
+            .clip(RoundedCornerShape(18.dp))
+            // A faint edge, so the card's shape shows on a black OLED page whatever the cover.
+            .border(1.dp, Color.White.copy(alpha = 0.1f), RoundedCornerShape(18.dp))
+            .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onClick)
+    ) {
+        BlurredArtwork(song.displayArtwork, Modifier.matchParentSize(), minBrightness = CARD_MIN_BRIGHTNESS)
+        // Just enough shade for the white text over a bright cover.
+        Box(Modifier.matchParentSize().background(Color.Black.copy(alpha = 0.2f)))
+        Row(Modifier.fillMaxSize().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+            SongArtwork(song, 126.dp, 10.dp)
+            Column(Modifier.weight(1f).padding(start = 14.dp)) {
+                Text("CONTINUE LISTENING", color = Color.White.copy(alpha = 0.7f), fontSize = 10.5.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.9.sp)
+                Spacer(Modifier.height(5.dp))
+                Text(song.title, color = Color.White, fontSize = 20.sp, lineHeight = 23.sp, fontWeight = FontWeight.ExtraBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                Text(song.artist, color = Color.White.copy(alpha = 0.75f), fontSize = 13.5.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Spacer(Modifier.height(12.dp))
+                Row(
+                    Modifier.clip(RoundedCornerShape(18.dp)).background(Color.White).padding(start = 10.dp, end = 14.dp, top = 7.dp, bottom = 7.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(if (playing) Icons.Rounded.Pause else Icons.Rounded.PlayArrow, contentDescription = null, tint = AppAccent, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(4.dp))
+                    Text(if (playing) "Pause" else "Resume", color = Color.Black, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                }
+            }
+        }
     }
 }
 
@@ -292,16 +357,38 @@ private fun SongShelf(songs: List<SongEntity>, callbacks: LibraryCallbacks) {
     }
 }
 
+/** A mix: four of its songs' covers in a 2x2 grid, its name on a band of its colour below. */
 @Composable
-private fun MixCard(title: String, subtitle: String, color: Color, onClick: () -> Unit) {
-    Column(Modifier.width(158.dp).clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onClick)) {
-        Box(
-            Modifier.size(158.dp, 128.dp).clip(RoundedCornerShape(8.dp)).background(color).padding(12.dp),
-            contentAlignment = Alignment.BottomStart
-        ) {
-            Text(title, color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.Bold)
+private fun MixCard(title: String, subtitle: String, color: Color, songs: List<SongEntity>, onClick: () -> Unit) {
+    val covers = remember(songs) { songs.distinctBy { it.displayArtwork }.take(4) }
+    Box(
+        Modifier
+            .size(156.dp, 196.dp)
+            .clip(RoundedCornerShape(14.dp))
+            .background(color)
+            .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onClick)
+    ) {
+        Column {
+            for (row in 0 until 2) {
+                Row {
+                    for (column in 0 until 2) {
+                        val song = covers.getOrNull(row * 2 + column)
+                        if (song != null) SongArtwork(song, 78.dp, 0.dp) else Spacer(Modifier.size(78.dp))
+                    }
+                }
+            }
         }
-        Spacer(Modifier.height(5.dp))
-        Text(subtitle, color = Color.White.copy(alpha = 0.55f), fontSize = 12.sp, maxLines = 1)
+        Column(
+            Modifier
+                .align(Alignment.BottomStart)
+                .fillMaxWidth()
+                .height(66.dp)
+                .background(Brush.verticalGradient(0f to Color.Transparent, 0.4f to color))
+                .padding(horizontal = 11.dp, vertical = 9.dp),
+            verticalArrangement = Arrangement.Bottom
+        ) {
+            Text(title, color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.ExtraBold, maxLines = 1)
+            Text(subtitle, color = Color.White.copy(alpha = 0.8f), fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
     }
 }

@@ -224,18 +224,27 @@ def resolve_stream_url(video_id, format_selector="bestaudio/best"):
     # extraction above, so nothing that played before stops playing.
     light = dict(opts)
     light["extractor_args"] = {"youtube": {"player_client": ["android"], "player_skip": ["webpage", "configs", "js"]}}
+    # When YouTube's bot check turns the light android client away ("Sign in to confirm you're
+    # not a bot"), the full extraction gets through (~4.5 s, measured); if even that fails, a
+    # last try with yt-dlp's own default client choice. (The visionos client was measured here
+    # too: refused by the same check, it only added ~2 s.) Each is tried only when the one
+    # before failed, so a normal song start costs exactly what it did.
+    defaults = {k: v for k, v in opts.items() if k != "extractor_args"}
     url = f"https://music.youtube.com/watch?v={video_id}"
     t0 = time.monotonic()
-    mode = "light"
-    try:
-        with yt_dlp.YoutubeDL(light) as ydl:
-            info = ydl.extract_info(url, download=False)
-        if not info or not info.get("url"):
-            raise ValueError("no stream url")
-    except Exception:
-        mode = "full"
-        with yt_dlp.YoutubeDL(opts) as ydl:
-            info = ydl.extract_info(url, download=False)
+    info, mode, last_error = None, None, None
+    for mode, attempt in (("light", light), ("full", opts), ("default", defaults)):
+        try:
+            with yt_dlp.YoutubeDL(attempt) as ydl:
+                info = ydl.extract_info(url, download=False)
+            if info and info.get("url"):
+                break
+            last_error = ValueError("no stream url")
+        except Exception as e:
+            last_error = e
+        info = None
+    if info is None:
+        raise last_error
     print(f"[timing] resolve_stream_url({video_id}) [{mode}]: {time.monotonic() - t0:.2f}s")
     entry = _entry_from_info(info)
     entry["url"] = info.get("url")
