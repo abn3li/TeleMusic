@@ -50,6 +50,14 @@ private const val KEN_BURNS_FRAME_NANOS = 15_500_000L
 
 private val backdropCache = LruCache<String, ImageBitmap>(8)
 
+// Home's "Continue Listening" card holds its blur still and barely zoomed, where Now Playing's
+// 96px backdrop (fine there - always moving, zoomed 1.5-2x) shows as blocky. So the card builds
+// its own, larger and more softly blurred copy, cached apart from Now Playing's: ~256 KB each.
+private const val CARD_BACKDROP_SIZE_PX = 256
+private const val CARD_BLUR_RADIUS = 8
+private const val CARD_BLUR_PASSES = 3
+private val cardBackdropCache = LruCache<String, ImageBitmap>(6)
+
 /**
  * Full-screen "floating light" backdrop: the artwork, saturated and heavily blurred, drifting
  * slowly in a Ken Burns pan/zoom/rotate behind the player.
@@ -157,21 +165,23 @@ fun FloatingArtworkBackground(
 }
 
 /** A still, blurred copy of [artwork] filling [modifier] - Home's "Continue Listening" card.
- * The same small blurred bitmap Now Playing's backdrop uses, built once per cover and shared
- * through its cache; nothing moves, so it costs nothing after that. A dark cover is lifted to at
+ * Its own 256px, three-pass blur (see [CARD_BACKDROP_SIZE_PX]), built once per cover on a
+ * background thread and kept in its own cache; nothing moves, so it costs nothing after that. A dark cover is lifted to at
  * least [minBrightness] (its colour kept, just brighter), so on a black OLED page the card never
  * sinks into the background; bright covers are left as they are. */
 @Composable
 internal fun BlurredArtwork(artwork: String?, modifier: Modifier = Modifier, minBrightness: Float = 0f) {
     val context = LocalContext.current
-    var backdrop by remember(artwork) { mutableStateOf(artwork?.let { backdropCache.get(it) }) }
+    var backdrop by remember(artwork) { mutableStateOf(artwork?.let { cardBackdropCache.get(it) }) }
     LaunchedEffect(artwork) {
         if (artwork.isNullOrEmpty() || backdrop != null) return@LaunchedEffect
-        val built = withContext(Dispatchers.IO) { buildBackdrop(context, artwork) } ?: return@LaunchedEffect
-        backdropCache.put(artwork, built)
+        val built = withContext(Dispatchers.IO) {
+            buildBlurredArtwork(context, artwork, CARD_BACKDROP_SIZE_PX, CARD_BLUR_RADIUS, CARD_BLUR_PASSES)
+        } ?: return@LaunchedEffect
+        cardBackdropCache.put(artwork, built)
         backdrop = built
     }
-    // Worked out once per cover from the 96px bitmap (a few thousand pixels), not per frame.
+    // Worked out once per cover from the bitmap (a few tens of thousands of pixels), not per frame.
     val lift = remember(backdrop, minBrightness) { backdrop?.let { brightnessLift(it, minBrightness) } }
     Box(modifier.background(Color(0xFF2A2A2E))) {
         backdrop?.let {
@@ -213,16 +223,27 @@ private fun brightnessLift(bitmap: ImageBitmap, floor: Float): androidx.compose.
     )
 }
 
-private suspend fun buildBackdrop(context: Context, artwork: String): ImageBitmap? {
+private suspend fun buildBackdrop(context: Context, artwork: String): ImageBitmap? =
+    buildBlurredArtwork(context, artwork, BACKDROP_SIZE_PX, blurRadius = 3, blurPasses = 2)
+
+/** [artwork] at [sizePx] square, saturated, slightly darkened and box-blurred [blurPasses] times
+ * at [blurRadius] (repeated box blurs approximate a gaussian) - on the CPU, once. */
+private suspend fun buildBlurredArtwork(
+    context: Context,
+    artwork: String,
+    sizePx: Int,
+    blurRadius: Int,
+    blurPasses: Int
+): ImageBitmap? {
     val request = ImageRequest.Builder(context)
         .data(artwork)
-        .size(BACKDROP_SIZE_PX * 2)
+        .size(sizePx * 2)
         .allowHardware(false)
         .build()
     val result = context.imageLoader.execute(request) as? SuccessResult ?: return null
-    val source = result.drawable.toBitmap(BACKDROP_SIZE_PX, BACKDROP_SIZE_PX, Bitmap.Config.ARGB_8888)
+    val source = result.drawable.toBitmap(sizePx, sizePx, Bitmap.Config.ARGB_8888)
 
-    val graded = Bitmap.createBitmap(BACKDROP_SIZE_PX, BACKDROP_SIZE_PX, Bitmap.Config.ARGB_8888)
+    val graded = Bitmap.createBitmap(sizePx, sizePx, Bitmap.Config.ARGB_8888)
     Canvas(graded).apply {
         val paint = Paint(Paint.FILTER_BITMAP_FLAG).apply {
             colorFilter = ColorMatrixColorFilter(ColorMatrix().apply { setSaturation(1.9f) })
@@ -231,10 +252,10 @@ private suspend fun buildBackdrop(context: Context, artwork: String): ImageBitma
         drawColor(0x4D000000)
     }
 
-    val pixels = IntArray(BACKDROP_SIZE_PX * BACKDROP_SIZE_PX)
-    graded.getPixels(pixels, 0, BACKDROP_SIZE_PX, 0, 0, BACKDROP_SIZE_PX, BACKDROP_SIZE_PX)
-    repeat(2) { boxBlur(pixels, BACKDROP_SIZE_PX, BACKDROP_SIZE_PX, radius = 3) }
-    graded.setPixels(pixels, 0, BACKDROP_SIZE_PX, 0, 0, BACKDROP_SIZE_PX, BACKDROP_SIZE_PX)
+    val pixels = IntArray(sizePx * sizePx)
+    graded.getPixels(pixels, 0, sizePx, 0, 0, sizePx, sizePx)
+    repeat(blurPasses) { boxBlur(pixels, sizePx, sizePx, radius = blurRadius) }
+    graded.setPixels(pixels, 0, sizePx, 0, 0, sizePx, sizePx)
     return graded.asImageBitmap()
 }
 
