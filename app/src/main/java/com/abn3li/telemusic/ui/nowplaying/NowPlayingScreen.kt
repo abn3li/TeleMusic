@@ -1,11 +1,15 @@
 package com.abn3li.telemusic.ui.nowplaying
 
+import androidx.compose.ui.graphics.BlendMode
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.CompositingStrategy
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.zIndex
 import com.abn3li.telemusic.ui.theme.SystemBarsState
 import androidx.compose.runtime.SideEffect
 import com.abn3li.telemusic.ui.theme.DarkPlayerTheme
 import com.abn3li.telemusic.data.local.listArtwork
-import com.abn3li.telemusic.data.browse.FULL_ARTWORK_SIZE
-import com.abn3li.telemusic.data.browse.googleArtworkAtSize
+import com.abn3li.telemusic.data.browse.fullSizeArtwork
 import com.abn3li.telemusic.ui.library.AppAlert
 import com.abn3li.telemusic.ui.library.AlertAction
 import com.abn3li.telemusic.ui.library.AlertTextField
@@ -51,7 +55,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
@@ -336,6 +339,7 @@ private fun NowPlayingContent(
             ) {
                 Box(
                     Modifier
+                        .zIndex(1f)
                         .fillMaxWidth()
                         .height(30.dp)
                         .then(dismissDrag)
@@ -346,7 +350,7 @@ private fun NowPlayingContent(
                         Modifier
                             .size(width = 36.dp, height = 5.dp)
                             .clip(RoundedCornerShape(2.5.dp))
-                            .background(Color.White.copy(alpha = 0.35f))
+                            .background(Color.White.copy(alpha = 0.6f))
                     )
                 }
 
@@ -375,7 +379,7 @@ private fun NowPlayingContent(
                         Modifier
                             .fillMaxWidth()
                             .padding(horizontal = 26.dp)
-                            .padding(top = 6.dp, bottom = 12.dp)
+                            .padding(top = 6.dp, bottom = 36.dp)
                     ) {
                         PlayerScrubber(viewModel = viewModel, active = playerVisible, onInteraction = onInteraction)
                         TransportRow(
@@ -451,9 +455,9 @@ private fun NowPlayingContent(
 }
 
 /**
- * Everything between the grabber and the controls. The artwork is a single element that morphs
- * between the big cover (Artwork page) and the small header thumbnail (Lyrics/Queue pages); its
- * position and size are pure graphicsLayer transforms, so the morph never re-lays-out anything.
+ * Everything between the grabber and the controls. The Artwork page shows the full-width cover;
+ * Lyrics and Queue fade it out for a small thumbnail beside the title. Only layer alphas change
+ * on the switch, so nothing is laid out or drawn again.
  */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -486,18 +490,14 @@ private fun PlayerPageArea(
     val showCoverTitle by remember { derivedStateOf { morph.value < 0.99f } }
     val showHeaderTitle by remember { derivedStateOf { morph.value > 0.01f } }
 
-    // Playing: the cover sits large; paused: it settles back smaller (Apple Music's signature).
-    val pauseScale = animateFloatAsState(
-        targetValue = if (state.isPlaying) 1f else 0.8f,
-        animationSpec = if (state.isPlaying) spring(dampingRatio = 1f, stiffness = 300f) else tween(350, easing = EaseOutQuart),
-        label = "coverPauseScale"
-    )
-
     val horizontalPadding = 28.dp
-    val coverTitleHeight = 92.dp
-    val bigSide = minOf(maxWidth - horizontalPadding * 2, maxHeight - coverTitleHeight - 16.dp).coerceAtLeast(120.dp)
-    val bigLeft = (maxWidth - bigSide) / 2
-    val bigTop = ((maxHeight - bigSide - coverTitleHeight) / 2).coerceAtLeast(8.dp)
+    // The cover fills the screen's width from its very top (behind the status bar and the
+    // grabber, [coverLift] above this area) and has faded out into the player's colours by the
+    // title, which sits just above the controls like Apple Music. A square cover is shown at
+    // most a tenth taller than wide, so little of its sides is trimmed.
+    val coverLift = WindowInsets.statusBars.asPaddingValues().calculateTopPadding() + 30.dp
+    val titleTop = (maxHeight - 96.dp).coerceAtLeast(8.dp)
+    val coverHeight = minOf(maxWidth * 1.1f, coverLift + titleTop).coerceAtLeast(160.dp)
     val smallSide = 62.dp
     val smallLeft = 26.dp
     val smallTop = 10.dp
@@ -511,9 +511,9 @@ private fun PlayerPageArea(
     )
     val latestState by rememberUpdatedState(state)
 
-    // YouTube Music art is fetched at 1200 px here (the big cover); everywhere else keeps the
-    // saved 544 px link. Local files and other hosts pass through unchanged.
-    val fullArtwork = remember(song?.displayArtwork) { googleArtworkAtSize(song?.displayArtwork, FULL_ARTWORK_SIZE) }
+    // The big cover is fetched at 1200 px where the host allows it (YouTube Music, iTunes, Deezer,
+    // YouTube video frames - see fullSizeArtwork); everywhere else keeps the saved link.
+    val fullArtwork = remember(song?.displayArtwork) { fullSizeArtwork(song?.displayArtwork) }
     val artworkRequest = remember(fullArtwork, context) {
         ImageRequest.Builder(context)
             .data(fullArtwork)
@@ -550,7 +550,8 @@ private fun PlayerPageArea(
         Row(
             Modifier
                 .fillMaxWidth()
-                .padding(top = bigTop + bigSide + 18.dp)
+                .zIndex(1f)
+                .padding(top = titleTop)
                 .padding(horizontal = horizontalPadding)
                 .graphicsLayer { alpha = (1f - morph.value * 2f).coerceIn(0f, 1f) }
                 .then(dismissDrag),
@@ -589,7 +590,8 @@ private fun PlayerPageArea(
                 isFavorite = song?.isFavorite == true,
                 overflowOpen = overflowOpen,
                 onFavorite = { viewModel.toggleFavorite() },
-                onOverflow = onOpenOverflow
+                onOverflow = onOpenOverflow,
+                plain = true
             )
         }
     }
@@ -631,32 +633,42 @@ private fun PlayerPageArea(
     }
 
     val onCover = page == PlayerPage.ARTWORK
-    Box(
-        Modifier
-            .offset(x = bigLeft, y = bigTop)
-            .size(bigSide)
-            .graphicsLayer {
-                val t = morph.value
-                val bigSidePx = bigSide.toPx()
-                val coverScale = pauseScale.value
-                val headerScale = smallSide.toPx() / bigSidePx
-                val scale = lerpFloat(coverScale, headerScale, t)
-                val coverX = (1f - coverScale) * bigSidePx / 2f + swipeSettle.value * (1f - t)
-                val coverY = (1f - coverScale) * bigSidePx / 2f
-                val headerX = (smallLeft - bigLeft).toPx()
-                val headerY = (smallTop - bigTop).toPx()
-                transformOrigin = TransformOrigin(0f, 0f)
-                translationX = lerpFloat(coverX, headerX, t)
-                translationY = lerpFloat(coverY, headerY, t)
-                scaleX = scale
-                scaleY = scale
-                val cornerPx = lerpFloat(12.dp.toPx(), 7.dp.toPx(), t) / scale
-                shape = RoundedCornerShape(cornerPx)
-                clip = true
-                shadowElevation = lerpFloat(22.dp.toPx(), 4.dp.toPx(), t)
-            }
-            .pointerInput(onCover) {
-                if (onCover) {
+    val hasArtwork = !song?.displayArtwork.isNullOrEmpty()
+    // The large size missing (an old video has no 1280 px frame) or offline and not saved: the
+    // saved link, then the small list thumbnail - each beats a blank.
+    var coverFailures by remember(fullArtwork) { mutableIntStateOf(0) }
+    val coverModel: Any? = when (coverFailures) {
+        0 -> artworkRequest
+        1 -> song?.displayArtwork
+        else -> song?.listArtwork
+    }
+
+    // The full-width cover, drawn first so the title sits on top of its fade. Lyrics and Queue
+    // fade it out. Moving and fading it are layer changes only - the faded picture itself is
+    // drawn again only when the artwork changes.
+    if (showCoverTitle) {
+        Box(
+            Modifier
+                .offset(y = -coverLift)
+                .fillMaxWidth()
+                .height(coverHeight)
+                .graphicsLayer {
+                    alpha = (1f - morph.value * 1.6f).coerceIn(0f, 1f)
+                    translationX = swipeSettle.value
+                    // Offscreen, so the fade below can cut the picture's own alpha.
+                    compositingStrategy = CompositingStrategy.Offscreen
+                }
+                .drawWithContent {
+                    drawContent()
+                    drawRect(
+                        Brush.verticalGradient(
+                            0f to Color.Black, 0.62f to Color.Black, 0.85f to Color.Black.copy(alpha = 0.35f), 1f to Color.Transparent
+                        ),
+                        blendMode = BlendMode.DstIn
+                    )
+                }
+                .pointerInput(onCover) {
+                    if (!onCover) return@pointerInput
                     var total = 0f
                     detectHorizontalDragGestures(
                         onDragStart = { total = 0f },
@@ -680,30 +692,73 @@ private fun PlayerPageArea(
                             swipeOffset = total * 0.35f
                         }
                     )
-                } else {
-                    detectTapGestures { onPageChange(PlayerPage.ARTWORK) }
                 }
-            }
-            .then(if (onCover) dismissDrag else Modifier)
-            .background(Color(0xFF2A2A2E)),
-        contentAlignment = Alignment.Center
-    ) {
-        Icon(
-            Icons.Rounded.MusicNote,
-            contentDescription = null,
-            tint = Color.White.copy(alpha = 0.35f),
-            modifier = Modifier.fillMaxSize(0.3f)
-        )
-        if (!song?.displayArtwork.isNullOrEmpty()) {
-            // Offline with the big cover not saved: the small list thumbnail beats a blank.
-            var fullFailed by remember(fullArtwork) { mutableStateOf(false) }
-            AsyncImage(
-                model = if (fullFailed) song?.listArtwork else artworkRequest,
-                contentDescription = "Album artwork",
-                contentScale = ContentScale.Crop,
-                modifier = Modifier.fillMaxSize(),
-                onError = { fullFailed = true }
+                .then(if (onCover) dismissDrag else Modifier)
+                .background(Color(0xFF2A2A2E)),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                Icons.Rounded.MusicNote,
+                contentDescription = null,
+                tint = Color.White.copy(alpha = 0.35f),
+                modifier = Modifier.fillMaxSize(0.3f)
             )
+            if (hasArtwork) {
+                AsyncImage(
+                    model = coverModel,
+                    contentDescription = "Album artwork",
+                    contentScale = ContentScale.Crop,
+                    alignment = Alignment.TopCenter,
+                    modifier = Modifier.fillMaxSize(),
+                    onError = { coverFailures++ }
+                )
+            }
+            // A soft shade under the status bar, so its clock and icons read on a bright cover.
+            Box(
+                Modifier
+                    .align(Alignment.TopCenter)
+                    .fillMaxWidth()
+                    .height(coverLift + 24.dp)
+                    .background(Brush.verticalGradient(listOf(Color.Black.copy(alpha = 0.32f), Color.Transparent)))
+            )
+        }
+    }
+
+    // Lyrics and Queue: the cover as a small thumbnail beside the title; tapping it goes back.
+    if (showHeaderTitle) {
+        Box(
+            Modifier
+                .offset(x = smallLeft, y = smallTop)
+                .size(smallSide)
+                .graphicsLayer {
+                    val t = morph.value
+                    alpha = ((t - 0.3f) / 0.7f).coerceIn(0f, 1f)
+                    val scale = lerpFloat(0.85f, 1f, t)
+                    scaleX = scale
+                    scaleY = scale
+                    shape = RoundedCornerShape(7.dp)
+                    clip = true
+                    shadowElevation = 4.dp.toPx()
+                }
+                .pointerInput(Unit) { detectTapGestures { onPageChange(PlayerPage.ARTWORK) } }
+                .background(Color(0xFF2A2A2E)),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                Icons.Rounded.MusicNote,
+                contentDescription = null,
+                tint = Color.White.copy(alpha = 0.35f),
+                modifier = Modifier.fillMaxSize(0.4f)
+            )
+            if (hasArtwork) {
+                AsyncImage(
+                    model = coverModel,
+                    contentDescription = "Album artwork",
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize(),
+                    onError = { coverFailures++ }
+                )
+            }
         }
     }
 }
@@ -713,14 +768,17 @@ private fun PlayerActionButtons(
     isFavorite: Boolean,
     overflowOpen: Boolean,
     onFavorite: () -> Unit,
-    onOverflow: () -> Unit
+    onOverflow: () -> Unit,
+    // On the cover's fade: bare icons, no circles behind them.
+    plain: Boolean = false
 ) {
     val haptics = LocalHapticFeedback.current
-    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(if (plain) 14.dp else 12.dp)) {
         CircleActionButton(
             icon = if (isFavorite) Icons.Rounded.Star else Icons.Rounded.StarBorder,
             contentDescription = if (isFavorite) "Remove from favorites" else "Add to favorites",
             inverted = false,
+            plain = plain,
             onClick = {
                 haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                 onFavorite()
@@ -730,6 +788,7 @@ private fun PlayerActionButtons(
             icon = Icons.Rounded.MoreHoriz,
             contentDescription = "More options",
             inverted = overflowOpen,
+            plain = plain,
             onClick = {
                 haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                 onOverflow()
@@ -743,26 +802,31 @@ private fun CircleActionButton(
     icon: ImageVector,
     contentDescription: String,
     inverted: Boolean,
+    plain: Boolean = false,
     onClick: () -> Unit
 ) {
     val interaction = remember { MutableInteractionSource() }
     val scale = rememberPressScale(interaction)
     val background by animateColorAsState(
-        if (inverted) Color.White.copy(alpha = 0.92f) else Color.White.copy(alpha = 0.14f),
+        when {
+            inverted -> Color.White.copy(alpha = 0.92f)
+            plain -> Color.Transparent
+            else -> Color.White.copy(alpha = 0.14f)
+        },
         tween(300),
         label = "circleActionBg"
     )
     val tint by animateColorAsState(if (inverted) Color.Black else Color.White, tween(300), label = "circleActionTint")
     Box(
         Modifier
-            .size(32.dp)
+            .size(if (plain) 36.dp else 32.dp)
             .graphicsLayer { scaleX = scale; scaleY = scale }
             .clip(CircleShape)
             .background(background)
             .clickable(interactionSource = interaction, indication = null, onClick = onClick),
         contentAlignment = Alignment.Center
     ) {
-        Icon(icon, contentDescription, tint = tint, modifier = Modifier.size(20.dp))
+        Icon(icon, contentDescription, tint = tint, modifier = Modifier.size(if (plain && !inverted) 26.dp else 20.dp))
     }
 }
 

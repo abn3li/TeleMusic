@@ -54,9 +54,9 @@ data class LyricsSearch(val result: LyricsResult?, val allAnswered: Boolean)
  * Providers are tried in this order, each one free and requiring no API key - and, unlike
  * what was here before, each one actually verified reachable (via curl) before being wired in:
  * 0. BiniLyrics (lyrics-api.binimum.org, now served from lrc.red) - community lyrics as TTML,
- *    many timed word by word, Arabic included. Its word-timed lyrics win over everything, since
- *    only those let the Now Playing sweep follow the singing exactly. Its line-timed ones rank
- *    right after LRCLIB's. New searches there sometimes fail (503) or hang, so it gets a short
+ *    many timed word by word, Arabic included. Its synced lyrics win over everything (word-timed
+ *    ones are the only ones Now Playing sweeps word by word, and its line-timed ones are as good
+ *    as anyone's). New searches there sometimes fail (503) or hang, so it gets a short
  *    time budget and the others run meanwhile. (Better Lyrics, the other word-synced API
  *    checked, answers only songs it already has cached without an API key - left out.)
  * 1. LRCLIB (lrclib.net) - open community database, line-synced (LRC) capable.
@@ -126,8 +126,8 @@ class LyricsRepository {
 
         try {
             val biniResult = biniDeferred.await()
-            if (biniResult?.synced != null && hasWordTiming(biniResult.synced)) {
-                Log.d("LyricsRepository", "[BiniLyrics] Word-synced match")
+            if (biniResult?.synced != null) {
+                Log.d("LyricsRepository", if (hasWordTiming(biniResult.synced)) "[BiniLyrics] Word-synced match" else "[BiniLyrics] Line-synced match")
                 return@coroutineScope biniResult.copy(provider = LyricsProvider.BINI_LYRICS)
             }
 
@@ -135,11 +135,6 @@ class LyricsRepository {
             if (lrcLibResult?.synced != null) {
                 Log.d("LyricsRepository", "[LRCLIB] Synced match")
                 return@coroutineScope lrcLibResult.copy(provider = LyricsProvider.LRCLIB)
-            }
-
-            if (biniResult?.synced != null) {
-                Log.d("LyricsRepository", "[BiniLyrics] Line-synced match")
-                return@coroutineScope biniResult.copy(provider = LyricsProvider.BINI_LYRICS)
             }
 
             val kuGouResult = kuGouDeferred.await()

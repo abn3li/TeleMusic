@@ -32,7 +32,19 @@ object NetworkModule {
     private fun retrofit(baseUrl: String) = Retrofit.Builder().baseUrl(baseUrl).client(client)
         .addConverterFactory(GsonConverterFactory.create()).build()
 
-    val lrcLibApi: LrcLibApi by lazy { retrofit("https://lrclib.net/").create(LrcLibApi::class.java) }
+    // LRCLIB turns away OkHttp's default User-Agent (error 520) and asks apps to name themselves.
+    private val lrcLibClient: OkHttpClient by lazy {
+        client.newBuilder()
+            .addInterceptor { chain ->
+                chain.proceed(chain.request().newBuilder().header("User-Agent", "TeleMusic/2.2 (https://github.com/abn3li/TeleMusic)").build())
+            }
+            .build()
+    }
+
+    val lrcLibApi: LrcLibApi by lazy {
+        Retrofit.Builder().baseUrl("https://lrclib.net/").client(lrcLibClient)
+            .addConverterFactory(GsonConverterFactory.create()).build().create(LrcLibApi::class.java)
+    }
     val lyricsOvhApi: LyricsOvhApi by lazy { retrofit("https://api.lyrics.ovh/").create(LyricsOvhApi::class.java) }
     val iTunesApi: ITunesApi by lazy { retrofit("https://itunes.apple.com/").create(ITunesApi::class.java) }
     val deezerApi: DeezerApi by lazy { retrofit("https://api.deezer.com/").create(DeezerApi::class.java) }

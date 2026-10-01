@@ -385,8 +385,7 @@ private fun LyricsSourceButton(onClick: () -> Unit, modifier: Modifier = Modifie
 
 /**
  * How far the active line's letter-by-letter sweep is at any moment: at each point's time, that
- * many characters are sung, and in between it moves evenly. Two points (start, end) when the
- * lyrics only time the line; one per word when they time words. A data class, so an equal one
+ * many characters are sung, and in between it moves evenly - one point per timed word. A data class, so an equal one
  * built on the next recomposition doesn't restart the sweep.
  */
 private data class SweepTiming(val points: List<WordMark>) {
@@ -428,28 +427,23 @@ private const val UNSUNG_ALPHA = 0.35f
 private const val SWEEP_EDGE_PX = 36f
 
 /**
- * Lyrics timed word by word (BiniLyrics) sweep exactly with the singing. Most others only say
- * when each LINE starts, so the sweep spreads the line's time over its letters: from the line's
- * start to the next line's, but no longer than a normal singing pace for its length (a line
- * followed by a long instrumental gap mustn't crawl), and a little before the next line so it
- * always finishes. The same pace finishes a word-timed line whose last word has no end time.
+ * Only lyrics timed word by word (BiniLyrics) sweep, exactly with the singing. Lyrics that only
+ * say when each LINE starts have none: the whole line lights up at once, as before. A word-timed
+ * line whose last word has no end time finishes at a normal singing pace, a little before the
+ * next line.
  */
-private fun sweepTiming(line: LyricLine, next: LyricLine?): SweepTiming {
+private fun sweepTiming(line: LyricLine, next: LyricLine?): SweepTiming? {
+    if (line.words.isEmpty()) return null
     val length = line.text.length
     val latestEnd = (next?.timeMs ?: Long.MAX_VALUE) - 150L
-    if (line.words.isNotEmpty()) {
-        val points = line.words.toMutableList()
-        if (points.first().chars > 0) points.add(0, WordMark(minOf(line.timeMs, points.first().timeMs), 0))
-        val last = points.last()
-        if (last.chars < length) {
-            val paced = ((length - last.chars) * 80L).coerceAtLeast(300L)
-            points += WordMark(last.timeMs + paced.coerceAtMost(latestEnd - last.timeMs).coerceAtLeast(100L), length)
-        }
-        return SweepTiming(points)
+    val points = line.words.toMutableList()
+    if (points.first().chars > 0) points.add(0, WordMark(minOf(line.timeMs, points.first().timeMs), 0))
+    val last = points.last()
+    if (last.chars < length) {
+        val paced = ((length - last.chars) * 80L).coerceAtLeast(300L)
+        points += WordMark(last.timeMs + paced.coerceAtMost(latestEnd - last.timeMs).coerceAtLeast(100L), length)
     }
-    val paced = (length * 80L).coerceAtLeast(1_200L)
-    val gap = (next?.timeMs ?: (line.timeMs + paced)) - line.timeMs - 150L
-    return SweepTiming(listOf(WordMark(line.timeMs, 0), WordMark(line.timeMs + paced.coerceAtMost(gap).coerceAtLeast(300L), length)))
+    return SweepTiming(points)
 }
 
 /**

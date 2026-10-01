@@ -1,5 +1,9 @@
 package com.abn3li.telemusic.ui.navigation
 
+import androidx.compose.foundation.layout.asPaddingValues
+import androidx.compose.foundation.layout.union
+import androidx.compose.foundation.layout.displayCutout
+import androidx.compose.foundation.layout.systemBars
 import com.abn3li.telemusic.ui.theme.LocalPalette
 import com.abn3li.telemusic.ui.theme.paper
 import com.abn3li.telemusic.ui.theme.ink
@@ -228,8 +232,12 @@ fun TgMusicNavGraph(navController: NavHostController = rememberNavController()) 
         if (showBottomBar) NavBarHeight + 4.dp + MiniPlayerHeight + 12.dp else MiniPlayerHeight
     } else if (showBottomBar) NavBarHeight + 12.dp else 0.dp
 
+    // The pages and the tab bar stay clear of the system bars; only the player (below) draws
+    // behind them.
+    val navBarInset = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
     Box(Modifier.fillMaxSize()) {
-        Scaffold { innerPadding ->
+      Box(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.systemBars.union(WindowInsets.displayCutout))) {
+        Scaffold(contentWindowInsets = WindowInsets(0)) { innerPadding ->
             CompositionLocalProvider(
                 LocalMiniPlayerInset provides miniPlayerInset,
                 LocalPlayNext provides playNext,
@@ -398,10 +406,11 @@ fun TgMusicNavGraph(navController: NavHostController = rememberNavController()) 
         }
 
         DownloadLocationPrompt(app)
+      }
 
         PlayerSheetOverlay(
             viewModel = playerViewModel,
-            bottomOffset = miniPlayerBottomMargin,
+            bottomOffset = miniPlayerBottomMargin + navBarInset,
             onOpenArtist = { artist -> navController.navigate(Routes.artist(artist)) },
             onOpenAlbum = { album -> navController.navigate(Routes.album(album)) },
             modifier = Modifier.fillMaxSize()

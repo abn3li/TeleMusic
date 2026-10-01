@@ -45,6 +45,10 @@ class MainActivity : ComponentActivity() {
             }
         }
         super.onCreate(savedInstanceState)
+        // Drawn behind the status and navigation bars, so the open player's cover can fill the
+        // status bar. Every other screen keeps clear of the bars (see TgMusicNavGraph).
+        WindowCompat.setDecorFitsSystemWindows(window, false)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) window.isNavigationBarContrastEnforced = false
         askOlderUsersForNotifications()
         setContent {
             val themeMode by app.settingsStore.themeMode.collectAsState()
@@ -59,6 +63,9 @@ class MainActivity : ComponentActivity() {
             // The open player and the welcome pages are always dark, so the bars around them are too.
             val lightBars = light && !SystemBarsState.playerOpen && !SystemBarsState.onboardingOpen
             val groupedPage = SystemBarsState.groupedPages > 0
+            // Read here too (not only inside the effect), so opening the player re-runs it in
+            // the dark theme as well.
+            val playerBars = SystemBarsState.playerOpen
             SideEffect {
                 WindowCompat.getInsetsController(window, view).apply {
                     isAppearanceLightStatusBars = lightBars
@@ -66,10 +73,15 @@ class MainActivity : ComponentActivity() {
                 }
                 val bar = if (lightBars) android.graphics.Color.WHITE else android.graphics.Color.BLACK
                 window.decorView.setBackgroundColor(bar)
+                // The open player shows through both bars: its cover at the top, its colours below.
                 @Suppress("DEPRECATION")
-                window.statusBarColor = if (lightBars && groupedPage) LightPalette.groupedBackground.toArgb() else bar
+                window.statusBarColor = when {
+                    playerBars -> android.graphics.Color.TRANSPARENT
+                    lightBars && groupedPage -> LightPalette.groupedBackground.toArgb()
+                    else -> bar
+                }
                 @Suppress("DEPRECATION")
-                window.navigationBarColor = bar
+                window.navigationBarColor = if (playerBars) android.graphics.Color.TRANSPARENT else bar
             }
             TgMusicTheme(light = light) {
                 Surface(modifier = Modifier.fillMaxSize()) {

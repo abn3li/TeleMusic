@@ -15,6 +15,25 @@ fun googleArtworkAtSize(url: String?, size: Int): String? {
     }
 }
 
+/**
+ * [url] at Now Playing's size ([FULL_ARTWORK_SIZE]) wherever the host serves other sizes from the
+ * same link: YouTube Music, iTunes (600 px when saved) and Deezer (1000 px) change a number in
+ * it, a YouTube video frame (480x360) becomes its largest one (1280x720, missing for some old
+ * videos - see the fallback in Now Playing). Anything else is returned unchanged.
+ */
+fun fullSizeArtwork(url: String?): String? {
+    if (url.isNullOrBlank()) return url
+    val size = FULL_ARTWORK_SIZE
+    return when {
+        "googleusercontent.com" in url -> googleArtworkAtSize(url, size)
+        "mzstatic.com" in url -> url.replace(Regex("""/\d+x\d+bb\.(jpg|png|webp)$"""), "/${size}x${size}bb.jpg")
+        "dzcdn.net" in url -> url.replace(Regex("""/\d+x\d+-"""), "/${size}x$size-")
+        "ytimg.com" in url -> Regex("""ytimg\.com/vi(?:_webp)?/([^/]+)/""").find(url)
+            ?.let { "https://i.ytimg.com/vi/${it.groupValues[1]}/maxresdefault.jpg" } ?: url
+        else -> url
+    }
+}
+
 /** Saved-art size: sharp in lists, the mini player and the notification, still small (~40 KB). */
 const val SAVED_ARTWORK_SIZE = 544
 

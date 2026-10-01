@@ -1017,7 +1017,7 @@ class MusicRepository(
      * never opened while online. Once per download; a no-op for local files. */
     private fun keepArtworkForOffline(artUrl: String?) {
         if (artUrl.isNullOrBlank() || !artUrl.startsWith("http")) return
-        val full = com.abn3li.telemusic.data.browse.googleArtworkAtSize(artUrl, com.abn3li.telemusic.data.browse.FULL_ARTWORK_SIZE)
+        val full = com.abn3li.telemusic.data.browse.fullSizeArtwork(artUrl)
         setOfNotNull(artUrl, full).forEach { url ->
             appContext.imageLoader.enqueue(
                 coil.request.ImageRequest.Builder(appContext)
