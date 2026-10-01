@@ -1,5 +1,8 @@
 package com.abn3li.telemusic.ui.navigation
 
+import com.abn3li.telemusic.ui.theme.LocalPalette
+import com.abn3li.telemusic.ui.theme.paper
+import com.abn3li.telemusic.ui.theme.ink
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.Dispatchers
@@ -427,7 +430,7 @@ private fun AppBottomNavBar(
     Column(
         modifier = modifier
             .fillMaxWidth()
-            .background(NavFade)
+            .background(navFade(paper))
             .windowInsetsPadding(WindowInsets.navigationBars)
     ) {
         Spacer(Modifier.height(NavBarFadeHeight - NavBarHeight))
@@ -496,12 +499,6 @@ private fun NavBarItem(item: NavigationItem, selected: Boolean, onClick: () -> U
 private val NavBarHeight = 64.dp
 // The 2.2 fade, unchanged: the page scrolls away under the items into black.
 private val NavBarFadeHeight = 96.dp
-private val NavFade = Brush.verticalGradient(
-    0f to Color.Transparent,
-    0.3f to Color.Black.copy(alpha = 0.6f),
-    0.55f to Color.Black.copy(alpha = 0.92f),
-    1f to Color.Black
-)
 private val NavIconSize = 25.dp
 private val NavInactive = Color(0xFF8E8E93)
 
@@ -537,4 +534,15 @@ private fun DownloadLocationPrompt(app: TgMusicApp) {
             )
         )
     }
+}
+
+/** The fade behind the bottom bar, into the current theme's page colour (black or white). */
+@Composable
+private fun navFade(page: Color): Brush = remember(page) {
+    Brush.verticalGradient(
+        0f to Color.Transparent,
+        0.3f to page.copy(alpha = 0.6f),
+        0.55f to page.copy(alpha = 0.92f),
+        1f to page
+    )
 }

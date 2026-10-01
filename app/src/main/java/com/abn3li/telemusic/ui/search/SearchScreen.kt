@@ -1,5 +1,8 @@
 package com.abn3li.telemusic.ui.search
 
+import com.abn3li.telemusic.ui.theme.LocalPalette
+import com.abn3li.telemusic.ui.theme.paper
+import com.abn3li.telemusic.ui.theme.ink
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.foundation.combinedClickable
 import android.net.Uri
@@ -293,7 +296,7 @@ private fun ResultsScreen(
         val selected = SearchSource.entries[pagerState.currentPage]
         if (selected != source) onSource(selected)
     }
-    Box(Modifier.fillMaxSize().background(Color.Black)) {
+    Box(Modifier.fillMaxSize().background(paper)) {
         HorizontalPager(state = pagerState, modifier = Modifier.fillMaxSize()) { page ->
             LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(top = ResultsHeaderHeight, bottom = LocalMiniPlayerInset.current + 24.dp)) {
                 if (page == 0) youtubeResults(section, state, loading, onSection, openCollection, play, playNext, download)
@@ -347,23 +350,23 @@ private fun ResultsHeader(query: String, source: SearchSource, onQuery: (String)
         rootView.viewTreeObserver.addOnGlobalLayoutListener(listener)
         onDispose { rootView.viewTreeObserver.removeOnGlobalLayoutListener(listener) }
     }
-    Column(Modifier.fillMaxWidth().height(ResultsHeaderHeight).background(Color.Black).padding(horizontal = 18.dp).padding(top = 5.dp, bottom = 9.dp),
+    Column(Modifier.fillMaxWidth().height(ResultsHeaderHeight).background(paper).padding(horizontal = 18.dp).padding(top = 5.dp, bottom = 9.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             Row(Modifier.weight(1f).height(44.dp).clip(RoundedCornerShape(10.dp)).background(LibraryFieldColor).padding(horizontal = 10.dp),
                 verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Rounded.Search, null, tint = Color.White.copy(.55f), modifier = Modifier.size(19.dp)); Spacer(Modifier.width(8.dp))
+                Icon(Icons.Rounded.Search, null, tint = ink.copy(.55f), modifier = Modifier.size(19.dp)); Spacer(Modifier.width(8.dp))
                 BasicTextField(fieldValue, { value ->
                     fieldValue = value
                     onQuery(value.text)
-                }, Modifier.weight(1f).focusRequester(focus), textStyle = TextStyle(Color.White, fontSize = 17.sp),
+                }, Modifier.weight(1f).focusRequester(focus), textStyle = TextStyle(ink, fontSize = 17.sp),
                     cursorBrush = SolidColor(AppAccent), singleLine = true, keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
                     keyboardActions = KeyboardActions(onSearch = {
                         onSearch()
                         focusManager.clearFocus()
                         keyboard?.hide()
                     }))
-                Icon(Icons.Rounded.Cancel, "Clear", tint = Color.White.copy(.45f), modifier = Modifier.size(20.dp).clickable { onQuery("") })
+                Icon(Icons.Rounded.Cancel, "Clear", tint = ink.copy(.45f), modifier = Modifier.size(20.dp).clickable { onQuery("") })
             }
             Text("Cancel", color = AppAccent, fontSize = 16.sp, modifier = Modifier.clickable(onClick = onCancel))
         }
@@ -372,10 +375,10 @@ private fun ResultsHeader(query: String, source: SearchSource, onQuery: (String)
             SearchSource.entries.forEach { item ->
                 val selected = item == source
                 Box(Modifier.weight(1f).height(34.dp).clip(RoundedCornerShape(7.dp))
-                    .background(if (selected) Color(0xFF3A3A3E) else Color.Transparent)
+                    .background(if (selected) LocalPalette.current.raised else Color.Transparent)
                     .clickable(remember { MutableInteractionSource() }, null) { onSource(item) }, contentAlignment = Alignment.Center) {
                     Text(if (item == SearchSource.YOUTUBE) "YouTube Music" else "Your Library",
-                        color = if (selected) Color.White else Color.White.copy(.65f), fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                        color = if (selected) ink else ink.copy(.65f), fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
                 }
             }
         }
@@ -508,8 +511,8 @@ private fun YoutubeSongRow(result: YtDlpSearchResult, state: YouTubeDownloadUiSt
         haptics.performHapticFeedback(HapticFeedbackType.LongPress); menu = true }).padding(start = 18.dp, end = 8.dp, top = 5.dp, bottom = 5.dp), verticalAlignment = Alignment.CenterVertically) {
         Thumbnail(result.thumbnailUrl, Modifier.size(50.dp), 5, 150)
         Column(Modifier.weight(1f).padding(start = 12.dp, end = 6.dp)) {
-            Text(result.title, color = Color.White, fontSize = 16.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Text(prefix + result.artist, color = Color.White.copy(.56f), fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(result.title, color = ink, fontSize = 16.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(prefix + result.artist, color = ink.copy(.56f), fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
         if (showDownload) Box(Modifier.size(44.dp), contentAlignment = Alignment.Center) {
             when { downloading -> CalmSpinner(Modifier.size(20.dp), AppAccent, 2.dp)
@@ -538,10 +541,10 @@ private fun CollectionRow(title: String, subtitle: String, round: Boolean, art: 
     Row(Modifier.fillMaxWidth().heightIn(min = 60.dp).clickable(onClick = onClick).padding(start = 18.dp, end = 16.dp, top = 5.dp, bottom = 5.dp), verticalAlignment = Alignment.CenterVertically) {
         if (round) ArtistAvatar(art, 50) else CoverTile(art, Modifier.size(50.dp), 5, Icons.AutoMirrored.Rounded.QueueMusic)
         Column(Modifier.weight(1f).padding(start = 12.dp, end = 8.dp)) {
-            Text(title, color = Color.White, fontSize = 16.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Text(subtitle, color = Color.White.copy(.56f), fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(title, color = ink, fontSize = 16.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(subtitle, color = ink.copy(.56f), fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
-        Icon(Icons.AutoMirrored.Rounded.ArrowForwardIos, null, tint = Color.White.copy(.35f), modifier = Modifier.size(14.dp))
+        Icon(Icons.AutoMirrored.Rounded.ArrowForwardIos, null, tint = ink.copy(.35f), modifier = Modifier.size(14.dp))
     }
 }
 
@@ -549,8 +552,8 @@ private fun CollectionRow(title: String, subtitle: String, round: Boolean, art: 
 private fun MediaCard(title: String, subtitle: String, round: Boolean, art: String?, onClick: () -> Unit) {
     Column(Modifier.width(142.dp).clickable(onClick = onClick), horizontalAlignment = if (round) Alignment.CenterHorizontally else Alignment.Start) {
         if (round) ArtistAvatar(art, 142) else CoverTile(art, Modifier.fillMaxWidth().aspectRatio(1f), 8)
-        Text(title, color = Color.White.copy(.94f), fontSize = 15.sp, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 8.dp))
-        Text(subtitle, color = Color.White.copy(.56f), fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Text(title, color = ink.copy(.94f), fontSize = 15.sp, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 8.dp))
+        Text(subtitle, color = ink.copy(.56f), fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
 }
 
@@ -562,7 +565,7 @@ private fun ImportedCard(p: ImportedPlaylistEntity, open: () -> Unit, remove: ()
                 Icon(Icons.Rounded.Close, "Remove", tint = Color.White, modifier = Modifier.size(15.dp))
             }
         }
-        Text(p.title, color = Color.White.copy(.94f), fontSize = 15.sp, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 8.dp))
+        Text(p.title, color = ink.copy(.94f), fontSize = 15.sp, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 8.dp))
     }
 }
 
@@ -574,7 +577,7 @@ private fun ImportedCard(p: ImportedPlaylistEntity, open: () -> Unit, remove: ()
 @Composable
 private fun Header(title: String, seeAll: (() -> Unit)? = null, action: (@Composable () -> Unit)? = null, compact: Boolean = false) {
     Row(Modifier.fillMaxWidth().padding(horizontal = 18.dp).padding(top = if (compact) 16.dp else 22.dp, bottom = if (compact) 6.dp else 10.dp), verticalAlignment = Alignment.CenterVertically) {
-        Text(title, color = Color.White, fontSize = 21.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+        Text(title, color = ink, fontSize = 21.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
         seeAll?.let { Text("See All", color = AppAccent, fontSize = 15.sp, modifier = Modifier.clickable(onClick = it)) }; action?.invoke()
     }
 }

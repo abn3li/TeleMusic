@@ -1,5 +1,8 @@
 package com.abn3li.telemusic.ui.download
 
+import com.abn3li.telemusic.ui.theme.LocalPalette
+import com.abn3li.telemusic.ui.theme.paper
+import com.abn3li.telemusic.ui.theme.ink
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -112,9 +115,9 @@ fun BrowseCollectionScreen(
                 Column(Modifier.fillMaxWidth().clickable { onOpenCollection(collection) }) {
                     Thumbnail(collection.thumbnailUrl, Modifier.fillMaxWidth().aspectRatio(1f), corner = 7, requestPx = 300)
                     Spacer(Modifier.height(5.dp))
-                    Text(collection.title, color = Color.White.copy(alpha = 0.9f), fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(collection.title, color = ink.copy(alpha = 0.9f), fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     collection.subtitle?.let {
-                        Text(it, color = Color.White.copy(alpha = 0.6f), fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text(it, color = ink.copy(alpha = 0.6f), fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
                 }
             }
@@ -294,7 +297,7 @@ internal fun CollectionCard(item: BrowseCollection, onClick: () -> Unit) {
         ) {
             Text(
                 item.title,
-                color = Color.White.copy(alpha = 0.94f),
+                color = ink.copy(alpha = 0.94f),
                 fontSize = 15.sp,
                 lineHeight = CardTitleLineHeight,
                 maxLines = 2,
@@ -304,7 +307,7 @@ internal fun CollectionCard(item: BrowseCollection, onClick: () -> Unit) {
             item.subtitle?.let {
                 Text(
                     it,
-                    color = Color.White.copy(alpha = 0.6f),
+                    color = ink.copy(alpha = 0.6f),
                     fontSize = 13.sp,
                     lineHeight = CardSubtitleLineHeight,
                     maxLines = 1,

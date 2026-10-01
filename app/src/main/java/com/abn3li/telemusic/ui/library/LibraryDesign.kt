@@ -1,5 +1,9 @@
 package com.abn3li.telemusic.ui.library
 
+import androidx.compose.runtime.CompositionLocalProvider
+import com.abn3li.telemusic.ui.theme.LocalPalette
+import com.abn3li.telemusic.ui.theme.paper
+import com.abn3li.telemusic.ui.theme.ink
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
@@ -104,6 +108,26 @@ internal fun LargeTitleList(
     // Taller when the sticky part holds more than the search field (the search page's filter pills).
     stickyHeight: Dp = SearchStickyHeight,
     overlay: (@Composable BoxScope.() -> Unit)? = null,
+    // A Settings-style page of grouped cards: grey page, white cards in the light theme.
+    grouped: Boolean = false,
+    content: LazyListScope.() -> Unit
+) {
+    val palette = LocalPalette.current
+    CompositionLocalProvider(LocalPalette provides if (grouped) palette.groupedPage() else palette) {
+        LargeTitleListBody(title, onBack, listState, titleTrailing, barActions, stickyContent, stickyHeight, overlay, content)
+    }
+}
+
+@Composable
+private fun LargeTitleListBody(
+    title: String,
+    onBack: (() -> Unit)?,
+    listState: LazyListState,
+    titleTrailing: (@Composable () -> Unit)?,
+    barActions: (@Composable RowScope.() -> Unit)?,
+    stickyContent: (@Composable () -> Unit)?,
+    stickyHeight: Dp,
+    overlay: (@Composable BoxScope.() -> Unit)?,
     content: LazyListScope.() -> Unit
 ) {
     var barHeightPx by remember { mutableIntStateOf(0) }
@@ -126,7 +150,7 @@ internal fun LargeTitleList(
     }
     val bottomInset = LocalMiniPlayerInset.current + 24.dp
 
-    Box(Modifier.fillMaxSize().background(Color.Black)) {
+    Box(Modifier.fillMaxSize().background(paper)) {
         LazyColumn(
             state = listState,
             modifier = Modifier.fillMaxSize(),
@@ -143,7 +167,7 @@ internal fun LargeTitleList(
                     .offset { IntOffset(0, stickyOffset) }
                     .fillMaxWidth()
                     .height(stickyHeight)
-                    .background(Color.Black)
+                    .background(paper)
             ) { stickyContent() }
         }
         overlay?.invoke(this)
@@ -187,7 +211,7 @@ internal fun LargeTitleGrid(
     }
     val bottomInset = LocalMiniPlayerInset.current + 24.dp
 
-    Box(Modifier.fillMaxSize().background(Color.Black)) {
+    Box(Modifier.fillMaxSize().background(paper)) {
         LazyVerticalGrid(
             state = gridState,
             columns = GridCells.Fixed(2),
@@ -209,7 +233,7 @@ internal fun LargeTitleGrid(
                     .offset { IntOffset(0, stickyOffset) }
                     .fillMaxWidth()
                     .height(SearchStickyHeight)
-                    .background(Color.Black)
+                    .background(paper)
             ) { stickyContent() }
         }
         LibraryTitleBar(
@@ -235,7 +259,7 @@ private fun LargeTitle(title: String, trailing: (@Composable () -> Unit)?, alpha
     ) {
         Text(
             title,
-            color = Color.White,
+            color = ink,
             fontSize = 35.sp,
             lineHeight = 40.sp,
             fontWeight = FontWeight.Bold,
@@ -256,7 +280,7 @@ private fun LibraryTitleBar(
 ) {
     // Always opaque: the page is black anyway, and fading this in only once the large title had
     // scrolled away let rows flash through the bar for a few frames on a fast fling.
-    Box(modifier.fillMaxWidth().height(LibraryBarHeight).background(Color.Black)) {
+    Box(modifier.fillMaxWidth().height(LibraryBarHeight).background(paper)) {
         if (onBack != null) {
             Icon(
                 Icons.AutoMirrored.Rounded.ArrowBackIos,
@@ -275,7 +299,7 @@ private fun LibraryTitleBar(
             exit = fadeOut(tween(120)),
             modifier = Modifier.align(Alignment.Center).padding(horizontal = 70.dp)
         ) {
-            Text(title, color = Color.White, fontSize = 18.5.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(title, color = ink, fontSize = 18.5.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
         if (actions != null) {
             Row(
@@ -290,7 +314,7 @@ private fun LibraryTitleBar(
             exit = fadeOut(tween(120)),
             modifier = Modifier.align(Alignment.BottomCenter)
         ) {
-            Spacer(Modifier.fillMaxWidth().height(1.dp).background(Color.White.copy(alpha = 0.12f)))
+            Spacer(Modifier.fillMaxWidth().height(1.dp).background(ink.copy(alpha = 0.12f)))
         }
     }
 }
@@ -336,13 +360,13 @@ internal fun LibrarySearchField(
     ) {
         Box(Modifier.weight(1f)) {
             if (text.isEmpty()) {
-                Text(placeholder, color = Color.White.copy(alpha = 0.6f), fontSize = 17.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(placeholder, color = ink.copy(alpha = 0.6f), fontSize = 17.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
             BasicTextField(
                 value = text,
                 onValueChange = onValueChange,
                 singleLine = true,
-                textStyle = TextStyle(color = Color.White, fontSize = 17.sp),
+                textStyle = TextStyle(color = ink, fontSize = 17.sp),
                 cursorBrush = SolidColor(AppAccent),
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
                 keyboardActions = KeyboardActions(onSearch = { onSearch(); keyboard?.hide() }),
@@ -353,7 +377,7 @@ internal fun LibrarySearchField(
             Icon(
                 Icons.Rounded.Cancel,
                 contentDescription = "Clear",
-                tint = Color.White.copy(alpha = 0.45f),
+                tint = ink.copy(alpha = 0.45f),
                 modifier = Modifier
                     .size(20.dp)
                     .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) { onValueChange("") }
@@ -379,7 +403,7 @@ internal fun ChevronIcon(modifier: Modifier = Modifier) {
     Icon(
         Icons.AutoMirrored.Rounded.ArrowForwardIos,
         contentDescription = null,
-        tint = Color.White.copy(alpha = 0.3f),
+        tint = ink.copy(alpha = 0.3f),
         modifier = modifier.size(14.dp)
     )
 }
@@ -395,7 +419,7 @@ internal fun LibraryLinkRow(icon: ImageVector, label: String, onClick: () -> Uni
         verticalAlignment = Alignment.CenterVertically
     ) {
         Icon(icon, contentDescription = null, tint = AppAccent, modifier = Modifier.padding(start = 18.dp, end = 12.dp).size(30.dp))
-        Text(label, color = Color.White, fontSize = 20.sp, modifier = Modifier.weight(1f))
+        Text(label, color = ink, fontSize = 20.sp, modifier = Modifier.weight(1f))
         ChevronIcon(Modifier.padding(end = 21.dp))
     }
 }
@@ -491,7 +515,7 @@ internal fun LibraryFloatingMenu(
                         shadowElevation = 40f
                         clip = true
                     }
-                    .background(Color(0xFF161616)),
+                    .background(LocalPalette.current.alert),
                 content = content
             )
         }
@@ -509,7 +533,7 @@ internal fun LibraryMenuItem(
     val color = when {
         destructive -> Color(0xFFFF453A)
         selected -> AppAccent
-        else -> Color.White
+        else -> ink
     }
     Row(
         Modifier
@@ -526,10 +550,10 @@ internal fun LibraryMenuItem(
 
 @Composable
 internal fun LibraryMenuDivider() {
-    Spacer(Modifier.fillMaxWidth().height(0.65.dp).background(Color.White.copy(alpha = 0.1f)))
+    Spacer(Modifier.fillMaxWidth().height(0.65.dp).background(ink.copy(alpha = 0.1f)))
 }
 
 @Composable
 internal fun LibraryMenuGroupGap() {
-    Spacer(Modifier.fillMaxWidth().height(8.dp).background(Color.Black.copy(alpha = 0.55f)))
+    Spacer(Modifier.fillMaxWidth().height(8.dp).background(Color.Black.copy(alpha = if (LocalPalette.current.isLight) 0.06f else 0.55f)))
 }

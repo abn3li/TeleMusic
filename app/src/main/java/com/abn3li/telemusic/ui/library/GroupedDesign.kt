@@ -1,5 +1,9 @@
 package com.abn3li.telemusic.ui.library
 
+import androidx.compose.runtime.ReadOnlyComposable
+import com.abn3li.telemusic.ui.theme.LocalPalette
+import com.abn3li.telemusic.ui.theme.paper
+import com.abn3li.telemusic.ui.theme.ink
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.spring
@@ -49,7 +53,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
 // iOS-style grouped lists (Settings, Sync, YouTube).
-internal val GroupCardColor = Color(0xFF1C1C1E)
+internal val GroupCardColor: Color
+    @Composable @ReadOnlyComposable get() = LocalPalette.current.field
 internal val GroupLabelColor = Color(0xFF8E8D93)
 internal val DestructiveRed = Color(0xFFFF453A)
 
@@ -97,7 +102,7 @@ internal fun GroupDivider(start: Dp = 15.dp) {
             .fillMaxWidth()
             .padding(start = start)
             .height(0.5.dp)
-            .background(Color.White.copy(alpha = 0.12f))
+            .background(ink.copy(alpha = 0.12f))
     )
 }
 
@@ -121,7 +126,7 @@ internal fun GroupRow(
     title: String,
     desc: String? = null,
     icon: (@Composable () -> Unit)? = null,
-    titleColor: Color = Color.White,
+    titleColor: Color = ink,
     enabled: Boolean = true,
     onClick: (() -> Unit)? = null,
     trailing: (@Composable () -> Unit)? = null
@@ -142,7 +147,7 @@ internal fun GroupRow(
         Column(Modifier.weight(1f)) {
             Text(title, color = titleColor, fontSize = 16.5.sp, lineHeight = 20.5.sp)
             if (desc != null) {
-                Text(desc, color = Color.White.copy(alpha = 0.5f), fontSize = 13.2.sp, lineHeight = 16.2.sp)
+                Text(desc, color = ink.copy(alpha = 0.5f), fontSize = 13.2.sp, lineHeight = 16.2.sp)
             }
         }
         if (trailing != null) {
@@ -159,7 +164,7 @@ internal fun GroupValue(text: String?, showChevron: Boolean = true) {
         if (text != null) {
             Text(
                 text,
-                color = Color.White.copy(alpha = 0.45f),
+                color = ink.copy(alpha = 0.45f),
                 fontSize = 15.sp,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
@@ -174,7 +179,7 @@ internal fun GroupValue(text: String?, showChevron: Boolean = true) {
 @Composable
 internal fun GroupSwitch(checked: Boolean, onCheckedChange: (Boolean) -> Unit, enabled: Boolean = true) {
     val haptics = LocalHapticFeedback.current
-    val track by animateColorAsState(if (checked) AppAccent else Color(0xFF39393D), label = "switchTrack")
+    val track by animateColorAsState(if (checked) AppAccent else if (LocalPalette.current.isLight) Color(0xFFE9E9EA) else Color(0xFF39393D), label = "switchTrack")
     val thumbOffset by animateDpAsState(
         if (checked) 20.dp else 0.dp,
         spring(dampingRatio = 0.65f, stiffness = 500f),
@@ -225,7 +230,7 @@ internal fun GroupTextField(
         verticalAlignment = Alignment.CenterVertically
     ) {
         if (label != null) {
-            Text(label, color = Color.White, fontSize = 16.5.sp, modifier = Modifier.width(92.dp))
+            Text(label, color = ink, fontSize = 16.5.sp, modifier = Modifier.width(92.dp))
         }
         if (leading != null) {
             leading()
@@ -233,14 +238,14 @@ internal fun GroupTextField(
         }
         Box(Modifier.weight(1f)) {
             if (value.isEmpty()) {
-                Text(placeholder, color = Color.White.copy(alpha = 0.3f), fontSize = 16.5.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(placeholder, color = ink.copy(alpha = 0.3f), fontSize = 16.5.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
             BasicTextField(
                 value = value,
                 onValueChange = onValueChange,
                 singleLine = true,
                 enabled = enabled,
-                textStyle = TextStyle(color = Color.White, fontSize = 16.5.sp),
+                textStyle = TextStyle(color = ink, fontSize = 16.5.sp),
                 cursorBrush = SolidColor(AppAccent),
                 keyboardOptions = KeyboardOptions(keyboardType = if (password) KeyboardType.Password else keyboardType),
                 visualTransformation = if (password) PasswordVisualTransformation() else VisualTransformation.None,
@@ -283,7 +288,7 @@ internal fun FilterPill(label: String, selected: Boolean, onClick: () -> Unit) {
     val background by animateColorAsState(if (selected) AppAccent else GroupCardColor, label = "pillBg")
     Text(
         label,
-        color = if (selected) Color.White else Color.White.copy(alpha = 0.75f),
+        color = if (selected) Color.White else ink.copy(alpha = 0.75f),
         fontSize = 15.sp,
         modifier = Modifier
             .clip(RoundedCornerShape(50))
@@ -311,8 +316,8 @@ internal fun GroupOption(
         verticalAlignment = Alignment.CenterVertically
     ) {
         Column(Modifier.weight(1f)) {
-            Text(label, color = Color.White, fontSize = 15.5.sp)
-            if (detail != null) Text(detail, color = Color.White.copy(alpha = 0.45f), fontSize = 12.5.sp)
+            Text(label, color = ink, fontSize = 15.5.sp)
+            if (detail != null) Text(detail, color = ink.copy(alpha = 0.45f), fontSize = 12.5.sp)
         }
         if (selected) {
             Spacer(Modifier.width(10.dp))

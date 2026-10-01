@@ -1,5 +1,8 @@
 package com.abn3li.telemusic.ui.library
 
+import com.abn3li.telemusic.ui.theme.LocalPalette
+import com.abn3li.telemusic.ui.theme.paper
+import com.abn3li.telemusic.ui.theme.ink
 import androidx.compose.foundation.border
 import com.abn3li.telemusic.data.local.displayArtwork
 import androidx.compose.ui.graphics.Brush
@@ -197,7 +200,7 @@ fun HomeScreen(
                         ) {
                             ArtistAvatar(artist.albumArtUrl, 84)
                             Spacer(Modifier.height(6.dp))
-                            Text(artist.artist, color = Color.White.copy(alpha = 0.9f), fontSize = 12.5.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Text(artist.artist, color = ink.copy(alpha = 0.9f), fontSize = 12.5.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         }
                     }
                 }
@@ -258,7 +261,7 @@ private fun HomeSectionHeader(title: String, onSeeAll: (() -> Unit)? = null) {
         Modifier.fillMaxWidth().padding(start = 18.dp, end = 18.dp, top = 24.dp, bottom = 10.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Text(title, color = Color.White, fontSize = 21.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+        Text(title, color = ink, fontSize = 21.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
         if (onSeeAll != null) {
             Text(
                 "See All",
@@ -284,7 +287,7 @@ private fun ShortcutButton(label: String, icon: ImageVector, modifier: Modifier,
     ) {
         Icon(icon, contentDescription = null, tint = AppAccent, modifier = Modifier.size(22.dp))
         Spacer(Modifier.height(5.dp))
-        Text(label, color = Color.White.copy(alpha = 0.92f), fontSize = 11.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Text(label, color = ink.copy(alpha = 0.92f), fontSize = 11.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
 }
 
@@ -302,7 +305,7 @@ private fun ContinueListeningCard(song: SongEntity, playing: Boolean, onClick: (
             .heightIn(min = 176.dp)
             .clip(RoundedCornerShape(18.dp))
             // A faint edge, so the card's shape shows on a black OLED page whatever the cover.
-            .border(1.dp, Color.White.copy(alpha = 0.1f), RoundedCornerShape(18.dp))
+            .border(1.dp, ink.copy(alpha = 0.1f), RoundedCornerShape(18.dp))
             .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onClick)
     ) {
         BlurredArtwork(song.displayArtwork, Modifier.matchParentSize(), minBrightness = CARD_MIN_BRIGHTNESS)
@@ -353,8 +356,8 @@ private fun SongShelf(songs: List<SongEntity>, callbacks: LibraryCallbacks) {
             Column(Modifier.width(128.dp).clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) { callbacks.onPlay(ids, index) }) {
                 SongArtwork(song, 128.dp, 6.dp)
                 Spacer(Modifier.height(5.dp))
-                Text(song.title, color = Color.White.copy(alpha = 0.9f), fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Text(song.artist, color = Color.White.copy(alpha = 0.55f), fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(song.title, color = ink.copy(alpha = 0.9f), fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(song.artist, color = ink.copy(alpha = 0.55f), fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
         }
     }

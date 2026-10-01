@@ -193,6 +193,17 @@ class AppSettingsStore(context: Context) {
         get() = prefs.getBoolean(KEY_HIDE_DOWNLOADED, false)
         set(value) = prefs.edit().putBoolean(KEY_HIDE_DOWNLOADED, value).apply()
 
+    // Dark, Light or follow the phone. A flow so the whole app recolours the moment it changes.
+    private val _themeMode = MutableStateFlow(
+        runCatching { ThemeMode.valueOf(prefs.getString(KEY_THEME_MODE, null) ?: ThemeMode.DARK.name) }.getOrDefault(ThemeMode.DARK)
+    )
+    val themeMode: StateFlow<ThemeMode> = _themeMode
+
+    fun setThemeMode(mode: ThemeMode) {
+        prefs.edit().putString(KEY_THEME_MODE, mode.name).apply()
+        _themeMode.value = mode
+    }
+
     // A flow rather than plain getters: the player is mounted once at the nav root and has to
     // react the moment one of these is flipped in Settings.
     private val _playerEffects = MutableStateFlow(
@@ -215,6 +226,7 @@ class AppSettingsStore(context: Context) {
     }
 
     companion object {
+        private const val KEY_THEME_MODE = "theme_mode"
         private const val KEY_LYRICS_GLOW = "player_lyrics_glow"
         private const val KEY_LYRICS_BLUR = "player_lyrics_blur"
         private const val KEY_ANIMATED_BACKGROUND = "player_animated_background"
@@ -264,3 +276,6 @@ class AppSettingsStore(context: Context) {
         }
     }
 }
+
+/** Settings > Appearance. Dark is the default, as the app always looked. */
+enum class ThemeMode(val label: String) { DARK("Dark"), LIGHT("Light"), SYSTEM("System") }

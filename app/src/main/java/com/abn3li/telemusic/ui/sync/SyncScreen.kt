@@ -1,5 +1,8 @@
 package com.abn3li.telemusic.ui.sync
 
+import com.abn3li.telemusic.ui.theme.LocalPalette
+import com.abn3li.telemusic.ui.theme.paper
+import com.abn3li.telemusic.ui.theme.ink
 import com.abn3li.telemusic.ui.library.CalmSpinner
 import com.abn3li.telemusic.ui.library.AlertColor
 import androidx.compose.foundation.layout.height
@@ -135,6 +138,7 @@ fun SyncScreen(onBack: () -> Unit) {
     LargeTitleList(
         title = "Sync",
         onBack = onBack,
+        grouped = true,
         stickyContent = if (ready) {
             { LibrarySearchField(state.searchQuery, "Search Chats", viewModel::setSearchQuery) }
         } else null
@@ -159,7 +163,7 @@ fun SyncScreen(onBack: () -> Unit) {
                                 TelegramConnectionState.DISCONNECTED -> "Disconnected"
                                 else -> "Connecting…"
                             },
-                            color = if (connection == TelegramConnectionState.DISCONNECTED) DestructiveRed else Color.White,
+                            color = if (connection == TelegramConnectionState.DISCONNECTED) DestructiveRed else ink,
                             fontSize = 15.sp
                         )
                     }
@@ -178,7 +182,7 @@ fun SyncScreen(onBack: () -> Unit) {
                             CalmSpinner(color = AppAccent, strokeWidth = 2.dp, modifier = Modifier.size(18.dp))
                             Spacer(Modifier.size(12.dp))
                         }
-                        Text(progress, color = Color.White, fontSize = 15.sp, maxLines = 3, overflow = TextOverflow.Ellipsis)
+                        Text(progress, color = ink, fontSize = 15.sp, maxLines = 3, overflow = TextOverflow.Ellipsis)
                     }
                 }
             }
@@ -238,7 +242,7 @@ private fun PhoneStep(viewModel: SyncViewModel) {
             placeholder = "555 123 4567",
             keyboardType = KeyboardType.Phone,
             enabled = !isSubmitting,
-            leading = { Text(selectedCountry.dialCode, color = Color.White, fontSize = 16.5.sp) }
+            leading = { Text(selectedCountry.dialCode, color = ink, fontSize = 16.5.sp) }
         )
         GroupDivider()
         GroupActionRow("Continue", enabled = nationalNumber.any { it.isDigit() }, loading = isSubmitting) {
@@ -284,7 +288,7 @@ private fun CountryPickerDialog(selected: Country, onDismiss: () -> Unit, onSele
                         .clickable(onClick = onDismiss)
                         .padding(horizontal = 16.dp, vertical = 8.dp)
                 )
-                Text("Country", color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.align(Alignment.Center))
+                Text("Country", color = ink, fontSize = 17.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.align(Alignment.Center))
             }
             Row(
                 Modifier
@@ -293,25 +297,25 @@ private fun CountryPickerDialog(selected: Country, onDismiss: () -> Unit, onSele
                     .padding(bottom = 10.dp)
                     .height(38.dp)
                     .clip(RoundedCornerShape(10.dp))
-                    .background(Color(0xFF1A1A1C))
+                    .background(LocalPalette.current.field)
                     .padding(horizontal = 9.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Icon(Icons.Rounded.Search, contentDescription = null, tint = Color.White.copy(alpha = 0.5f), modifier = Modifier.size(20.dp))
+                Icon(Icons.Rounded.Search, contentDescription = null, tint = ink.copy(alpha = 0.5f), modifier = Modifier.size(20.dp))
                 Spacer(Modifier.width(6.dp))
                 Box(Modifier.weight(1f)) {
-                    if (query.isEmpty()) Text("Search", color = Color.White.copy(alpha = 0.45f), fontSize = 16.sp)
+                    if (query.isEmpty()) Text("Search", color = ink.copy(alpha = 0.45f), fontSize = 16.sp)
                     BasicTextField(
                         value = query,
                         onValueChange = { query = it },
                         singleLine = true,
-                        textStyle = TextStyle(color = Color.White, fontSize = 16.sp),
+                        textStyle = TextStyle(color = ink, fontSize = 16.sp),
                         cursorBrush = SolidColor(AppAccent),
                         modifier = Modifier.fillMaxWidth()
                     )
                 }
             }
-            Box(Modifier.fillMaxWidth().height(0.5.dp).background(Color.White.copy(alpha = 0.14f)))
+            Box(Modifier.fillMaxWidth().height(0.5.dp).background(ink.copy(alpha = 0.14f)))
             LazyColumn(Modifier.fillMaxWidth().weight(1f)) {
                 itemsIndexed(filtered, key = { _, country -> country.isoCode }) { index, country ->
                     if (index > 0) GroupDivider(start = 52.dp)
@@ -323,7 +327,7 @@ private fun CountryPickerDialog(selected: Country, onDismiss: () -> Unit, onSele
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(country.flagEmoji, fontSize = 20.sp, modifier = Modifier.width(36.dp))
-                        Text(country.name, color = Color.White, fontSize = 16.5.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                        Text(country.name, color = ink, fontSize = 16.5.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
                         Text(country.dialCode, color = GroupLabelColor, fontSize = 15.sp)
                         Box(Modifier.width(30.dp), contentAlignment = Alignment.CenterEnd) {
                             if (country.isoCode == selected.isoCode) {
@@ -475,8 +479,8 @@ private fun ChatRow(title: String, subtitle: String, icon: ImageVector, tint: Co
             Icon(icon, contentDescription = null, tint = Color.White, modifier = Modifier.size(19.dp))
         }
         Column(Modifier.weight(1f).padding(start = 13.dp)) {
-            Text(title, color = Color.White, fontSize = 16.5.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Text(subtitle, color = Color.White.copy(alpha = 0.5f), fontSize = 13.sp)
+            Text(title, color = ink, fontSize = 16.5.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(subtitle, color = ink.copy(alpha = 0.5f), fontSize = 13.sp)
         }
         ChevronIcon()
     }

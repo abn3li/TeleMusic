@@ -1,5 +1,8 @@
 package com.abn3li.telemusic.ui.spotify
 
+import com.abn3li.telemusic.ui.theme.LocalPalette
+import com.abn3li.telemusic.ui.theme.paper
+import com.abn3li.telemusic.ui.theme.ink
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -158,7 +161,7 @@ fun SpotifyLibraryScreen(onBack: () -> Unit, onOpenPlaylist: (Long, String) -> U
         if (filter.isBlank()) all else all.filter { it.title.contains(filter.trim(), ignoreCase = true) }
     }
 
-    LargeTitleList(title = "Spotify", onBack = onBack) {
+    LargeTitleList(title = "Spotify", onBack = onBack, grouped = true) {
         item("search") {
             GroupCard(Modifier.padding(top = 4.dp)) {
                 GroupTextField(value = filter, onValueChange = { filter = it }, placeholder = "Search")
@@ -168,14 +171,14 @@ fun SpotifyLibraryScreen(onBack: () -> Unit, onOpenPlaylist: (Long, String) -> U
             GroupHeader("Your Spotify Library")
             GroupCard {
                 when {
-                    library.loading && library.playlists.isEmpty() -> GroupRow(title = "Loading…", titleColor = Color.White.copy(alpha = 0.5f))
+                    library.loading && library.playlists.isEmpty() -> GroupRow(title = "Loading…", titleColor = ink.copy(alpha = 0.5f))
                     library.error != null -> GroupRow(
                         title = library.error.orEmpty(),
                         desc = "Tap to try again",
-                        titleColor = Color.White.copy(alpha = 0.7f),
+                        titleColor = ink.copy(alpha = 0.7f),
                         onClick = { account.loadLibrary(force = true) }
                     )
-                    items.isEmpty() -> GroupRow(title = "No matches", titleColor = Color.White.copy(alpha = 0.5f))
+                    items.isEmpty() -> GroupRow(title = "No matches", titleColor = ink.copy(alpha = 0.5f))
                     else -> items.forEachIndexed { index, item ->
                         if (index > 0) GroupDivider(start = 64.dp)
                         val link = linkByKey[item.key]
@@ -270,7 +273,7 @@ private fun LibraryRow(
         Cover(item, 36.dp)
         Spacer(Modifier.width(13.dp))
         Column(Modifier.weight(1f)) {
-            Text(item.title, color = Color.White, fontSize = 16.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(item.title, color = ink, fontSize = 16.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
             val subtitle = when {
                 progress != null && progress.total == 0 -> "Reading from Spotify…"
                 progress != null -> "Importing ${progress.done} of ${progress.total}"
@@ -279,10 +282,10 @@ private fun LibraryRow(
                 item.total != null -> "${item.total} songs"
                 else -> "Spotify"
             }
-            Text(subtitle, color = Color.White.copy(alpha = 0.5f), fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(subtitle, color = ink.copy(alpha = 0.5f), fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
             if (progress != null && progress.total > 0) {
                 Spacer(Modifier.height(6.dp))
-                Box(Modifier.fillMaxWidth().height(3.dp).clip(RoundedCornerShape(2.dp)).background(Color(0xFF3A3A3C))) {
+                Box(Modifier.fillMaxWidth().height(3.dp).clip(RoundedCornerShape(2.dp)).background(LocalPalette.current.raised)) {
                     Box(Modifier.fillMaxWidth(progress.done.toFloat() / progress.total).height(3.dp).background(AppAccent))
                 }
             }

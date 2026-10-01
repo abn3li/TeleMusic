@@ -1,5 +1,8 @@
 package com.abn3li.telemusic.ui.nowplaying
 
+import com.abn3li.telemusic.ui.theme.PlayerOpenState
+import androidx.compose.runtime.SideEffect
+import com.abn3li.telemusic.ui.theme.DarkPlayerTheme
 import com.abn3li.telemusic.data.local.listArtwork
 import com.abn3li.telemusic.data.browse.FULL_ARTWORK_SIZE
 import com.abn3li.telemusic.data.browse.googleArtworkAtSize
@@ -132,7 +135,10 @@ fun PlayerSheetOverlay(
     key(isExpanded) {
         BackHandler(enabled = isExpanded) { collapse() }
     }
+    // The player is dark in both themes: the system bars follow it while it's open.
+    SideEffect { PlayerOpenState.isOpen = isExpanded }
 
+    DarkPlayerTheme {
     NowPlayingContent(
         state = stableState,
         viewModel = viewModel,
@@ -164,6 +170,7 @@ fun PlayerSheetOverlay(
                 shadowElevation = if (progress > 0.001f && progress < 0.999f) cardShadowPx else 0f
             }
     )
+    }
 
     // Drawn above the card and carried up with its top edge, fading out as the card opens - so
     // opening reads as the mini player itself turning into the full player.

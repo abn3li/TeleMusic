@@ -1,5 +1,8 @@
 package com.abn3li.telemusic.ui.settings
 
+import com.abn3li.telemusic.ui.theme.LocalPalette
+import com.abn3li.telemusic.ui.theme.paper
+import com.abn3li.telemusic.ui.theme.ink
 import com.abn3li.telemusic.ui.library.CalmSpinner
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -64,7 +67,7 @@ fun ImportLocalMusicSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
         containerColor = GroupCardColor,
-        dragHandle = { BottomSheetDefaults.DragHandle(color = Color.White.copy(alpha = 0.3f)) }
+        dragHandle = { BottomSheetDefaults.DragHandle(color = ink.copy(alpha = 0.3f)) }
     ) {
         Column(
             modifier = Modifier
@@ -76,7 +79,7 @@ fun ImportLocalMusicSheet(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text("Import from Folder", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+                Text("Import from Folder", color = ink, fontSize = 20.sp, fontWeight = FontWeight.Bold)
                 if (selectableCount > 0) {
                     Text(
                         if (allSelected) "Deselect All" else "Select All",
@@ -128,7 +131,7 @@ fun ImportLocalMusicSheet(
                             CheckCircle(checked)
                             Spacer(Modifier.width(14.dp))
                             Column(Modifier.weight(1f)) {
-                                Text(file.title, color = Color.White, fontSize = 16.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                Text(file.title, color = ink, fontSize = 16.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                 Text(
                                     text = if (alreadyImported) "${file.artist} · Already imported" else file.artist,
                                     color = GroupLabelColor,
@@ -160,7 +163,7 @@ fun ImportLocalMusicSheet(
             ) {
                 Text(
                     if (selectedCount > 0) "Import ($selectedCount)" else "Import",
-                    color = Color.White,
+                    color = ink,
                     fontSize = 17.sp,
                     fontWeight = FontWeight.SemiBold
                 )
@@ -177,6 +180,6 @@ private fun CheckCircle(checked: Boolean) {
             Icon(Icons.Rounded.Check, contentDescription = null, tint = Color.White, modifier = Modifier.size(16.dp))
         }
     } else {
-        Box(Modifier.size(24.dp).border(1.5.dp, Color.White.copy(alpha = 0.35f), CircleShape))
+        Box(Modifier.size(24.dp).border(1.5.dp, ink.copy(alpha = 0.35f), CircleShape))
     }
 }

@@ -1,5 +1,8 @@
 package com.abn3li.telemusic.ui.nowplaying
 
+import com.abn3li.telemusic.ui.theme.LocalPalette
+import com.abn3li.telemusic.ui.theme.paper
+import com.abn3li.telemusic.ui.theme.ink
 import com.abn3li.telemusic.ui.library.CalmSpinner
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
@@ -85,7 +88,7 @@ internal val MiniPlayerBarHeight: Dp = 56.dp
 internal val MiniPlayerSideMargin: Dp = 12.dp
 internal val MiniPlayerCorner: Dp = 16.dp
 
-private val MiniPlayerColor = Color(0xFF202023)
+
 private val SwipeEasing = CubicBezierEasing(0.25f, 1f, 0.5f, 1f)
 private const val SKIP_DISTANCE_FRACTION = 0.18f
 private const val SKIP_VELOCITY = 1400f
@@ -139,8 +142,8 @@ fun MiniPlayer(
 
         Surface(
             shape = RoundedCornerShape(MiniPlayerCorner),
-            color = MiniPlayerColor,
-            border = BorderStroke(0.5.dp, Color.White.copy(alpha = 0.08f)),
+            color = LocalPalette.current.miniPlayer,
+            border = BorderStroke(0.5.dp, ink.copy(alpha = 0.08f)),
             shadowElevation = 10.dp,
             modifier = Modifier
                 .fillMaxWidth()
@@ -161,10 +164,10 @@ fun MiniPlayer(
                     Modifier
                         .size(44.dp)
                         .clip(RoundedCornerShape(8.dp))
-                        .background(Color.White.copy(alpha = 0.08f)),
+                        .background(ink.copy(alpha = 0.08f)),
                     contentAlignment = Alignment.Center
                 ) {
-                    Icon(Icons.Rounded.MusicNote, null, tint = Color.White.copy(alpha = 0.4f), modifier = Modifier.size(20.dp))
+                    Icon(Icons.Rounded.MusicNote, null, tint = ink.copy(alpha = 0.4f), modifier = Modifier.size(20.dp))
                     if (!song.displayArtwork.isNullOrEmpty()) {
                         AsyncImage(
                             model = song.displayArtwork,
@@ -215,7 +218,7 @@ fun MiniPlayer(
                 ) {
                     Text(
                         text = song.title,
-                        color = Color.White,
+                        color = ink,
                         fontSize = 15.5.sp,
                         fontWeight = FontWeight.Medium,
                         maxLines = 1,
@@ -238,7 +241,7 @@ fun MiniPlayer(
                     contentAlignment = Alignment.Center
                 ) {
                     if (loading) {
-                        CalmSpinner(color = Color.White, strokeWidth = 2.dp, modifier = Modifier.size(20.dp))
+                        CalmSpinner(color = ink, strokeWidth = 2.dp, modifier = Modifier.size(20.dp))
                     } else {
                         AnimatedContent(
                             targetState = state.isPlaying,
@@ -250,7 +253,7 @@ fun MiniPlayer(
                             Icon(
                                 if (playing) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
                                 contentDescription = if (playing) "Pause" else "Play",
-                                tint = Color.White,
+                                tint = ink,
                                 modifier = Modifier.size(30.dp)
                             )
                         }
@@ -269,7 +272,7 @@ fun MiniPlayer(
                     Icon(
                         if (outputName != null) Icons.Rounded.Headphones else Icons.Rounded.Airplay,
                         contentDescription = "Audio output",
-                        tint = Color.White.copy(alpha = 0.85f),
+                        tint = ink.copy(alpha = 0.85f),
                         modifier = Modifier.size(if (outputName != null) 24.dp else 22.dp)
                     )
                 }

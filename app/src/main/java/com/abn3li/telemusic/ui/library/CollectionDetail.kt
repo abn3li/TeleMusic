@@ -1,5 +1,8 @@
 package com.abn3li.telemusic.ui.library
 
+import com.abn3li.telemusic.ui.theme.LocalPalette
+import com.abn3li.telemusic.ui.theme.paper
+import com.abn3li.telemusic.ui.theme.ink
 import com.abn3li.telemusic.data.local.displayArtwork
 import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.Close
@@ -222,7 +225,7 @@ fun ArtistDetailScreen(artist: String, viewModel: LibraryViewModel, callbacks: L
                             CoverTile(album.albumArtUrl, Modifier.fillMaxWidth().aspectRatio(1f), corner = 8)
                             Text(
                                 album.album,
-                                color = Color.White.copy(alpha = 0.94f),
+                                color = ink.copy(alpha = 0.94f),
                                 fontSize = 15.sp,
                                 lineHeight = 18.sp,
                                 maxLines = 2,
@@ -446,8 +449,8 @@ private fun songCountLine(songs: List<SongEntity>): String {
 
 @Composable
 internal fun BoxScope.HeroImage(url: String?, placeholder: ImageVector) {
-    Box(Modifier.matchParentSize().background(Color(0xFF2A2A2E)), contentAlignment = Alignment.Center) {
-        Icon(placeholder, null, tint = Color.White.copy(alpha = 0.25f), modifier = Modifier.size(120.dp))
+    Box(Modifier.matchParentSize().background(LocalPalette.current.raised), contentAlignment = Alignment.Center) {
+        Icon(placeholder, null, tint = ink.copy(alpha = 0.25f), modifier = Modifier.size(120.dp))
     }
     if (!url.isNullOrEmpty()) {
         AsyncImage(model = url, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.matchParentSize())
@@ -460,12 +463,12 @@ internal fun SectionHeader(title: String, onMore: (() -> Unit)?) {
         Modifier.fillMaxWidth().padding(horizontal = 18.dp).padding(top = 20.dp, bottom = 10.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Text(title, color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+        Text(title, color = ink, fontSize = 24.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
         if (onMore != null) {
             Icon(
                 Icons.AutoMirrored.Rounded.ArrowForwardIos,
                 contentDescription = "See all",
-                tint = Color.White.copy(alpha = 0.7f),
+                tint = ink.copy(alpha = 0.7f),
                 modifier = Modifier
                     .size(26.dp)
                     .clip(CircleShape)
@@ -629,7 +632,7 @@ internal fun <T> DetailPageScaffold(
     }
     val showStrip by remember { derivedStateOf { collapse >= 1f } }
 
-    Box(Modifier.fillMaxSize().background(Color.Black)) {
+    Box(Modifier.fillMaxSize().background(paper)) {
         LazyColumn(state = listState, modifier = Modifier.fillMaxSize()) {
             if (!searching) {
                 item("hero") {
@@ -639,10 +642,10 @@ internal fun <T> DetailPageScaffold(
                             Modifier.matchParentSize().background(
                                 Brush.verticalGradient(
                                     listOf(
-                                        Color.Black.copy(alpha = 0.22f),
-                                        Color.Black.copy(alpha = 0.46f),
-                                        Color.Black.copy(alpha = 0.92f),
-                                        Color.Black
+                                        paper.copy(alpha = 0.22f),
+                                        paper.copy(alpha = 0.46f),
+                                        paper.copy(alpha = 0.92f),
+                                        paper
                                     )
                                 )
                             )
@@ -655,7 +658,7 @@ internal fun <T> DetailPageScaffold(
                             Spacer(Modifier.weight(1f))
                             Text(
                                 title,
-                                color = Color.White,
+                                color = ink,
                                 fontSize = 31.sp,
                                 lineHeight = 36.sp,
                                 fontWeight = FontWeight.Bold,
@@ -667,7 +670,7 @@ internal fun <T> DetailPageScaffold(
                                 Spacer(Modifier.height(10.dp))
                                 Text(
                                     subtitle,
-                                    color = Color.White,
+                                    color = ink,
                                     fontSize = 18.sp,
                                     fontWeight = FontWeight.Medium,
                                     textAlign = TextAlign.Center,
@@ -679,7 +682,7 @@ internal fun <T> DetailPageScaffold(
                             Spacer(Modifier.height(8.dp))
                             Text(
                                 detailLine,
-                                color = Color.White.copy(alpha = 0.72f),
+                                color = ink.copy(alpha = 0.72f),
                                 fontSize = 14.5.sp,
                                 lineHeight = 20.sp,
                                 textAlign = TextAlign.Center,
@@ -704,7 +707,7 @@ internal fun <T> DetailPageScaffold(
                 item("empty") {
                     Text(
                         if (searching) "No results" else emptyText,
-                        color = Color.White.copy(alpha = 0.55f),
+                        color = ink.copy(alpha = 0.55f),
                         fontSize = 15.sp,
                         modifier = Modifier.padding(horizontal = 20.dp, vertical = 18.dp)
                     )
@@ -775,7 +778,7 @@ internal fun HeroButton(icon: ImageVector, description: String, enabled: Boolean
             },
         contentAlignment = Alignment.Center
     ) {
-        Icon(icon, description, tint = Color.White, modifier = Modifier.size(if (active) 30.dp else 36.dp))
+        Icon(icon, description, tint = ink, modifier = Modifier.size(if (active) 30.dp else 36.dp))
     }
 }
 
@@ -783,7 +786,7 @@ internal fun HeroButton(icon: ImageVector, description: String, enabled: Boolean
  * still icon, not moving bars: an endless animation would keep the screen redrawing. */
 @Composable
 private fun PlaybackStatusLine(playing: Boolean, shuffled: Boolean) {
-    val color = if (shuffled) AppAccent else Color.White.copy(alpha = 0.75f)
+    val color = if (shuffled) AppAccent else ink.copy(alpha = 0.75f)
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
         Icon(Icons.Rounded.GraphicEq, contentDescription = null, tint = color, modifier = Modifier.size(16.dp))
         Text(
@@ -806,17 +809,20 @@ private fun DetailTopBar(
     modifier: Modifier = Modifier
 ) {
     val progress = collapse()
-    val surface = lerp(Color.Black.copy(alpha = 0.34f), Color.White.copy(alpha = 0.08f), progress)
+    // Over the cover the buttons are white on a dark disc; once the bar has filled in with the
+    // page colour they take the theme's own ink.
+    val surface = lerp(Color.Black.copy(alpha = 0.34f), ink.copy(alpha = 0.08f), progress)
+    val barInk = lerp(Color.White, ink, progress)
     var menuOpen by remember { mutableStateOf(false) }
     Box(
         modifier
             .fillMaxWidth()
-            .background(Color.Black.copy(alpha = progress * 0.96f))
+            .background(paper.copy(alpha = progress * 0.96f))
             .padding(horizontal = 16.dp, vertical = 10.dp)
     ) {
         Text(
             title,
-            color = Color.White,
+            color = ink,
             fontSize = 17.sp,
             fontWeight = FontWeight.Bold,
             maxLines = 1,
@@ -835,7 +841,7 @@ private fun DetailTopBar(
                     .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onBack),
                 contentAlignment = Alignment.Center
             ) {
-                Icon(Icons.AutoMirrored.Rounded.ArrowBackIos, "Back", tint = Color.White, modifier = Modifier.padding(start = 5.dp).size(18.dp))
+                Icon(Icons.AutoMirrored.Rounded.ArrowBackIos, "Back", tint = barInk, modifier = Modifier.padding(start = 5.dp).size(18.dp))
             }
             Spacer(Modifier.weight(1f))
             Row(
@@ -850,12 +856,12 @@ private fun DetailTopBar(
                         Icon(
                             if (favorite) Icons.Rounded.Star else Icons.Rounded.StarBorder,
                             contentDescription = "Favorite",
-                            tint = if (favorite) AppAccent else Color.White,
+                            tint = if (favorite) AppAccent else barInk,
                             modifier = Modifier.size(22.dp)
                         )
                     }
                     if (menu != null) {
-                        Spacer(Modifier.width(1.dp).height(18.dp).background(Color.White.copy(alpha = 0.25f)))
+                        Spacer(Modifier.width(1.dp).height(18.dp).background(barInk.copy(alpha = 0.25f)))
                     }
                 }
                 if (menu != null) {
@@ -864,7 +870,7 @@ private fun DetailTopBar(
                             Modifier.size(34.dp).clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) { menuOpen = true },
                             contentAlignment = Alignment.Center
                         ) {
-                            Icon(Icons.Rounded.MoreHoriz, "More", tint = Color.White, modifier = Modifier.size(26.dp))
+                            Icon(Icons.Rounded.MoreHoriz, "More", tint = barInk, modifier = Modifier.size(26.dp))
                         }
                         LibraryFloatingMenu(expanded = menuOpen, onDismiss = { menuOpen = false }) {
                             menu { menuOpen = false }

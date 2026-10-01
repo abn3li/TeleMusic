@@ -1,5 +1,9 @@
 package com.abn3li.telemusic.ui.library
 
+import androidx.compose.runtime.ReadOnlyComposable
+import com.abn3li.telemusic.ui.theme.LocalPalette
+import com.abn3li.telemusic.ui.theme.paper
+import com.abn3li.telemusic.ui.theme.ink
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
@@ -36,8 +40,10 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 
 // iOS-style centered alert, used for every confirmation/input dialog in the app.
-internal val AlertColor = Color(0xFF252527)
-private val AlertHairline = Color.White.copy(alpha = 0.14f)
+internal val AlertColor: Color
+    @Composable @ReadOnlyComposable get() = LocalPalette.current.alert
+private val AlertHairline: Color
+    @Composable @ReadOnlyComposable get() = LocalPalette.current.hairline
 
 internal class AlertAction(
     val label: String,
@@ -71,10 +77,10 @@ internal fun AppAlert(
                 Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 20.dp, bottom = 18.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                Text(title, color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center, lineHeight = 22.sp)
+                Text(title, color = ink, fontSize = 17.sp, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center, lineHeight = 22.sp)
                 if (message != null) {
                     Spacer(Modifier.height(4.dp))
-                    Text(message, color = Color.White.copy(alpha = 0.85f), fontSize = 13.sp, textAlign = TextAlign.Center, lineHeight = 17.sp)
+                    Text(message, color = ink.copy(alpha = 0.85f), fontSize = 13.sp, textAlign = TextAlign.Center, lineHeight = 17.sp)
                 }
                 if (content != null) {
                     Spacer(Modifier.height(14.dp))
@@ -138,19 +144,19 @@ internal fun AlertTextField(
         modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(8.dp))
-            .background(Color(0xFF1A1A1C))
+            .background(LocalPalette.current.field)
             .then(if (isError) Modifier.background(DestructiveRed.copy(alpha = 0.12f)) else Modifier)
             .padding(horizontal = 10.dp, vertical = 9.dp),
         contentAlignment = Alignment.CenterStart
     ) {
         if (value.isEmpty()) {
-            Text(placeholder, color = Color.White.copy(alpha = 0.3f), fontSize = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(placeholder, color = ink.copy(alpha = 0.3f), fontSize = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
         BasicTextField(
             value = value,
             onValueChange = onValueChange,
             singleLine = true,
-            textStyle = TextStyle(color = Color.White, fontSize = 15.sp),
+            textStyle = TextStyle(color = ink, fontSize = 15.sp),
             cursorBrush = SolidColor(AppAccent),
             keyboardOptions = KeyboardOptions(keyboardType = keyboardType),
             modifier = Modifier.fillMaxWidth()
@@ -160,6 +166,6 @@ internal fun AlertTextField(
 
 /** Small note under alert fields (errors, hints). */
 @Composable
-internal fun AlertNote(text: String, color: Color = Color.White.copy(alpha = 0.6f)) {
+internal fun AlertNote(text: String, color: Color = ink.copy(alpha = 0.6f)) {
     Text(text, color = color, fontSize = 12.5.sp, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth().padding(top = 8.dp))
 }

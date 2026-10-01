@@ -1,5 +1,8 @@
 package com.abn3li.telemusic.ui.library
 
+import com.abn3li.telemusic.ui.theme.LocalPalette
+import com.abn3li.telemusic.ui.theme.paper
+import com.abn3li.telemusic.ui.theme.ink
 import com.abn3li.telemusic.data.local.listArtwork
 import com.abn3li.telemusic.data.local.displayArtwork
 import android.widget.Toast
@@ -178,21 +181,21 @@ internal fun LibrarySongRow(
             when (leading) {
                 SongRowLeading.Artwork -> SongArtwork(song, 52.dp, 3.5.dp)
                 is SongRowLeading.TrackNumber -> Box(Modifier.width(24.dp).height(44.dp), contentAlignment = Alignment.Center) {
-                    Text("${leading.number}", color = Color.White.copy(alpha = 0.42f), fontSize = 15.sp, maxLines = 1)
+                    Text("${leading.number}", color = ink.copy(alpha = 0.42f), fontSize = 15.sp, maxLines = 1)
                 }
             }
             Column(Modifier.weight(1f).padding(start = 16.dp, end = 8.dp)) {
-                Text(song.title, color = Color.White, fontSize = 16.sp, lineHeight = 16.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                Text(song.title, color = ink, fontSize = 16.sp, lineHeight = 16.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.padding(bottom = 1.dp))
                 if (subtitle != null) {
-                    Text(subtitle, color = Color.White.copy(alpha = 0.5f), fontSize = 13.sp, lineHeight = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(subtitle, color = ink.copy(alpha = 0.5f), fontSize = 13.sp, lineHeight = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
             }
             when {
                 song.telegramMessageId in actions.downloadingIds ->
-                    CalmSpinner(color = Color.White.copy(alpha = 0.5f), strokeWidth = 1.5.dp, modifier = Modifier.size(14.dp))
+                    CalmSpinner(color = ink.copy(alpha = 0.5f), strokeWidth = 1.5.dp, modifier = Modifier.size(14.dp))
                 song.isExplicitDownload ->
-                    Icon(Icons.Rounded.ArrowCircleDown, contentDescription = "Downloaded", tint = Color.White.copy(alpha = 0.35f), modifier = Modifier.size(16.dp))
+                    Icon(Icons.Rounded.ArrowCircleDown, contentDescription = "Downloaded", tint = ink.copy(alpha = 0.35f), modifier = Modifier.size(16.dp))
             }
         }
     }
@@ -211,7 +214,7 @@ internal fun LibrarySongRow(
 internal fun SwipeToPlayNext(
     onPlayNext: () -> Unit,
     modifier: Modifier = Modifier,
-    rowBackground: Color = Color.Black,
+    rowBackground: Color = paper,
     content: @Composable (Modifier) -> Unit
 ) {
     val haptics = LocalHapticFeedback.current
@@ -288,10 +291,10 @@ internal fun SongArtwork(song: SongEntity, size: Dp, corner: Dp) {
     var fullFailed by remember(song.telegramMessageId) { mutableStateOf(false) }
     val art = if (size >= LARGE_TILE && !fullFailed) song.displayArtwork else song.listArtwork
     Box(
-        Modifier.size(size).clip(RoundedCornerShape(corner)).background(Color(0xFF2A2A2E)),
+        Modifier.size(size).clip(RoundedCornerShape(corner)).background(LocalPalette.current.raised),
         contentAlignment = Alignment.Center
     ) {
-        Icon(Icons.Rounded.MusicNote, null, tint = Color.White.copy(alpha = 0.3f), modifier = Modifier.size(size * 0.45f))
+        Icon(Icons.Rounded.MusicNote, null, tint = ink.copy(alpha = 0.3f), modifier = Modifier.size(size * 0.45f))
         if (!art.isNullOrEmpty()) {
             AsyncImage(
                 model = art, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize(),
@@ -336,7 +339,7 @@ private fun SongContextMenu(song: SongEntity, actions: LibrarySongActions, ancho
         BoxWithConstraints(
             Modifier
                 .fillMaxSize()
-                .background(Color.Black.copy(alpha = 0.18f))
+                .background(paper.copy(alpha = 0.18f))
                 .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) { close() }
         ) {
             val density = LocalDensity.current
@@ -401,10 +404,10 @@ private fun SongContextCard(
         Row(Modifier.fillMaxWidth().height(64.dp).padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
             SongArtwork(song, 44.dp, 6.dp)
             Column(Modifier.weight(1f).padding(start = 10.dp)) {
-                Text(song.title, color = Color.White, fontSize = 14.5.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(song.title, color = ink, fontSize = 14.5.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Text(
                     if (album != null) "${song.artist} · $album" else song.artist,
-                    color = Color.White.copy(alpha = 0.55f),
+                    color = ink.copy(alpha = 0.55f),
                     fontSize = 11.sp,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
@@ -482,8 +485,8 @@ private fun CardItem(
     val rotation by animateFloatAsState(if (expanded) 90f else 0f, spring(dampingRatio = 0.72f, stiffness = 420f), label = "cardChevron")
     val color = when {
         destructive -> Color(0xFFFF453A)
-        !enabled -> Color.White.copy(alpha = 0.4f)
-        else -> Color.White
+        !enabled -> ink.copy(alpha = 0.4f)
+        else -> ink
     }
     Row(
         Modifier
@@ -500,7 +503,7 @@ private fun CardItem(
                 Icon(
                     Icons.AutoMirrored.Rounded.ArrowForwardIos,
                     null,
-                    tint = Color.White.copy(alpha = 0.48f),
+                    tint = ink.copy(alpha = 0.48f),
                     modifier = Modifier.size(11.dp).graphicsLayer { rotationZ = rotation }
                 )
             }
@@ -511,29 +514,29 @@ private fun CardItem(
 
 @Composable
 private fun CardDivider() {
-    Spacer(Modifier.fillMaxWidth().height(0.5.dp).background(Color.White.copy(alpha = 0.08f)))
+    Spacer(Modifier.fillMaxWidth().height(0.5.dp).background(ink.copy(alpha = 0.08f)))
 }
 
 @Composable
 private fun PlaylistPicker(playlists: List<PlaylistEntity>, onPick: (PlaylistEntity) -> Unit, onCreate: (String) -> Unit) {
     var creating by remember { mutableStateOf(false) }
     var name by remember { mutableStateOf("") }
-    Column(Modifier.fillMaxWidth().background(Color.White.copy(alpha = 0.04f))) {
+    Column(Modifier.fillMaxWidth().background(ink.copy(alpha = 0.04f))) {
         if (creating) {
             Row(
                 Modifier.fillMaxWidth().height(42.dp).padding(horizontal = 16.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Box(
-                    Modifier.weight(1f).height(30.dp).clip(RoundedCornerShape(8.dp)).background(Color.White.copy(alpha = 0.08f)).padding(horizontal = 8.dp),
+                    Modifier.weight(1f).height(30.dp).clip(RoundedCornerShape(8.dp)).background(ink.copy(alpha = 0.08f)).padding(horizontal = 8.dp),
                     contentAlignment = Alignment.CenterStart
                 ) {
-                    if (name.isEmpty()) Text("Playlist name", color = Color.White.copy(alpha = 0.45f), fontSize = 12.sp)
+                    if (name.isEmpty()) Text("Playlist name", color = ink.copy(alpha = 0.45f), fontSize = 12.sp)
                     BasicTextField(
                         value = name,
                         onValueChange = { name = it },
                         singleLine = true,
-                        textStyle = TextStyle(color = Color.White, fontSize = 12.sp),
+                        textStyle = TextStyle(color = ink, fontSize = 12.sp),
                         cursorBrush = SolidColor(AppAccent),
                         modifier = Modifier.fillMaxWidth()
                     )
@@ -541,7 +544,7 @@ private fun PlaylistPicker(playlists: List<PlaylistEntity>, onPick: (PlaylistEnt
                 Spacer(Modifier.width(8.dp))
                 Text(
                     "Create",
-                    color = if (name.isNotBlank()) AppAccent else Color.White.copy(alpha = 0.3f),
+                    color = if (name.isNotBlank()) AppAccent else ink.copy(alpha = 0.3f),
                     fontSize = 12.sp,
                     fontWeight = FontWeight.SemiBold,
                     modifier = Modifier.clickable(enabled = name.isNotBlank()) { onCreate(name.trim()) }
@@ -557,14 +560,14 @@ private fun PlaylistPicker(playlists: List<PlaylistEntity>, onPick: (PlaylistEnt
             }
         }
         if (playlists.isEmpty() && !creating) {
-            Text("No playlists yet", color = Color.White.copy(alpha = 0.4f), fontSize = 11.sp, modifier = Modifier.padding(horizontal = 19.dp, vertical = 6.dp))
+            Text("No playlists yet", color = ink.copy(alpha = 0.4f), fontSize = 11.sp, modifier = Modifier.padding(horizontal = 19.dp, vertical = 6.dp))
         }
         playlists.forEach { playlist ->
             Row(
                 Modifier.fillMaxWidth().height(36.dp).clickable { onPick(playlist) }.padding(horizontal = 19.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text(playlist.name, color = Color.White, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(playlist.name, color = ink, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
         }
     }

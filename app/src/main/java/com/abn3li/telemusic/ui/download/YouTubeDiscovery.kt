@@ -1,5 +1,8 @@
 package com.abn3li.telemusic.ui.download
 
+import com.abn3li.telemusic.ui.theme.LocalPalette
+import com.abn3li.telemusic.ui.theme.paper
+import com.abn3li.telemusic.ui.theme.ink
 import com.abn3li.telemusic.ui.library.CalmSpinner
 import com.abn3li.telemusic.repository.SpotifyImportState
 import androidx.compose.ui.text.input.KeyboardType
@@ -75,8 +78,8 @@ internal fun ImportPlaylistPrompt(viewModel: DiscoveryViewModel, onClose: () -> 
 @Composable
 internal fun Thumbnail(url: String?, modifier: Modifier, corner: Int, requestPx: Int) {
     val context = LocalContext.current
-    Box(modifier.clip(RoundedCornerShape(corner.dp)).background(Color(0xFF2A2A2E)), contentAlignment = Alignment.Center) {
-        Icon(Icons.Rounded.MusicNote, null, tint = Color.White.copy(alpha = 0.3f), modifier = Modifier.fillMaxSize(0.4f))
+    Box(modifier.clip(RoundedCornerShape(corner.dp)).background(LocalPalette.current.raised), contentAlignment = Alignment.Center) {
+        Icon(Icons.Rounded.MusicNote, null, tint = ink.copy(alpha = 0.3f), modifier = Modifier.fillMaxSize(0.4f))
         if (url != null) {
             val request = remember(url) { ImageRequest.Builder(context).data(url).size(requestPx, requestPx).build() }
             AsyncImage(model = request, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
@@ -108,15 +111,15 @@ internal fun TrackResultRow(
     ) {
         Thumbnail(thumbnailUrl, Modifier.size(52.dp), corner = 4, requestPx = 150)
         Column(Modifier.weight(1f).padding(start = 16.dp, end = 8.dp)) {
-            Text(title, color = Color.White, fontSize = 16.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Text(artist, color = Color.White.copy(alpha = 0.5f), fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(title, color = ink, fontSize = 16.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(artist, color = ink.copy(alpha = 0.5f), fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
         // Fixed 44dp slots so the row doesn't shift when a button turns into a spinner.
         Box(Modifier.size(44.dp), contentAlignment = Alignment.Center) {
             Icon(
                 Icons.Rounded.PlayArrow,
                 contentDescription = "Play",
-                tint = Color.White,
+                tint = ink,
                 modifier = Modifier.size(26.dp).clickable(
                     interactionSource = remember { MutableInteractionSource() },
                     indication = null,

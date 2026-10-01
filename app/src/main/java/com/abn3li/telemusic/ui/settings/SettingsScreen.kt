@@ -1,5 +1,9 @@
 package com.abn3li.telemusic.ui.settings
 
+import com.abn3li.telemusic.data.settings.ThemeMode
+import com.abn3li.telemusic.ui.theme.LocalPalette
+import com.abn3li.telemusic.ui.theme.paper
+import com.abn3li.telemusic.ui.theme.ink
 import com.abn3li.telemusic.ui.library.AppAlert
 import com.abn3li.telemusic.ui.library.AlertAction
 import android.content.Intent
@@ -97,6 +101,7 @@ fun SettingsScreen(onBack: () -> Unit, onOpenSpotify: () -> Unit, onLoggedOut: (
 
     var enrichEnabled by remember { mutableStateOf(app.settingsStore.enrichMetadataOnSync) }
     val playerEffects by app.settingsStore.playerEffects.collectAsState()
+    val themeMode by app.settingsStore.themeMode.collectAsState()
     var cacheLimit by remember { mutableStateOf(app.settingsStore.maxCacheSizeBytes) }
     var cacheOptionsOpen by remember { mutableStateOf(false) }
 
@@ -215,13 +220,23 @@ fun SettingsScreen(onBack: () -> Unit, onOpenSpotify: () -> Unit, onLoggedOut: (
     }
     var downloadOptionsOpen by remember { mutableStateOf(false) }
 
-    LargeTitleList(title = "Settings", onBack = onBack) {
+    LargeTitleList(title = "Settings", onBack = onBack, grouped = true) {
         item("spotify") {
             GroupHeader("Spotify")
             com.abn3li.telemusic.ui.spotify.SpotifySettingsGroup(
                 onOpenPlaylists = onOpenSpotify,
                 onHelp = { uriHandler.openUri("https://developer.spotify.com/dashboard") }
             )
+        }
+
+        item("appearance") {
+            GroupHeader("Appearance")
+            GroupCard {
+                ThemeMode.entries.forEachIndexed { index, mode ->
+                    if (index > 0) GroupDivider()
+                    GroupOption(label = mode.label, selected = themeMode == mode, startPadding = 15) { app.settingsStore.setThemeMode(mode) }
+                }
+            }
         }
 
         item("now_playing") {
@@ -540,8 +555,8 @@ private fun LinkRow(title: String, value: String, icon: androidx.compose.ui.grap
         onClick = onClick,
         trailing = {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(value, color = Color.White.copy(alpha = 0.45f), fontSize = 15.sp, modifier = Modifier.padding(end = 6.dp))
-                Icon(Icons.AutoMirrored.Rounded.OpenInNew, null, tint = Color.White.copy(alpha = 0.3f), modifier = Modifier.size(15.dp))
+                Text(value, color = ink.copy(alpha = 0.45f), fontSize = 15.sp, modifier = Modifier.padding(end = 6.dp))
+                Icon(Icons.AutoMirrored.Rounded.OpenInNew, null, tint = ink.copy(alpha = 0.3f), modifier = Modifier.size(15.dp))
             }
         }
     )

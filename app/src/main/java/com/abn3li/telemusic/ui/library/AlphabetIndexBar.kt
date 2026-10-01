@@ -1,5 +1,8 @@
 package com.abn3li.telemusic.ui.library
 
+import com.abn3li.telemusic.ui.theme.LocalPalette
+import com.abn3li.telemusic.ui.theme.paper
+import com.abn3li.telemusic.ui.theme.ink
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
@@ -96,7 +99,7 @@ internal fun AlphabetIndexBar(letters: List<String>, onLetter: (String) -> Unit,
                 .width(StripWidth)
                 .onPlaced { stripTop.floatValue = it.positionInParent().y }
                 .clip(RoundedCornerShape(10.dp))
-                .background(if (activeLetter != null) Color.White.copy(alpha = 0.08f) else Color.Transparent)
+                .background(if (activeLetter != null) ink.copy(alpha = 0.08f) else Color.Transparent)
                 .pointerInput(letters) {
                     awaitEachGesture {
                         val down = awaitFirstDown()
@@ -128,7 +131,7 @@ internal fun AlphabetIndexBar(letters: List<String>, onLetter: (String) -> Unit,
             letters.forEach { letter ->
                 Text(
                     letter,
-                    color = if (letter == activeLetter) Color.White else AppAccent,
+                    color = if (letter == activeLetter) ink else AppAccent,
                     fontSize = fontSize,
                     lineHeight = fontSize,
                     fontWeight = FontWeight.SemiBold,
@@ -154,7 +157,7 @@ internal fun AlphabetIndexBar(letters: List<String>, onLetter: (String) -> Unit,
                 Modifier
                     .size(BubbleSize)
                     .shadow(10.dp, RoundedCornerShape(16.dp))
-                    .background(Color(0xF22C2C2E), RoundedCornerShape(16.dp)),
+                    .background(LocalPalette.current.raised.copy(alpha = 0.95f), RoundedCornerShape(16.dp)),
                 contentAlignment = Alignment.Center
             ) {
                 Text(shownLetter, color = AppAccent, fontSize = 32.sp, fontWeight = FontWeight.Bold)

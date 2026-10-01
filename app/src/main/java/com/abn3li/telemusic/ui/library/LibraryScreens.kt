@@ -1,5 +1,8 @@
 package com.abn3li.telemusic.ui.library
 
+import com.abn3li.telemusic.ui.theme.LocalPalette
+import com.abn3li.telemusic.ui.theme.paper
+import com.abn3li.telemusic.ui.theme.ink
 import androidx.compose.ui.platform.LocalContext
 import com.abn3li.telemusic.TgMusicApp
 import androidx.compose.ui.layout.onSizeChanged
@@ -184,8 +187,8 @@ internal fun PinnedTile(item: PinnedPlaylist, onLeft: Boolean, onOpen: () -> Uni
                 CoverTile(item.artworkUrl, Modifier.fillMaxWidth().aspectRatio(1f), corner = 7, placeholder = Icons.AutoMirrored.Rounded.QueueMusic)
             }
             Spacer(Modifier.height(5.dp))
-            Text(item.title, color = Color.White.copy(alpha = 0.9f), fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Text("Playlist", color = Color.White.copy(alpha = 0.6f), fontSize = 13.sp, lineHeight = 17.sp, maxLines = 1)
+            Text(item.title, color = ink.copy(alpha = 0.9f), fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text("Playlist", color = ink.copy(alpha = 0.6f), fontSize = 13.sp, lineHeight = 17.sp, maxLines = 1)
         }
         // Opens just under the tile, growing toward the screen's middle so it never runs off an edge.
         LibraryFloatingMenu(
@@ -297,7 +300,7 @@ internal fun SongListPage(
             item("empty") {
                 Text(
                     if (query.isBlank()) "No songs yet" else "No results",
-                    color = Color.White.copy(alpha = 0.55f),
+                    color = ink.copy(alpha = 0.55f),
                     fontSize = 17.sp,
                     modifier = Modifier.padding(horizontal = 20.dp, vertical = 18.dp)
                 )
@@ -397,10 +400,10 @@ internal fun AlbumGridItem(album: AlbumSummary, onClick: () -> Unit) {
     ) {
         CoverTile(album.albumArtUrl, Modifier.fillMaxWidth().aspectRatio(1f), corner = 7)
         Spacer(Modifier.height(5.dp))
-        Text(album.album, color = Color.White.copy(alpha = 0.9f), fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Text(album.album, color = ink.copy(alpha = 0.9f), fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
         Text(
             "${album.songCount} ${if (album.songCount == 1) "Song" else "Songs"}",
-            color = Color.White.copy(alpha = 0.6f),
+            color = ink.copy(alpha = 0.6f),
             fontSize = 13.sp,
             lineHeight = 17.sp,
             maxLines = 1
@@ -452,7 +455,7 @@ private fun ArtistRow(artist: ArtistSummary, onClick: () -> Unit) {
         ArtistAvatar(artist.albumArtUrl, 48)
         Text(
             artist.artist,
-            color = Color.White,
+            color = ink,
             fontSize = 16.5.sp,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
@@ -541,7 +544,7 @@ private fun PlaylistRow(label: String, tile: @Composable () -> Unit, onClick: ()
         tile()
         Text(
             label,
-            color = Color.White,
+            color = ink,
             fontSize = 17.sp,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
