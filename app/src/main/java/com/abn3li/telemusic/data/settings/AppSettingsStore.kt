@@ -193,6 +193,12 @@ class AppSettingsStore(context: Context) {
         get() = prefs.getBoolean(KEY_HIDE_DOWNLOADED, false)
         set(value) = prefs.edit().putBoolean(KEY_HIDE_DOWNLOADED, value).apply()
 
+    /** YouTube downloads made on purpose although the library had the song in better quality:
+     * never replaced by that other copy (see MusicRepository.mergeCrossSourceDuplicates). */
+    var keepBothSongIds: Set<Long>
+        get() = prefs.getStringSet("keep_both_song_ids", emptySet()).orEmpty().mapNotNull { it.toLongOrNull() }.toSet()
+        set(value) = prefs.edit().putStringSet("keep_both_song_ids", value.map { it.toString() }.toSet()).apply()
+
     // Dark, Light or follow the phone. A flow so the whole app recolours the moment it changes.
     private val _themeMode = MutableStateFlow(
         runCatching { ThemeMode.valueOf(prefs.getString(KEY_THEME_MODE, null) ?: ThemeMode.DARK.name) }.getOrDefault(ThemeMode.DARK)

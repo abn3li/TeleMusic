@@ -9,7 +9,7 @@ import androidx.room.migration.Migration
 
 @Database(
     entities = [SongEntity::class, PlaylistEntity::class, PlaylistSongCrossRef::class, ImportedPlaylistEntity::class, SpotifyLinkEntity::class, SpotifyTrackMapEntity::class, LyricsCacheEntity::class],
-    version = 10,
+    version = 11,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -114,10 +114,19 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        // A Telegram song's file size and type, for picking the better of two copies of one
+        // song (Telegram and YouTube). Unknown (0 / null) until the next sync fills them in.
+        private val MIGRATION_10_11 = object : Migration(10, 11) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE songs ADD COLUMN sourceSizeBytes INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE songs ADD COLUMN sourceMime TEXT")
+            }
+        }
+
         fun get(context: Context): AppDatabase =
             INSTANCE ?: synchronized(this) {
                 INSTANCE ?: Room.databaseBuilder(context.applicationContext, AppDatabase::class.java, "tgmusic.db")
-                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10)
+                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11)
                     .fallbackToDestructiveMigration() // fine during active development, for any version this migration chain doesn't cover
                     .build().also { INSTANCE = it }
             }

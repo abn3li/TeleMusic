@@ -1,5 +1,6 @@
 package com.abn3li.telemusic.repository
 
+import kotlinx.coroutines.launch
 import coil.imageLoader
 import androidx.room.withTransaction
 import kotlinx.coroutines.Dispatchers
@@ -49,6 +50,13 @@ private const val MAX_CACHE_POLL_ATTEMPTS = 600
 private const val MAX_STREAM_ONLY_SONGS = 3000
 private const val MAX_RECENT_STREAMS = 30
 private const val STAMP_REPEAT_WINDOW_MS = 10_000L
+// Choosing between a Telegram and a YouTube copy of one song (see mergeCrossSourceDuplicates):
+// within 10% counts as the same quality.
+private const val SAME_QUALITY_MARGIN = 1.10
+private const val YOUTUBE_STREAM_KBPS = 130.0
+private const val EFFICIENT_CODEC_FACTOR = 1.4
+private const val LOSSLESS_KBPS = 100_000.0
+private val LOSSLESS_MIME_HINTS = listOf("flac", "alac", "wav", "aiff", "x-ape")
 
 // Thumbnails saved per database transaction - see backfillThumbnails.
 private const val THUMBNAIL_BATCH = 60
@@ -623,6 +631,148 @@ class MusicRepository(
         }
 
         removeDuplicates()
+        mergeCrossSourceDuplicates()
+    }
+
+    // ---- One song from both Telegram and YouTube ----
+
+    private val crossSourceLock = kotlinx.coroutines.sync.Mutex()
+    // Telegram copies being downloaded to replace a YouTube download: started once, in the
+    // background, so a sync or an import never waits for them.
+    private val upgradeScope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + Dispatchers.IO)
+    private val upgradesInFlight = java.util.concurrent.ConcurrentHashMap.newKeySet<Long>()
+
+    /**
+     * Where the library has one song twice - from Telegram and from YouTube (same title and
+     * artist, lengths within a few seconds) - keeps the better copy: the higher quality (see
+     * [qualityOf]); about the same, the downloaded one; neither downloaded, the Telegram one.
+     * The copy kept takes the other's Like, playlist places, last play and Spotify link, then
+     * the other is removed from the library (never from Telegram). A YouTube download beaten
+     * by a Telegram copy is replaced only once that copy has downloaded, so the song never
+     * stops working offline; if the download fails, both stay. Runs after a sync and after an
+     * import; nothing runs while the app is idle.
+     */
+    suspend fun mergeCrossSourceDuplicates() = withContext(Dispatchers.IO) {
+        // Without Telegram signed in, its songs can't play - nothing to compare against.
+        if (!tdlibManager.isStarted) return@withContext
+        crossSourceLock.withLock {
+            val all = songDao.observeAll().firstOrNull().orEmpty()
+            val telegram = all.filter { it.telegramFileId != 0 && it.youtubeVideoId == null && !it.isLocalImport }
+                .groupBy { recordingKey(it) }
+            // Downloads made on purpose despite a better copy stay, with that copy.
+            val keepBoth = settingsStore.keepBothSongIds
+            val youtube = all.filter { it.youtubeVideoId != null && it.telegramMessageId !in keepBoth }
+            val toUpgrade = mutableListOf<Pair<SongEntity, SongEntity>>()
+            val removed = HashSet<Long>()
+            database.withTransaction {
+                for (yt in youtube) {
+                    val tg = telegram[recordingKey(yt)]?.firstOrNull { it.telegramMessageId !in removed && sameRecording(it, yt) } ?: continue
+                    // Quality not known yet (synced before sizes were recorded): decided after the next sync.
+                    val keep = betterCopy(tg, yt) ?: continue
+                    removed += if (keep === yt) tg.telegramMessageId else yt.telegramMessageId
+                    when {
+                        keep === yt -> moveOnto(tg, yt)
+                        yt.isExplicitDownload && !tg.isExplicitDownload -> toUpgrade += tg to yt
+                        else -> moveOnto(yt, tg)
+                    }
+                }
+            }
+            for ((tg, yt) in toUpgrade) {
+                if (!upgradesInFlight.add(tg.telegramMessageId)) continue
+                upgradeScope.launch {
+                    try {
+                        // Downloaded first; only then is the YouTube download replaced.
+                        downloadExplicitly(tg)
+                        database.withTransaction { moveOnto(yt, tg) }
+                    } catch (e: Exception) {
+                        Log.w("MusicRepository", "Better Telegram copy of '${tg.title}' didn't download; keeping both", e)
+                    } finally {
+                        upgradesInFlight.remove(tg.telegramMessageId)
+                    }
+                }
+            }
+        }
+    }
+
+    /** Before downloading a YouTube song: the copy already in the library that's as good or
+     * better (from Telegram), if any - so the user can be asked first. Null when there's none,
+     * or its quality isn't known yet. */
+    suspend fun betterCopyInLibrary(videoId: String, title: String, artist: String, durationSeconds: Int): SongEntity? =
+        withContext(Dispatchers.IO) {
+            val candidate = SongEntity(
+                telegramMessageId = ytDlpStableSongId(videoId), telegramFileId = 0,
+                title = title, artist = artist, durationSeconds = durationSeconds, youtubeVideoId = videoId
+            )
+            songDao.findTelegramByTitleAndArtist(title, artist)
+                ?.takeIf { sameRecording(it, candidate) && betterCopy(it, candidate) === it }
+        }
+
+    /** The user downloaded [videoId] anyway: that download stays alongside the better copy. */
+    fun keepBothCopies(videoId: String) {
+        settingsStore.keepBothSongIds = settingsStore.keepBothSongIds + ytDlpStableSongId(videoId)
+    }
+
+    private fun recordingKey(song: SongEntity) = "${song.title.trim().lowercase()}|${song.artist.trim().lowercase()}"
+
+    /** Same title and artist, and lengths within 3 seconds (a live or extended version of a song
+     * shares its name but not its length). Songs without a real title/artist never match. */
+    private fun sameRecording(a: SongEntity, b: SongEntity): Boolean {
+        if (a.title.isBlank() || a.title == "Unknown title" || a.artist.isBlank() || a.artist == "Unknown artist") return false
+        if (recordingKey(a) != recordingKey(b)) return false
+        return a.durationSeconds > 0 && b.durationSeconds > 0 && kotlin.math.abs(a.durationSeconds - b.durationSeconds) <= 3
+    }
+
+    /** [telegram] or [youtube], whichever copy of one song to keep - see
+     * [mergeCrossSourceDuplicates]. Null while either copy's quality is unknown: nothing is
+     * removed on a guess. */
+    private fun betterCopy(telegram: SongEntity, youtube: SongEntity): SongEntity? {
+        val tq = qualityOf(telegram) ?: return null
+        val yq = qualityOf(youtube) ?: return null
+        if (tq >= yq * SAME_QUALITY_MARGIN) return telegram
+        if (yq >= tq * SAME_QUALITY_MARGIN) return youtube
+        if (youtube.isExplicitDownload && !telegram.isExplicitDownload) return youtube
+        return telegram
+    }
+
+    /**
+     * A copy's quality, as an MP3-equivalent bitrate in kbps (Opus and AAC sound about as good as
+     * MP3 at ~1.4x their bitrate); lossless files score above any lossy one. Null when unknown.
+     */
+    private fun qualityOf(song: SongEntity): Double? {
+        val duration = song.durationSeconds.takeIf { it > 0 } ?: return null
+        if (song.youtubeVideoId != null) {
+            // Streamed from YouTube: its usual audio, ~130 kbps Opus. Downloaded: the file itself.
+            val path = song.localFilePath ?: return YOUTUBE_STREAM_KBPS * EFFICIENT_CODEC_FACTOR
+            val bytes = fileSizeOf(path)?.takeIf { it > 0 } ?: return YOUTUBE_STREAM_KBPS * EFFICIENT_CODEC_FACTOR
+            val factor = if (path.substringAfterLast('.', "").lowercase() == "mp3") 1.0 else EFFICIENT_CODEC_FACTOR
+            return bytes * 8.0 / duration / 1000.0 * factor
+        }
+        val mime = song.sourceMime.orEmpty().lowercase()
+        if (LOSSLESS_MIME_HINTS.any { it in mime }) return LOSSLESS_KBPS
+        val bytes = song.sourceSizeBytes.takeIf { it > 0 } ?: return null
+        val factor = if ("mpeg" in mime || "mp3" in mime || mime.isBlank()) 1.0 else EFFICIENT_CODEC_FACTOR
+        return bytes * 8.0 / duration / 1000.0 * factor
+    }
+
+    /** Size of a real file or of a content:// copy in the user's download folder. */
+    private fun fileSizeOf(path: String): Long? = runCatching {
+        if (path.startsWith("content://")) {
+            appContext.contentResolver.openFileDescriptor(Uri.parse(path), "r")?.use { it.statSize }
+        } else File(path).takeIf { it.exists() }?.length()
+    }.getOrNull()
+
+    /** [from]'s Like, playlist places, last play and Spotify link go to [to]; then [from] leaves
+     * the library, its downloaded or cached file with it (never anything in Telegram). */
+    private suspend fun moveOnto(from: SongEntity, to: SongEntity) {
+        for (entry in playlistDao.getEntriesForSong(from.telegramMessageId)) {
+            playlistDao.addSong(entry.copy(songId = to.telegramMessageId))
+        }
+        playlistDao.removeEntriesForSong(from.telegramMessageId)
+        if (from.isFavorite && !to.isFavorite) songDao.setFavorite(to.telegramMessageId, true)
+        if (from.lastPlayedAtMillis > to.lastPlayedAtMillis) songDao.stampLastPlayed(to.telegramMessageId, from.lastPlayedAtMillis)
+        if (!from.album.isNullOrBlank()) songDao.setAlbumIfMissing(to.telegramMessageId, from.album)
+        database.spotifyDao().remapSong(from.telegramMessageId, to.telegramMessageId)
+        clearSong(from)
     }
 
     private suspend fun addSyncedSong(chatId: Long, msg: TelegramAudioMessage) {
@@ -639,6 +789,10 @@ class MusicRepository(
             if (sameMessage && existingById.telegramFileId != msg.fileId) {
                 songDao.setTelegramFileId(existingById.telegramMessageId, msg.fileId)
             }
+            // Songs synced before sizes were recorded get theirs now.
+            if (sameMessage && existingById.sourceSizeBytes == 0L && msg.sizeBytes > 0) {
+                songDao.setSourceInfo(existingById.telegramMessageId, msg.sizeBytes, msg.mimeType.ifBlank { null })
+            }
             return
         }
 
@@ -650,16 +804,23 @@ class MusicRepository(
             ?: (if (titleKnown && msg.durationSeconds > 0) songDao.findTelegramByTitleAndDuration(title, msg.durationSeconds) else null)
         if (duplicate != null) return
 
-        songDao.upsert(
-            SongEntity(
-                telegramMessageId = msg.messageId,
-                telegramFileId = msg.fileId,
-                title = title,
-                artist = artist,
-                durationSeconds = msg.durationSeconds,
-                resolvedChatId = chatId
-            )
+        val song = SongEntity(
+            telegramMessageId = msg.messageId,
+            telegramFileId = msg.fileId,
+            title = title,
+            artist = artist,
+            durationSeconds = msg.durationSeconds,
+            resolvedChatId = chatId,
+            sourceSizeBytes = msg.sizeBytes,
+            sourceMime = msg.mimeType.ifBlank { null }
         )
+        // 4. The library already has this song from YouTube in the same or better quality: the
+        // Telegram copy isn't added (it would only be merged away again after every sync).
+        if (titleKnown && artist != "Unknown artist" &&
+            songDao.findYoutubeByTitleAndArtist(title, artist).any { sameRecording(song, it) && betterCopy(song, it) === it }
+        ) return
+
+        songDao.upsert(song)
     }
 
     /**

@@ -68,7 +68,11 @@ data class SongEntity(
     // different chat than the current lastSyncedChatId is played (see that function's own doc).
     // Null until the first successful resolve; a stale/wrong value here just means one sweep to
     // correct it, never worse than not caching at all.
-    val resolvedChatId: Long? = null
+    val resolvedChatId: Long? = null,
+    // A Telegram song's file size and type (from the message), for choosing the better copy
+    // when the same song is also in the library from YouTube. 0 / null until a sync records them.
+    val sourceSizeBytes: Long = 0L,
+    val sourceMime: String? = null
 )
 
 /**

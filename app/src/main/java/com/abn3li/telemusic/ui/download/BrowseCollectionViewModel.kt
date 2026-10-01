@@ -44,7 +44,9 @@ data class BrowseCollectionUiState(
     // to "Open in Library" instead of staying an inert "Imported" label forever.
     val importedPlaylistId: Long? = null,
     // True once the page was saved as an album instead (Library > Albums, no playlist).
-    val importedAsAlbum: Boolean = false
+    val importedAsAlbum: Boolean = false,
+    // A tapped download waiting for a yes: the song is already in the library in better quality.
+    val downloadConflict: DownloadConflict? = null
 )
 
 /** Backs a single browse destination - a playlist's, chart's, or artist's own page reached by
@@ -94,7 +96,22 @@ class BrowseCollectionViewModel(
      * own doc). */
     fun onDownloadClick(track: BrowseTrack) {
         if (track.videoId in _uiState.value.downloadingIds || track.videoId in _uiState.value.downloadedIds) return
-        startDownload(track)
+        viewModelScope.launch {
+            if (musicRepository.betterCopyInLibrary(track.videoId, track.title, track.artist, track.durationSeconds) != null) {
+                _uiState.update {
+                    it.copy(downloadConflict = DownloadConflict(track.title) {
+                        musicRepository.keepBothCopies(track.videoId)
+                        startDownload(track)
+                    })
+                }
+            } else {
+                startDownload(track)
+            }
+        }
+    }
+
+    fun dismissDownloadConflict() {
+        _uiState.update { it.copy(downloadConflict = null) }
     }
 
 
@@ -123,6 +140,7 @@ class BrowseCollectionViewModel(
                     _uiState.update { it.copy(importProgress = (index + 1) to tracks.size) }
                 }
                 musicRepository.backfillThumbnails()
+                musicRepository.mergeCrossSourceDuplicates()
                 _uiState.update { it.copy(importProgress = null, importedAsAlbum = true) }
                 return@launch
             }
@@ -133,6 +151,7 @@ class BrowseCollectionViewModel(
                 _uiState.update { it.copy(importProgress = (index + 1) to tracks.size) }
             }
             musicRepository.backfillThumbnails()
+            musicRepository.mergeCrossSourceDuplicates()
             _uiState.update { it.copy(importProgress = null, importedPlaylistId = playlistId) }
         }
     }

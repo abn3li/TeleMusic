@@ -102,6 +102,7 @@ fun BrowseCollectionScreen(
     )
     val state by viewModel.uiState.collectAsState()
     val onDownload: (BrowseTrack) -> Unit = { track -> app.downloadGate.run { viewModel.onDownloadClick(track) } }
+    state.downloadConflict?.let { conflict -> DownloadAnywayPrompt(conflict, viewModel::dismissDownloadConflict) }
 
     state.artist?.let { artist ->
         ArtistPageContent(artist, state, onBack, onOpenCollection, onPlayTracks, onPlayNext, onDownload)

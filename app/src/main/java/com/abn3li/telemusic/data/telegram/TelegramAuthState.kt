@@ -21,7 +21,9 @@ enum class TelegramConnectionState {
 
 data class TelegramAudioMessage(
     val messageId: Long, val fileId: Int,
-    val title: String, val performer: String, val durationSeconds: Int
+    val title: String, val performer: String, val durationSeconds: Int,
+    // The file's size and type, for comparing quality against another copy of the song.
+    val sizeBytes: Long = 0L, val mimeType: String = ""
 )
 
 /** One page of a chat search: the songs found, and where the next page starts (0 = no more). */

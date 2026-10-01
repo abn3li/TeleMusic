@@ -1,5 +1,6 @@
 package com.abn3li.telemusic.ui.search
 
+import com.abn3li.telemusic.ui.download.DownloadAnywayPrompt
 import com.abn3li.telemusic.ui.theme.LocalPalette
 import com.abn3li.telemusic.ui.theme.paper
 import com.abn3li.telemusic.ui.theme.ink
@@ -197,6 +198,7 @@ fun SearchScreen(
     val feed by discovery.uiState.collectAsState()
     var showImport by remember { mutableStateOf(false) }
     if (showImport) ImportPlaylistPrompt(discovery) { showImport = false }
+    state.downloadConflict?.let { conflict -> DownloadAnywayPrompt(conflict, search::dismissDownloadConflict) }
     BackHandler(query.isNotEmpty()) {
         if (section != ResultSection.OVERVIEW) section = ResultSection.OVERVIEW else search.onQueryChange("")
     }

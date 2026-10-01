@@ -200,3 +200,17 @@ private fun ImportPlaylistDialog(
         }
     }
 }
+
+/** "Already in your library in higher quality - download anyway?" before a YouTube download. */
+@Composable
+internal fun DownloadAnywayPrompt(conflict: DownloadConflict, onDismiss: () -> Unit) {
+    AppAlert(
+        title = "Already in Your Library",
+        message = "\u201C${conflict.title}\u201D is already in your library in higher quality. Are you sure you want to download it?",
+        onDismiss = onDismiss,
+        actions = listOf(
+            AlertAction("Cancel", bold = true, onClick = onDismiss),
+            AlertAction("Download") { onDismiss(); conflict.confirm() }
+        )
+    )
+}

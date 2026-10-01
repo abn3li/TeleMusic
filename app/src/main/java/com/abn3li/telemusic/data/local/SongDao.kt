@@ -34,6 +34,13 @@ interface SongDao {
     @Query("UPDATE songs SET thumbnailPath = :path WHERE telegramMessageId = :id")
     suspend fun setThumbnailPath(id: Long, path: String)
 
+    @Query("UPDATE songs SET sourceSizeBytes = :sizeBytes, sourceMime = :mime WHERE telegramMessageId = :id")
+    suspend fun setSourceInfo(id: Long, sizeBytes: Long, mime: String?)
+
+    /** Library songs from YouTube with this title and artist (any letter case). */
+    @Query("SELECT * FROM songs WHERE youtubeVideoId IS NOT NULL AND LOWER(TRIM(title)) = LOWER(TRIM(:title)) AND LOWER(TRIM(artist)) = LOWER(TRIM(:artist))")
+    suspend fun findYoutubeByTitleAndArtist(title: String, artist: String): List<SongEntity>
+
     /** Gives songs whose thumbnail was marked failed ("none") another try - see
      * MusicRepository.backfillThumbnails. */
     @Query("UPDATE songs SET thumbnailPath = NULL WHERE thumbnailPath = 'none' AND albumArtUrl IS NOT NULL AND albumArtUrl != ''")

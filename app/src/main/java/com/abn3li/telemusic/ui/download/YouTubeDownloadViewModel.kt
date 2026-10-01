@@ -49,8 +49,13 @@ data class YouTubeDownloadUiState(
     // Both keyed by videoId - a result mid-download shows a spinner in place of its download
     // icon, and a finished one shows a checkmark instead, without needing a full re-search.
     val downloadingIds: Set<String> = emptySet(),
-    val downloadedIds: Set<String> = emptySet()
+    val downloadedIds: Set<String> = emptySet(),
+    // A tapped download waiting for a yes: the song is already in the library in better quality.
+    val downloadConflict: DownloadConflict? = null
 )
+
+/** A YouTube download the user is asked about first - see YouTubeDownloadUiState.downloadConflict. */
+data class DownloadConflict(val title: String, val confirm: () -> Unit)
 
 /**
  * The YouTube half of the search page: finds songs, albums, artists and playlists, and plays
@@ -134,7 +139,23 @@ class YouTubeDownloadViewModel(
      * preferred, see DownloadQuality's own doc). */
     fun onDownloadIconClick(result: YtDlpSearchResult) {
         if (result.videoId in _uiState.value.downloadingIds || result.videoId in _uiState.value.downloadedIds) return
-        startDownload(result)
+        viewModelScope.launch {
+            // Already in the library in better quality: ask before downloading a worse copy.
+            if (musicRepository.betterCopyInLibrary(result.videoId, result.title, result.artist, result.durationSeconds) != null) {
+                _uiState.update {
+                    it.copy(downloadConflict = DownloadConflict(result.title) {
+                        musicRepository.keepBothCopies(result.videoId)
+                        startDownload(result)
+                    })
+                }
+            } else {
+                startDownload(result)
+            }
+        }
+    }
+
+    fun dismissDownloadConflict() {
+        _uiState.update { it.copy(downloadConflict = null) }
     }
 
 

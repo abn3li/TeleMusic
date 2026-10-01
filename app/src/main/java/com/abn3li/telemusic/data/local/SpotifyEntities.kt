@@ -58,4 +58,8 @@ interface SpotifyDao {
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun saveMatch(match: SpotifyTrackMapEntity)
+
+    /** A song replaced by a better copy: Spotify tracks matched to it now point at the copy. */
+    @Query("UPDATE spotify_track_map SET songId = :to WHERE songId = :from")
+    suspend fun remapSong(from: Long, to: Long)
 }

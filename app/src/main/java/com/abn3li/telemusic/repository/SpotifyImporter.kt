@@ -220,6 +220,8 @@ class SpotifyImporter(
                     _state.value = SpotifyImportState.Running(name, index + 1, total, key)
                 }
                 flush()
+                // A song you already have from Telegram keeps whichever copy is better.
+                musicRepository.mergeCrossSourceDuplicates()
                 val finished = SpotifyImportState.Finished(name, matched, total, playlistId, added, updated = existing != null)
                 _state.value = finished
                 if (downloadAll) _pendingDownload.value = playlistId

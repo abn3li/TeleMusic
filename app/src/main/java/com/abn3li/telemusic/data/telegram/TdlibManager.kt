@@ -407,7 +407,9 @@ class TdlibManager(private val context: Context) {
                         audio.audio.id,
                         audio.title.ifBlank { audio.fileName },
                         audio.performer,
-                        audio.duration
+                        audio.duration,
+                        sizeBytes = audio.audio.size.takeIf { it > 0 } ?: audio.audio.expectedSize,
+                        mimeType = audio.mimeType.orEmpty()
                     )
                 }
                 is TdApi.MessageDocument -> {
@@ -419,7 +421,9 @@ class TdlibManager(private val context: Context) {
                         doc.document.id,
                         doc.fileName.substringBeforeLast('.'),
                         "Telegram Document",
-                        0
+                        0,
+                        sizeBytes = doc.document.size.takeIf { it > 0 } ?: doc.document.expectedSize,
+                        mimeType = doc.mimeType.orEmpty()
                     )
                 }
                 else -> null
