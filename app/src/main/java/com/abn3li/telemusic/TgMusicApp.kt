@@ -65,7 +65,9 @@ class TgMusicApp : Application(), ImageLoaderFactory {
             mediaFolderExporter = MediaFolderExporter(this),
             ytDlpRepository = ytDlpRepository,
             database = db,
-            context = this
+            context = this,
+            // The queue lives on the main thread.
+            songsInUse = { kotlinx.coroutines.withContext(Dispatchers.Main) { playbackQueue.songIds() } }
         )
         spotifyAccount = com.abn3li.telemusic.data.spotify.SpotifyAccount(this, appScope)
         spotifyDao = db.spotifyDao()

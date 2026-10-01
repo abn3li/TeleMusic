@@ -97,9 +97,10 @@ class BrowseCollectionViewModel(
     fun onDownloadClick(track: BrowseTrack) {
         if (track.videoId in _uiState.value.downloadingIds || track.videoId in _uiState.value.downloadedIds) return
         viewModelScope.launch {
-            if (musicRepository.betterCopyInLibrary(track.videoId, track.title, track.artist, track.durationSeconds) != null) {
+            val existing = musicRepository.betterCopyInLibrary(track.videoId, track.title, track.artist, track.durationSeconds)
+            if (existing != null) {
                 _uiState.update {
-                    it.copy(downloadConflict = DownloadConflict(track.title) {
+                    it.copy(downloadConflict = DownloadConflict(track.title, existing.higherQuality) {
                         musicRepository.keepBothCopies(track.videoId)
                         startDownload(track)
                     })

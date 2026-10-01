@@ -1,6 +1,8 @@
 package com.abn3li.telemusic
 
-import com.abn3li.telemusic.ui.theme.PlayerOpenState
+import com.abn3li.telemusic.ui.theme.SystemBarsState
+import com.abn3li.telemusic.ui.theme.LightPalette
+import androidx.compose.ui.graphics.toArgb
 import com.abn3li.telemusic.data.settings.ThemeMode
 import androidx.core.view.WindowCompat
 import androidx.compose.ui.platform.LocalView
@@ -54,8 +56,9 @@ class MainActivity : ComponentActivity() {
             // Status and navigation bar icons: dark on the light theme, light on the dark one.
             val view = LocalView.current
             // Read here, not inside the effect, so opening or closing the player re-runs it.
-            // The open player is always dark, so the bars around it are too.
-            val lightBars = light && !PlayerOpenState.isOpen
+            // The open player and the welcome pages are always dark, so the bars around them are too.
+            val lightBars = light && !SystemBarsState.playerOpen && !SystemBarsState.onboardingOpen
+            val groupedPage = SystemBarsState.groupedPages > 0
             SideEffect {
                 WindowCompat.getInsetsController(window, view).apply {
                     isAppearanceLightStatusBars = lightBars
@@ -64,7 +67,7 @@ class MainActivity : ComponentActivity() {
                 val bar = if (lightBars) android.graphics.Color.WHITE else android.graphics.Color.BLACK
                 window.decorView.setBackgroundColor(bar)
                 @Suppress("DEPRECATION")
-                window.statusBarColor = bar
+                window.statusBarColor = if (lightBars && groupedPage) LightPalette.groupedBackground.toArgb() else bar
                 @Suppress("DEPRECATION")
                 window.navigationBarColor = bar
             }

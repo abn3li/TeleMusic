@@ -1,5 +1,6 @@
 package com.abn3li.telemusic.ui.theme
 
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.getValue
@@ -78,8 +79,12 @@ internal val ink: Color
 internal val paper: Color
     @Composable @ReadOnlyComposable get() = LocalPalette.current.background
 
-/** True while the full player covers the screen: it's always dark, so the system bars around it
- * go dark too, whatever the app's theme. Set by the player, read by MainActivity. */
-object PlayerOpenState {
-    var isOpen by mutableStateOf(false)
+/** What's on screen, for the system bars' colours (read by MainActivity). The full player and
+ * the welcome pages are always dark, so the bars around them go dark too, whatever the app's
+ * theme; a Settings-style page has its grey page colour behind the status bar. */
+object SystemBarsState {
+    var playerOpen by mutableStateOf(false)
+    var onboardingOpen by mutableStateOf(false)
+    // Settings-style pages on screen (a page fading out and the next fading in can overlap).
+    var groupedPages by mutableIntStateOf(0)
 }

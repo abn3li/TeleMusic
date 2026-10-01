@@ -22,6 +22,11 @@ interface SongDao {
     @Query("SELECT * FROM songs WHERE telegramFileId != 0 AND LOWER(TRIM(title)) = LOWER(TRIM(:title)) AND LOWER(TRIM(artist)) = LOWER(TRIM(:artist)) LIMIT 1")
     suspend fun findTelegramByTitleAndArtist(title: String, artist: String): SongEntity?
 
+    /** Every Telegram song with this title and artist (any letter case) - an original and its
+     * live version can share both. */
+    @Query("SELECT * FROM songs WHERE telegramFileId != 0 AND youtubeVideoId IS NULL AND LOWER(TRIM(title)) = LOWER(TRIM(:title)) AND LOWER(TRIM(artist)) = LOWER(TRIM(:artist))")
+    suspend fun findTelegramCopies(title: String, artist: String): List<SongEntity>
+
     @Query("SELECT * FROM songs WHERE telegramFileId != 0 AND LOWER(TRIM(title)) = LOWER(TRIM(:title)) AND ABS(durationSeconds - :duration) <= 2 LIMIT 1")
     suspend fun findTelegramByTitleAndDuration(title: String, duration: Int): SongEntity?
 

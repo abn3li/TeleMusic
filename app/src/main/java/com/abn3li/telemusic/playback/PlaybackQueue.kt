@@ -52,6 +52,9 @@ class PlaybackQueue {
 
     fun currentSongId(): Long? = base.getOrNull(baseIndex)
 
+    /** Every song in the queue, the playing one included. */
+    fun songIds(): Set<Long> = (base + nextInQueue).toSet()
+
     /** Where the queue is now, to go back to with [restore]. */
     fun snapshot(): Snapshot = Snapshot(originalSongIds.toList(), base.toList(), baseIndex, nextInQueue.toList(), sourceIds)
 

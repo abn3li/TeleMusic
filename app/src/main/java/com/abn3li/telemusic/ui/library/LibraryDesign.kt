@@ -1,5 +1,7 @@
 package com.abn3li.telemusic.ui.library
 
+import com.abn3li.telemusic.ui.theme.SystemBarsState
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.CompositionLocalProvider
 import com.abn3li.telemusic.ui.theme.LocalPalette
 import com.abn3li.telemusic.ui.theme.paper
@@ -113,6 +115,12 @@ internal fun LargeTitleList(
     content: LazyListScope.() -> Unit
 ) {
     val palette = LocalPalette.current
+    if (grouped) {
+        DisposableEffect(Unit) {
+            SystemBarsState.groupedPages++
+            onDispose { SystemBarsState.groupedPages-- }
+        }
+    }
     CompositionLocalProvider(LocalPalette provides if (grouped) palette.groupedPage() else palette) {
         LargeTitleListBody(title, onBack, listState, titleTrailing, barActions, stickyContent, stickyHeight, overlay, content)
     }

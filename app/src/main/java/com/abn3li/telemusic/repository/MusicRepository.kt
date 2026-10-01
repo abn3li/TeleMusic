@@ -96,7 +96,10 @@ class MusicRepository(
     private val mediaFolderExporter: MediaFolderExporter,
     private val ytDlpRepository: YtDlpRepository,
     private val database: com.abn3li.telemusic.data.local.AppDatabase,
-    context: Context
+    context: Context,
+    // Songs playing or waiting in the queue: never removed from under the player (see
+    // mergeCrossSourceDuplicates).
+    private val songsInUse: suspend () -> Set<Long> = { emptySet() }
 ) {
     private val appContext = context.applicationContext
 
@@ -642,15 +645,19 @@ class MusicRepository(
     private val upgradeScope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + Dispatchers.IO)
     private val upgradesInFlight = java.util.concurrent.ConcurrentHashMap.newKeySet<Long>()
 
+    /** A copy of a song already in the library, found before a YouTube download. */
+    data class ExistingCopy(val song: SongEntity, val higherQuality: Boolean)
+
     /**
      * Where the library has one song twice - from Telegram and from YouTube (same title and
      * artist, lengths within a few seconds) - keeps the better copy: the higher quality (see
      * [qualityOf]); about the same, the downloaded one; neither downloaded, the Telegram one.
      * The copy kept takes the other's Like, playlist places, last play and Spotify link, then
-     * the other is removed from the library (never from Telegram). A YouTube download beaten
-     * by a Telegram copy is replaced only once that copy has downloaded, so the song never
-     * stops working offline; if the download fails, both stay. Runs after a sync and after an
-     * import; nothing runs while the app is idle.
+     * the other is removed from the library (never from Telegram). A downloaded copy beaten by
+     * one that isn't downloaded is replaced only once the better one has downloaded, so the
+     * song never stops working offline; if that download fails, both stay. A song playing or
+     * in the queue is left for the next run. Runs after a sync and after an import; nothing
+     * runs while the app is idle.
      */
     suspend fun mergeCrossSourceDuplicates() = withContext(Dispatchers.IO) {
         // Without Telegram signed in, its songs can't play - nothing to compare against.
@@ -662,32 +669,39 @@ class MusicRepository(
             // Downloads made on purpose despite a better copy stay, with that copy.
             val keepBoth = settingsStore.keepBothSongIds
             val youtube = all.filter { it.youtubeVideoId != null && it.telegramMessageId !in keepBoth }
+            // (better copy, the copy it replaces once downloaded)
             val toUpgrade = mutableListOf<Pair<SongEntity, SongEntity>>()
             val removed = HashSet<Long>()
+            val inUse = songsInUse()
             database.withTransaction {
                 for (yt in youtube) {
                     val tg = telegram[recordingKey(yt)]?.firstOrNull { it.telegramMessageId !in removed && sameRecording(it, yt) } ?: continue
                     // Quality not known yet (synced before sizes were recorded): decided after the next sync.
                     val keep = betterCopy(tg, yt) ?: continue
-                    removed += if (keep === yt) tg.telegramMessageId else yt.telegramMessageId
-                    when {
-                        keep === yt -> moveOnto(tg, yt)
-                        yt.isExplicitDownload && !tg.isExplicitDownload -> toUpgrade += tg to yt
-                        else -> moveOnto(yt, tg)
-                    }
+                    val drop = if (keep === yt) tg else yt
+                    if (drop.telegramMessageId in inUse) continue
+                    removed += drop.telegramMessageId
+                    if (drop.isExplicitDownload && !keep.isExplicitDownload) toUpgrade += keep to drop
+                    else moveOnto(drop, keep)
                 }
             }
-            for ((tg, yt) in toUpgrade) {
-                if (!upgradesInFlight.add(tg.telegramMessageId)) continue
+            for ((keep, drop) in toUpgrade) {
+                if (!upgradesInFlight.add(keep.telegramMessageId)) continue
                 upgradeScope.launch {
                     try {
-                        // Downloaded first; only then is the YouTube download replaced.
-                        downloadExplicitly(tg)
-                        database.withTransaction { moveOnto(yt, tg) }
+                        // Downloaded first; only then is the other download replaced.
+                        downloadExplicitly(keep)
+                        crossSourceLock.withLock {
+                            // Read again: a Like or a play during the download must carry over.
+                            val freshKeep = songDao.getById(keep.telegramMessageId) ?: return@withLock
+                            val freshDrop = songDao.getById(drop.telegramMessageId) ?: return@withLock
+                            if (freshDrop.telegramMessageId in songsInUse()) return@withLock
+                            database.withTransaction { moveOnto(freshDrop, freshKeep) }
+                        }
                     } catch (e: Exception) {
-                        Log.w("MusicRepository", "Better Telegram copy of '${tg.title}' didn't download; keeping both", e)
+                        Log.w("MusicRepository", "Better copy of '${keep.title}' didn't download; keeping both", e)
                     } finally {
-                        upgradesInFlight.remove(tg.telegramMessageId)
+                        upgradesInFlight.remove(keep.telegramMessageId)
                     }
                 }
             }
@@ -697,14 +711,17 @@ class MusicRepository(
     /** Before downloading a YouTube song: the copy already in the library that's as good or
      * better (from Telegram), if any - so the user can be asked first. Null when there's none,
      * or its quality isn't known yet. */
-    suspend fun betterCopyInLibrary(videoId: String, title: String, artist: String, durationSeconds: Int): SongEntity? =
+    suspend fun betterCopyInLibrary(videoId: String, title: String, artist: String, durationSeconds: Int): ExistingCopy? =
         withContext(Dispatchers.IO) {
             val candidate = SongEntity(
                 telegramMessageId = ytDlpStableSongId(videoId), telegramFileId = 0,
                 title = title, artist = artist, durationSeconds = durationSeconds, youtubeVideoId = videoId
             )
-            songDao.findTelegramByTitleAndArtist(title, artist)
-                ?.takeIf { sameRecording(it, candidate) && betterCopy(it, candidate) === it }
+            val copy = songDao.findTelegramCopies(title, artist)
+                .firstOrNull { sameRecording(it, candidate) && betterCopy(it, candidate) === it }
+                ?: return@withContext null
+            val higher = (qualityOf(copy) ?: 0.0) >= (qualityOf(candidate) ?: 0.0) * SAME_QUALITY_MARGIN
+            ExistingCopy(copy, higher)
         }
 
     /** The user downloaded [videoId] anyway: that download stays alongside the better copy. */
@@ -1145,6 +1162,13 @@ class MusicRepository(
         song.localFilePath?.takeIf { it != song.exportedFileUri }?.let(::releaseLocalFile)
         song.exportedFileUri?.let { uri -> runCatching { mediaFolderExporter.delete(android.net.Uri.parse(uri)) } }
         songDao.delete(song.telegramMessageId)
+        forgetKeepBoth(song.telegramMessageId)
+    }
+
+    /** A song gone from the library no longer needs its "keep both copies" mark. */
+    private fun forgetKeepBoth(id: Long) {
+        val keepBoth = settingsStore.keepBothSongIds
+        if (id in keepBoth) settingsStore.keepBothSongIds = keepBoth - id
     }
 
     /** Releases whatever [path] actually represents - deletes it if it's a real file this app
@@ -1178,6 +1202,7 @@ class MusicRepository(
             songDao.clearDownload(song.telegramMessageId)
         } else {
             songDao.delete(song.telegramMessageId)
+            forgetKeepBoth(song.telegramMessageId)
         }
     }
 
@@ -1313,6 +1338,7 @@ class MusicRepository(
             song.exportedFileUri?.let { uri -> runCatching { mediaFolderExporter.delete(android.net.Uri.parse(uri)) } }
             songDao.delete(song.telegramMessageId)
         }
+        settingsStore.keepBothSongIds = emptySet()
         val playlists = playlistDao.observeAll().firstOrNull().orEmpty()
         for (pl in playlists) {
             playlistDao.delete(pl.id)

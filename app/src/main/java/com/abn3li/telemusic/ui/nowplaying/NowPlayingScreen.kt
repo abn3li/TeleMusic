@@ -1,6 +1,6 @@
 package com.abn3li.telemusic.ui.nowplaying
 
-import com.abn3li.telemusic.ui.theme.PlayerOpenState
+import com.abn3li.telemusic.ui.theme.SystemBarsState
 import androidx.compose.runtime.SideEffect
 import com.abn3li.telemusic.ui.theme.DarkPlayerTheme
 import com.abn3li.telemusic.data.local.listArtwork
@@ -136,7 +136,7 @@ fun PlayerSheetOverlay(
         BackHandler(enabled = isExpanded) { collapse() }
     }
     // The player is dark in both themes: the system bars follow it while it's open.
-    SideEffect { PlayerOpenState.isOpen = isExpanded }
+    SideEffect { SystemBarsState.playerOpen = isExpanded }
 
     DarkPlayerTheme {
     NowPlayingContent(

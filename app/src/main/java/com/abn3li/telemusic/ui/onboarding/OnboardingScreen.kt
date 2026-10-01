@@ -1,5 +1,8 @@
 package com.abn3li.telemusic.ui.onboarding
 
+import com.abn3li.telemusic.ui.theme.DarkPlayerTheme
+import com.abn3li.telemusic.ui.theme.SystemBarsState
+import androidx.compose.runtime.DisposableEffect
 import android.Manifest
 import android.content.pm.PackageManager
 import android.net.Uri
@@ -101,6 +104,16 @@ private val MixDaily = Color(0xFF72243E)
  */
 @Composable
 fun OnboardingScreen(onFinished: () -> Unit) {
+    // Always dark, whatever the theme: shared parts (dialogs) and the system bars follow.
+    DisposableEffect(Unit) {
+        SystemBarsState.onboardingOpen = true
+        onDispose { SystemBarsState.onboardingOpen = false }
+    }
+    DarkPlayerTheme { OnboardingContent(onFinished) }
+}
+
+@Composable
+private fun OnboardingContent(onFinished: () -> Unit) {
     val context = LocalContext.current
     val app = context.applicationContext as TgMusicApp
     // Android 12 and older allow notifications without asking, and a granted one needs no page.

@@ -55,7 +55,7 @@ data class YouTubeDownloadUiState(
 )
 
 /** A YouTube download the user is asked about first - see YouTubeDownloadUiState.downloadConflict. */
-data class DownloadConflict(val title: String, val confirm: () -> Unit)
+data class DownloadConflict(val title: String, val higherQuality: Boolean, val confirm: () -> Unit)
 
 /**
  * The YouTube half of the search page: finds songs, albums, artists and playlists, and plays
@@ -141,9 +141,10 @@ class YouTubeDownloadViewModel(
         if (result.videoId in _uiState.value.downloadingIds || result.videoId in _uiState.value.downloadedIds) return
         viewModelScope.launch {
             // Already in the library in better quality: ask before downloading a worse copy.
-            if (musicRepository.betterCopyInLibrary(result.videoId, result.title, result.artist, result.durationSeconds) != null) {
+            val existing = musicRepository.betterCopyInLibrary(result.videoId, result.title, result.artist, result.durationSeconds)
+            if (existing != null) {
                 _uiState.update {
-                    it.copy(downloadConflict = DownloadConflict(result.title) {
+                    it.copy(downloadConflict = DownloadConflict(result.title, existing.higherQuality) {
                         musicRepository.keepBothCopies(result.videoId)
                         startDownload(result)
                     })
