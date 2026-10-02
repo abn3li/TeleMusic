@@ -62,4 +62,10 @@ interface SpotifyDao {
     /** A song replaced by a better copy: Spotify tracks matched to it now point at the copy. */
     @Query("UPDATE spotify_track_map SET songId = :to WHERE songId = :from")
     suspend fun remapSong(from: Long, to: Long)
+
+    @Query("DELETE FROM spotify_links")
+    suspend fun deleteAllLinks()
+
+    @Query("DELETE FROM spotify_track_map")
+    suspend fun deleteAllMatches()
 }

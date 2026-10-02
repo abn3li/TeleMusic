@@ -1248,7 +1248,7 @@ class MusicRepository(
     suspend fun cancelStreamingDownload(fileId: Int) = tdlibManager.cancelDownload(fileId)
 
     /** What a cache wipe removed: fully cached songs, and half-streamed leftover files. */
-    data class CacheClearResult(val cachedSongs: Int, val partialFiles: Int, val freedBytes: Long)
+    data class CacheClearResult(val cachedSongs: Int, val partialFiles: Int, val freedBytes: Long, val lyricsCleared: Int)
 
     /**
      * Deletes every auto-cached song file (explicit downloads and local imports are never
@@ -1273,7 +1273,18 @@ class MusicRepository(
         }
         val (partial, partialBytes) = purgePartialAudioFiles()
         val (ytLeftovers, ytBytes) = purgeYouTubeDownloadLeftovers(everything = false)
-        return CacheClearResult(count, partial + ytLeftovers, freed + partialBytes + ytBytes)
+        // YouTube streams play straight from the internet - nothing of them is on disk; only the
+        // links already looked up are remembered (in memory), and those go too.
+        ytDlpRepository.clearStreamCache()
+        val lyrics = clearAllLyrics()
+        return CacheClearResult(count, partial + ytLeftovers, freed + partialBytes + ytBytes, lyrics)
+    }
+
+    /** Every saved lyric - on the songs and in the lookup cache. Opening a song's lyrics (or the
+     * open player) searches again. Returns how many songs had lyrics. */
+    private suspend fun clearAllLyrics(): Int = database.withTransaction {
+        lyricsCache.deleteAll()
+        songDao.clearAllLyrics()
     }
 
     /**
@@ -1344,6 +1355,25 @@ class MusicRepository(
             playlistDao.delete(pl.id)
         }
         settingsStore.lastSyncedChatId = 0L
+        settingsStore.pinnedPlaylists = emptyList()
+        // Everything else the library left behind: YouTube songs played without being added
+        // (Home's Recently Played), saved lyrics, YouTube and Spotify import links, covers.
+        recentStreamsLock.withLock {
+            withContext(Dispatchers.IO) { recentStreamsFile.delete() }
+            recentStreamsState.value = emptyList()
+        }
+        lyricsCache.deleteAll()
+        database.importedPlaylistDao().deleteAll()
+        database.spotifyDao().deleteAllLinks()
+        database.spotifyDao().deleteAllMatches()
+        ytDlpRepository.clearStreamCache()
+        withContext(Dispatchers.IO) {
+            for (dir in listOf("thumbnails", "artwork", "local_imports")) {
+                File(appContext.filesDir, dir).listFiles()?.forEach { it.deleteRecursively() }
+            }
+        }
+        appContext.imageLoader.memoryCache?.clear()
+        appContext.imageLoader.diskCache?.clear()
         // Every row is gone, so any file still in TDLib's music folder is a half-streamed
         // leftover, and anything left in the YouTube downloads folder is an orphan or an
         // interrupted download - wipe those too for a truly fresh start.

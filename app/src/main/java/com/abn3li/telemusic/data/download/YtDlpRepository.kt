@@ -26,6 +26,11 @@ class YtDlpRepository(context: Context) {
         streamCache.remove(videoId)
     }
 
+    /** Forgets every remembered YouTube stream link (kept in memory only). */
+    fun clearStreamCache() {
+        streamCache.clear()
+    }
+
     suspend fun search(query: String): List<YtDlpSearchResult> = withContext(Dispatchers.IO) {
         val startedAt = SystemClock.elapsedRealtime()
         runCatching { service.search(query) }

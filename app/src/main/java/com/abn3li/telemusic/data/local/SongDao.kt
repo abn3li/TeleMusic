@@ -76,6 +76,10 @@ interface SongDao {
     @Query("UPDATE songs SET lyricsPlain = :plain, lyricsSynced = :synced WHERE telegramMessageId = :id")
     suspend fun setLyrics(id: Long, plain: String?, synced: String?)
 
+    /** Clear Cache: every song's saved lyrics; returns how many songs had some. */
+    @Query("UPDATE songs SET lyricsPlain = NULL, lyricsSynced = NULL WHERE lyricsPlain IS NOT NULL OR lyricsSynced IS NOT NULL")
+    suspend fun clearAllLyrics(): Int
+
     // Only what the lyrics cache needs, not whole rows - see MusicRepository.backfillLyricsCache.
     // Paged by id ("after the last one seen"), not OFFSET: each page is a direct index jump, and
     // a song deleted meanwhile can't shift the rest and make a page skip one.

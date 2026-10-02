@@ -16,4 +16,7 @@ interface ImportedPlaylistDao {
 
     @Query("DELETE FROM imported_playlists WHERE browseId = :browseId")
     suspend fun delete(browseId: String)
+
+    @Query("DELETE FROM imported_playlists")
+    suspend fun deleteAll()
 }

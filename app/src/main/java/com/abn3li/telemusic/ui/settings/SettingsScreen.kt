@@ -433,7 +433,7 @@ fun SettingsScreen(onBack: () -> Unit, onOpenSpotify: () -> Unit, onLoggedOut: (
     if (showClearCacheConfirm) {
         AppAlert(
             title = "Clear Cache?",
-            message = "Deletes cached and partially streamed songs, and unfinished YouTube downloads, to free up space. Downloads, your songs and playlists stay in your library.",
+            message = "Deletes cached and partially streamed songs, unfinished YouTube downloads and saved lyrics, to free up space. Lyrics are found again when you open them. Downloads, your songs and playlists stay in your library.",
             onDismiss = { showClearCacheConfirm = false },
             actions = listOf(
                 AlertAction("Cancel") { showClearCacheConfirm = false },
@@ -442,7 +442,7 @@ fun SettingsScreen(onBack: () -> Unit, onOpenSpotify: () -> Unit, onLoggedOut: (
                     scope.launch {
                         val result = app.musicRepository.clearStreamingCache(keepSongId = app.playbackController.currentSongId())
                         val mb = result.freedBytes / (1024 * 1024)
-                        storageActionStatus = "Cleared ${result.cachedSongs} cached songs and ${result.partialFiles} partial downloads (${mb} MB)."
+                        storageActionStatus = "Cleared ${result.cachedSongs} cached songs, ${result.partialFiles} partial downloads (${mb} MB) and lyrics of ${result.lyricsCleared} songs."
                     }
                 }
             )
@@ -452,7 +452,7 @@ fun SettingsScreen(onBack: () -> Unit, onOpenSpotify: () -> Unit, onLoggedOut: (
     if (showClearLibraryConfirm) {
         AppAlert(
             title = "Reset Library?",
-            message = "This deletes ALL songs, playlists and audio files from this device. You can then sync again from any Telegram chat.",
+            message = "This deletes ALL songs, playlists, audio files, listening history, saved lyrics, covers and import links from this device. Your Telegram and Spotify sign-ins and your settings stay. You can then sync again from any Telegram chat.",
             onDismiss = { showClearLibraryConfirm = false },
             actions = listOf(
                 AlertAction("Cancel", bold = true) { showClearLibraryConfirm = false },

@@ -37,6 +37,9 @@ interface LyricsCacheDao {
     @Query("DELETE FROM lyrics_cache WHERE fetchedAtMillis < :before")
     suspend fun deleteOlderThan(before: Long)
 
+    @Query("DELETE FROM lyrics_cache")
+    suspend fun deleteAll(): Int
+
     /** Keeps an entry that's already there - for copying lyrics songs already had. */
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun putIfMissing(entries: List<LyricsCacheEntity>)
