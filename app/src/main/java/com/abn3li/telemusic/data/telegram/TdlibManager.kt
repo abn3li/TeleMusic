@@ -1,5 +1,7 @@
 package com.abn3li.telemusic.data.telegram
 
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.withTimeoutOrNull
 import android.content.Context
 import android.util.Log
 import com.abn3li.telemusic.data.settings.DnsResolver
@@ -54,6 +56,9 @@ class TdlibManager(private val context: Context) {
     // flight so open() being called again (ExoPlayer retries/seeks) never re-issues
     // DownloadFile from byte 0 - it just reads current progress instead.
     private val downloadsStarted = ConcurrentHashMap.newKeySet<Int>()
+
+    // TDLib has said it's fully closed (AuthorizationStateClosed) - see logOut.
+    private val tdlibClosed = MutableStateFlow(false)
 
     fun start(
         apiId: Int,
@@ -196,6 +201,7 @@ class TdlibManager(private val context: Context) {
                 _authState.value = TelegramAuthState.Ready
             }
             is TdApi.AuthorizationStateClosed -> {
+                tdlibClosed.value = true
                 _authState.value = TelegramAuthState.LoggedOut
                 _connectionState.value = TelegramConnectionState.DISCONNECTED
             }
@@ -603,33 +609,53 @@ class TdlibManager(private val context: Context) {
             } ?: cont.resumeWithException(TelegramNotSetUpException())
         }
 
+    /** How a Log Out went: whether Telegram's servers ended the session (it no longer appears
+     * under Telegram's Devices), and whether this phone's copy of it is gone. */
+    data class LogOutResult(val sessionEnded: Boolean, val localDataRemoved: Boolean)
+
     /**
-     * A real logout, not just disconnecting: Close() alone (what this previously used) leaves
-     * TDLib's local session database on disk untouched - including the authenticated phone
-     * number - so restarting TDLib against the same directory would silently restore the old
-     * session instead of asking for a phone number again. This sends TdApi.LogOut() (which
-     * actually invalidates the session server-side, unlike Close()) and then deletes the local
-     * database directory outright as a guarantee, not just a best-effort cleanup.
+     * A real logout, not just disconnecting: TdApi.LogOut() ends the session on Telegram's
+     * servers (Close() alone only stops TDLib here and leaves the session alive there), then the
+     * local session database is deleted so restarting can't quietly restore it. Waits for TDLib
+     * to report it has fully closed before deleting its files (up to [LOG_OUT_TIMEOUT_MS] - no
+     * connection can hold LogOut up). If LogOut fails or doesn't finish, TDLib is closed
+     * directly and the result says the session may still be open on Telegram's side.
      */
-    suspend fun logOut() {
-        try {
-            sendSuspend(TdApi.LogOut())
-        } catch (e: Exception) {
-            Log.w("TdlibManager", "LogOut request failed, closing directly instead: ${e.message}")
-            client?.send(TdApi.Close()) { }
+    suspend fun logOut(): LogOutResult {
+        val running = client
+        var sessionEnded = false
+        if (running != null) {
+            tdlibClosed.value = false
+            sessionEnded = try {
+                sendSuspend(TdApi.LogOut())
+                withTimeoutOrNull(LOG_OUT_TIMEOUT_MS) { tdlibClosed.first { it } } != null
+            } catch (e: Exception) {
+                Log.w("TdlibManager", "LogOut failed: ${e.message}")
+                false
+            }
+            if (!sessionEnded) {
+                // Stop TDLib here at least, and wait for it to let go of its files.
+                running.send(TdApi.Close()) { }
+                withTimeoutOrNull(CLOSE_TIMEOUT_MS) { tdlibClosed.first { it } }
+            }
         }
-        // Brief pause so TDLib finishes flushing/closing its own database files before this
-        // deletes the directory out from under it.
-        delay(300)
 
         client = null
         fileProgress.clear()
         downloadsStarted.clear()
 
         val databaseDirectory = java.io.File(context.filesDir, "tdlib")
-        runCatching { databaseDirectory.deleteRecursively() }
+        val removed = databaseDirectory.deleteRecursively() || !databaseDirectory.exists() ||
+            // A file TDLib was still letting go of: one more try.
+            (delay(500).let { databaseDirectory.deleteRecursively() })
 
         _authState.value = TelegramAuthState.LoggedOut
         _connectionState.value = TelegramConnectionState.DISCONNECTED
+        return LogOutResult(sessionEnded = sessionEnded || running == null, localDataRemoved = removed)
+    }
+
+    private companion object {
+        const val LOG_OUT_TIMEOUT_MS = 15_000L
+        const val CLOSE_TIMEOUT_MS = 5_000L
     }
 }

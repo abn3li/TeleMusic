@@ -479,8 +479,15 @@ fun SettingsScreen(onBack: () -> Unit, onOpenSpotify: () -> Unit, onLoggedOut: (
                     scope.launch {
                         // A real logout (TdApi.LogOut + wiping the local session), not just a
                         // disconnect - otherwise the old session could be silently restored.
-                        app.tdlibManager.logOut()
+                        val result = app.tdlibManager.logOut()
                         app.credentialsStore.clear()
+                        // Only a logout that didn't fully happen says anything.
+                        val problem = when {
+                            !result.sessionEnded -> "Logged out on this phone, but Telegram couldn't be reached to end the session. To be sure, remove it in Telegram > Settings > Devices."
+                            !result.localDataRemoved -> "Logged out, but some Telegram files couldn't be deleted from this phone. Reset Library or reinstalling removes them."
+                            else -> null
+                        }
+                        problem?.let { android.widget.Toast.makeText(context, it, android.widget.Toast.LENGTH_LONG).show() }
                         onLoggedOut()
                     }
                 }
