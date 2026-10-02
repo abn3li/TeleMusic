@@ -1,5 +1,13 @@
 package com.abn3li.telemusic.ui.nowplaying
 
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.material.icons.rounded.MusicNote
+import androidx.compose.animation.togetherWith
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.ExitTransition
+import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.AnimatedContent
 import com.abn3li.telemusic.ui.library.CalmSpinner
 import android.os.Build
 import androidx.compose.animation.core.CubicBezierEasing
@@ -490,6 +498,143 @@ private fun DrawScope.maskUnsung(layout: TextLayoutResult, sungChars: Float) {
     }
 }
 
+/**
+ * How many letters of [text] are sung, updated every frame from the player's position (which
+ * only arrives a few times a second) while it plays and [sweep] runs. Read it only while drawing,
+ * so a frame's change redraws the line without recomposing anything. No [sweep]: stays 0, no
+ * frames asked for.
+ */
+@Composable
+private fun rememberSungChars(
+    text: String,
+    sweep: SweepTiming?,
+    progressState: State<PlaybackProgress>,
+    isPlaying: Boolean
+): State<Float> {
+    val sungChars = remember { mutableFloatStateOf(0f) }
+    if (sweep != null) {
+        LaunchedEffect(sweep, isPlaying) {
+            val length = text.length.toFloat()
+            fun update(positionMs: Long) {
+                sungChars.floatValue = sweep.charsAt(positionMs).coerceIn(0f, length)
+            }
+            if (!isPlaying) {
+                // Paused: hold still, but follow a seek.
+                snapshotFlow { progressState.value.currentPositionMs }.collect { update(it) }
+                return@LaunchedEffect
+            }
+            var anchorMs = progressState.value.currentPositionMs
+            var anchorNanos = System.nanoTime()
+            var shownMs = anchorMs
+            update(anchorMs)
+            while (true) {
+                withFrameNanos { now ->
+                    val reported = progressState.value.currentPositionMs
+                    if (reported != anchorMs) {
+                        anchorMs = reported
+                        anchorNanos = now
+                    }
+                    val estimate = anchorMs + (now - anchorNanos) / 1_000_000
+                    // A position report slightly behind the guess mustn't pull letters back;
+                    // a real seek back does.
+                    shownMs = if (estimate < shownMs && shownMs - estimate < 400) shownMs else estimate
+                    update(shownMs)
+                }
+                // Done sweeping: stop asking for frames until the position jumps (a seek back
+                // into this line); the next line restarts this effect anyway.
+                if (sungChars.floatValue >= length) {
+                    val doneAt = progressState.value.currentPositionMs
+                    snapshotFlow { progressState.value.currentPositionMs }.first { it < doneAt }
+                    anchorMs = progressState.value.currentPositionMs
+                    anchorNanos = System.nanoTime()
+                    shownMs = anchorMs
+                    update(anchorMs)
+                }
+            }
+        }
+    }
+    return sungChars
+}
+
+/**
+ * The line being sung, under the title on Now Playing's cover page: a note and the line, the
+ * next one fading in as it starts. Word-timed lyrics (BiniLyrics) light up word by word; the
+ * rest show the whole line. Nothing between lines (an instrumental break) shows nothing, and a
+ * jump of more than one line (a seek) switches without the fade. Follows the position only
+ * while [active]; it asks for frames only during a fade or a word-timed sweep.
+ */
+@Composable
+internal fun CurrentLyricLine(
+    lines: List<LyricLine>,
+    viewModel: NowPlayingViewModel,
+    active: Boolean,
+    isPlaying: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val progressState = if (active) {
+        viewModel.playbackProgress.collectAsState()
+    } else {
+        remember { mutableStateOf(viewModel.playbackProgress.value) }
+    }
+    // Keyed on the state too: it's a different one once the player opens (the live position)
+    // than while closed (a still copy) - following the old one left the line stuck.
+    val index by remember(lines, progressState) {
+        derivedStateOf {
+            val position = progressState.value.currentPositionMs
+            lines.indexOfLast { it.timeMs <= position }.takeIf { it >= 0 && lines[it].text.isNotBlank() } ?: -1
+        }
+    }
+    AnimatedContent(
+        targetState = index,
+        transitionSpec = {
+            if (abs(targetState - initialState) <= 1 || initialState < 0 || targetState < 0) {
+                fadeIn(tween(300, easing = LyricEasing)) togetherWith fadeOut(tween(300, easing = LyricEasing))
+            } else {
+                EnterTransition.None togetherWith ExitTransition.None
+            }
+        },
+        contentAlignment = Alignment.CenterStart,
+        label = "currentLyricLine",
+        modifier = modifier.clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onClick)
+    ) { shown ->
+        val line = lines.getOrNull(shown)
+        if (line == null) {
+            Spacer(Modifier.fillMaxWidth())
+            return@AnimatedContent
+        }
+        val sweep = remember(line, shown) { sweepTiming(line, lines.getOrNull(shown + 1)) }
+        val sungChars by rememberSungChars(line.text, sweep, progressState, isPlaying && active)
+        var layout by remember { mutableStateOf<TextLayoutResult?>(null) }
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(
+                Icons.Rounded.MusicNote,
+                contentDescription = null,
+                tint = Color.White.copy(alpha = 0.7f),
+                modifier = Modifier.size(15.dp)
+            )
+            Spacer(Modifier.width(8.dp))
+            Text(
+                text = line.text,
+                onTextLayout = { layout = it },
+                // Word-timed: white, the mask dims what isn't sung yet. Line-timed: the whole line.
+                color = if (sweep != null) Color.White else Color.White.copy(alpha = 0.85f),
+                fontSize = 15.5.sp,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = if (sweep != null) Modifier
+                    .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
+                    .drawWithContent {
+                        drawContent()
+                        layout?.let { maskUnsung(it, sungChars) }
+                    }
+                else Modifier
+            )
+        }
+    }
+}
+
 @Composable
 private fun LyricLineText(
     text: String,
@@ -526,52 +671,8 @@ private fun LyricLineText(
     // change. The line just sung waits until it has scrolled away before blurring.
     val blurRadius by animateDpAsState(blurTarget, snap(delayMillis = if (justPassed) 260 else 0), label = "lyricBlur")
 
-    // How many letters are sung, updated every frame from the player's position (which only
-    // arrives a few times a second) while it plays. Read only while drawing, so a frame's change
-    // redraws the line without recomposing anything.
-    var sungChars by remember { mutableFloatStateOf(0f) }
+    val sungChars by rememberSungChars(text, sweep, progressState, isPlaying)
     var layout by remember { mutableStateOf<TextLayoutResult?>(null) }
-    if (sweep != null) {
-        LaunchedEffect(sweep, isPlaying) {
-            val length = text.length.toFloat()
-            fun update(positionMs: Long) {
-                sungChars = sweep.charsAt(positionMs).coerceIn(0f, length)
-            }
-            if (!isPlaying) {
-                // Paused: hold still, but follow a seek.
-                snapshotFlow { progressState.value.currentPositionMs }.collect { update(it) }
-                return@LaunchedEffect
-            }
-            var anchorMs = progressState.value.currentPositionMs
-            var anchorNanos = System.nanoTime()
-            var shownMs = anchorMs
-            update(anchorMs)
-            while (true) {
-                withFrameNanos { now ->
-                    val reported = progressState.value.currentPositionMs
-                    if (reported != anchorMs) {
-                        anchorMs = reported
-                        anchorNanos = now
-                    }
-                    val estimate = anchorMs + (now - anchorNanos) / 1_000_000
-                    // A position report slightly behind the guess mustn't pull letters back;
-                    // a real seek back does.
-                    shownMs = if (estimate < shownMs && shownMs - estimate < 400) shownMs else estimate
-                    update(shownMs)
-                }
-                // Done sweeping: stop asking for frames until the position jumps (a seek back
-                // into this line); the next line restarts this effect anyway.
-                if (sungChars >= length) {
-                    val doneAt = progressState.value.currentPositionMs
-                    snapshotFlow { progressState.value.currentPositionMs }.first { it < doneAt }
-                    anchorMs = progressState.value.currentPositionMs
-                    anchorNanos = System.nanoTime()
-                    shownMs = anchorMs
-                    update(anchorMs)
-                }
-            }
-        }
-    }
 
     Text(
         text = text,

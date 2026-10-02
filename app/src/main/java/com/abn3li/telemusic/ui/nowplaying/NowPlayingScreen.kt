@@ -279,10 +279,12 @@ private fun NowPlayingContent(
         }
     }
 
-    // Opening Lyrics (or skipping while it's open) searches once for a song that has none cached.
-    LaunchedEffect(state.song?.telegramMessageId, page) {
+    // The open player (any page - the cover page shows the line being sung) looks once for a song
+    // that has no lyrics yet: the saved ones on the phone first, then the internet. Never with
+    // the player closed or the app in the background, so songs passing by unseen cost nothing.
+    LaunchedEffect(state.song?.telegramMessageId, isExpanded) {
         val song = state.song ?: return@LaunchedEffect
-        if (page == PlayerPage.LYRICS && song.lyricsPlain.isNullOrBlank() && song.lyricsSynced.isNullOrBlank()) {
+        if (isExpanded && song.lyricsPlain.isNullOrBlank() && song.lyricsSynced.isNullOrBlank()) {
             viewModel.fetchLyricsOnDemand()
         }
     }
@@ -594,6 +596,26 @@ private fun PlayerPageArea(
                 plain = true
             )
         }
+    }
+
+    // The line being sung, between the title and the seek bar (saved synced lyrics only - it
+    // never searches on its own). Tapping it opens Lyrics.
+    if (showCoverTitle && state.lyricLines.isNotEmpty()) {
+        CurrentLyricLine(
+            lines = state.lyricLines,
+            viewModel = viewModel,
+            active = isExpanded && page == PlayerPage.ARTWORK,
+            isPlaying = state.isPlaying,
+            onClick = { onInteraction(); onPageChange(PlayerPage.LYRICS) },
+            modifier = Modifier
+                .zIndex(1f)
+                // Right on top of the seek bar, lined up with its left and right ends (26dp).
+                .padding(top = titleTop + 70.dp)
+                .padding(horizontal = 26.dp)
+                .fillMaxWidth()
+                .height(26.dp)
+                .graphicsLayer { alpha = (1f - morph.value * 2f).coerceIn(0f, 1f) }
+        )
     }
 
     if (showHeaderTitle) {
