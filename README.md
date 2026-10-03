@@ -18,10 +18,7 @@
 </p>
 
 <p align="center">
-  <img src="assets/screenshot-home.jpg" alt="Home" width="23%">
-  <img src="assets/screenshot-library.jpg" alt="Library" width="23%">
-  <img src="assets/screenshot-now-playing.jpg" alt="Now Playing" width="23%">
-  <img src="assets/screenshot-lyrics.jpg" alt="Lyrics" width="23%">
+  <img src="assets/screenshot-showcase-2.3.png" alt="TeleMusic Home, Library, Now Playing and Lyrics with Thunder" width="100%">
 </p>
 
 ---
