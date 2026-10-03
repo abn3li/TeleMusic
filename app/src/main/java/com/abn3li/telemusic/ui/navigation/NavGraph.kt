@@ -4,9 +4,7 @@ import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.union
 import androidx.compose.foundation.layout.displayCutout
 import androidx.compose.foundation.layout.systemBars
-import com.abn3li.telemusic.ui.theme.LocalPalette
 import com.abn3li.telemusic.ui.theme.paper
-import com.abn3li.telemusic.ui.theme.ink
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.Dispatchers
@@ -15,13 +13,10 @@ import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.windowInsetsPadding
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.semantics.Role
-import androidx.compose.foundation.layout.Spacer
 import kotlinx.coroutines.flow.first
 import com.abn3li.telemusic.ui.library.HomeScreen
 import com.abn3li.telemusic.ui.library.AlertAction
@@ -35,6 +30,7 @@ import androidx.compose.animation.ExitTransition
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -56,8 +52,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -227,9 +223,9 @@ fun TgMusicNavGraph(navController: NavHostController = rememberNavController()) 
     val inLibrary = currentRoute in LibraryRoutes
     val showBottomBar = inLibrary || currentRoute in listOf(Routes.HOME, Routes.SEARCH, Routes.SYNC, Routes.SETTINGS)
 
-    val miniPlayerBottomMargin = if (showBottomBar) NavBarHeight + 4.dp else 12.dp
+    val miniPlayerBottomMargin = if (showBottomBar) NavBarHeight else 12.dp
     val miniPlayerInset = if (playerState.song != null) {
-        if (showBottomBar) NavBarHeight + 4.dp + MiniPlayerHeight + 12.dp else MiniPlayerHeight
+        if (showBottomBar) NavBarHeight + MiniPlayerHeight + 12.dp else MiniPlayerHeight
     } else if (showBottomBar) NavBarHeight + 12.dp else 0.dp
 
     // The pages and the tab bar stay clear of the system bars; only the player (below) draws
@@ -246,7 +242,7 @@ fun TgMusicNavGraph(navController: NavHostController = rememberNavController()) 
             NavHost(
                 navController = navController,
                 startDestination = startDestination,
-                modifier = Modifier.padding(innerPadding),
+                modifier = Modifier.padding(innerPadding).then(rememberVerticalBounce(currentRoute)),
                 enterTransition = { EnterTransition.None },
                 exitTransition = { ExitTransition.None },
                 popEnterTransition = { EnterTransition.None },
@@ -426,25 +422,24 @@ private fun AppBottomNavBar(
 ) {
     val items = remember {
         listOf(
-            NavigationItem(Routes.HOME, "Home", NavIcons.Home, NavIcons.HomeFilled),
+            NavigationItem(Routes.HOME, "Home", NavIcons.Home),
             NavigationItem(Routes.SEARCH, "Search", NavIcons.Search),
             NavigationItem(Routes.SYNC, "Sync", NavIcons.Sync),
             NavigationItem(Routes.LIBRARY, "Library", NavIcons.Library)
         )
     }
 
-    // Docked, no container: the items sit on a fade to black, so the page scrolls away under
-    // them instead of being cut off by a solid edge. Nothing is drawn behind the selected one -
-    // colour and a slight lift are the only selection cue.
-    Column(
+    // The parent already clears the system bars. Adding their inset here again lifts the tabs
+    // above their intended position and crowds the mini player.
+    Box(
         modifier = modifier
             .fillMaxWidth()
-            .background(navFade(paper))
-            .windowInsetsPadding(WindowInsets.navigationBars)
+            .height(NavBarHeight)
+            .background(paper)
     ) {
-        Spacer(Modifier.height(NavBarFadeHeight - NavBarHeight))
         Row(
-            modifier = Modifier.fillMaxWidth().height(NavBarHeight),
+            modifier = Modifier.fillMaxWidth().height(NavBarRowHeight),
+            horizontalArrangement = Arrangement.SpaceAround,
             verticalAlignment = Alignment.CenterVertically
         ) {
             items.forEach { item ->
@@ -459,63 +454,65 @@ private fun AppBottomNavBar(
     }
 }
 
-/** One tab: the whole cell is the touch target, with no ripple; icon and label ease between grey
- * and the accent, and the icon grows by 5%. Animations run only while the selection changes. */
+/** Keep the touch target full size while the icon and label shrink together during a press. */
 @Composable
 private fun NavBarItem(item: NavigationItem, selected: Boolean, onClick: () -> Unit, modifier: Modifier = Modifier) {
+    val interactionSource = remember { MutableInteractionSource() }
+    val pressed by interactionSource.collectIsPressedAsState()
+    val pressScale by animateFloatAsState(
+        targetValue = if (pressed) 0.93f else 1f,
+        animationSpec = spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessMedium),
+        label = "navPressScale"
+    )
     val color by animateColorAsState(
         targetValue = if (selected) AppAccent else NavInactive,
-        animationSpec = tween(durationMillis = 180),
         label = "navColor"
     )
-    val scale by animateFloatAsState(
-        targetValue = if (selected) 1.05f else 1f,
-        animationSpec = spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessMediumLow),
-        label = "navScale"
-    )
-    Column(
+    Box(
         modifier = modifier
             .fillMaxHeight()
             .clickable(
-                interactionSource = remember { MutableInteractionSource() },
+                interactionSource = interactionSource,
                 indication = null,
                 role = Role.Tab,
                 onClick = onClick
-            ),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center
+            )
     ) {
-        Icon(
-            imageVector = if (selected) item.selectedIcon else item.icon,
-            contentDescription = item.label,
-            tint = color,
-            modifier = Modifier
-                .size(NavIconSize)
-                .graphicsLayer { scaleX = scale; scaleY = scale }
-        )
-        Spacer(Modifier.height(3.dp))
-        Text(
-            text = item.label,
-            color = color,
-            fontSize = 11.sp,
-            lineHeight = 13.sp,
-            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
-            maxLines = 1
-        )
+        Column(
+            modifier = Modifier.fillMaxSize().graphicsLayer {
+                scaleX = pressScale
+                scaleY = pressScale
+            },
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
+        ) {
+            Icon(
+                imageVector = item.icon,
+                contentDescription = item.label,
+                tint = color,
+                modifier = Modifier.size(NavIconSize)
+            )
+            Text(
+                text = item.label,
+                color = color,
+                fontSize = 12.sp,
+                lineHeight = 12.sp,
+                fontWeight = FontWeight.Medium,
+                maxLines = 1
+            )
+        }
     }
 }
 
 private val NavBarHeight = 64.dp
-// The 2.2 fade, unchanged: the page scrolls away under the items into black.
-private val NavBarFadeHeight = 96.dp
-private val NavIconSize = 25.dp
-private val NavInactive = Color(0xFF8E8E93)
+private val NavBarRowHeight = 62.dp
+private val NavIconSize = 30.dp
+private val NavInactive = Color.Gray
 
 private data class NavigationItem(
     val route: String,
     val label: String,
-    val icon: ImageVector,
-    val selectedIcon: ImageVector = icon
+    val icon: ImageVector
 )
 
 /** The one-time "where should downloads go?" question, shown the first time any download is
@@ -543,15 +540,4 @@ private fun DownloadLocationPrompt(app: TgMusicApp) {
             )
         )
     }
-}
-
-/** The fade behind the bottom bar, into the current theme's page colour (black or white). */
-@Composable
-private fun navFade(page: Color): Brush = remember(page) {
-    Brush.verticalGradient(
-        0f to Color.Transparent,
-        0.3f to page.copy(alpha = 0.6f),
-        0.55f to page.copy(alpha = 0.92f),
-        1f to page
-    )
 }

@@ -144,7 +144,7 @@ fun MiniPlayer(
             shape = RoundedCornerShape(MiniPlayerCorner),
             color = LocalPalette.current.miniPlayer,
             border = BorderStroke(0.5.dp, ink.copy(alpha = 0.08f)),
-            shadowElevation = 10.dp,
+            shadowElevation = 0.dp,
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = MiniPlayerSideMargin)
