@@ -14,10 +14,6 @@
 ---
 
 <p align="center">
-  <img src="docs/banner.png" alt="TeleMusic banner" width="100%">
-</p>
-
-<p align="center">
   <img src="assets/screenshot-showcase-2.3.png" alt="TeleMusic Home, Library, Now Playing and Lyrics with Thunder" width="100%">
 </p>
 
