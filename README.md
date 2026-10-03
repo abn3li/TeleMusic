@@ -28,21 +28,16 @@
 
 ## ✨ Features
 
-- **🏠 Home** — shortcuts, pinned playlists, Recently Played, Made for You mixes, Top Artists and picks from YouTube Music
-- **📱 Home-screen widgets** — small, medium and large, with a live progress bar, shuffle, repeat, Like and up next
-- **🎵 Telegram-native library** — syncs audio from any channel/chat you already belong to, no `@username` guessing
-- **📚 Full library UI** — Playlists, Tracks, Albums, Artists, sortable by name/artist/album/date added
-- **🔍 YouTube Music Discovery** — real, browsable Home/New Releases/Genres feed for downloading
-- **🟢 Spotify import** — paste a Spotify playlist or album link; songs are matched on YouTube Music and can be downloaded
-- **📥 Smart playlists** — Liked Songs, Telegram Songs, and Downloaded Songs, built in and always up to date
-- **🔄 Update checker** — Settings → About checks GitHub for a newer release
-- **🏷️ Auto metadata & artwork** — fills in missing title/artist/album/art via iTunes → Deezer → MusicBrainz
-- **🎤 Lyrics** — plain and line-synced, from LRCLIB, KuGou, and lyrics.ovh, with manual search as a fallback
-- **▶️ Real playback** — Media3 session with working lock screen, notification, Bluetooth, and Android Auto controls
-- **⬇️ Smart caching** — streams instantly, caches locally, with a separate explicit-download option and a size-limited auto-cache
-- **🎨 Dynamic Now Playing** — backdrop generated from each track's own artwork colors, swipe to skip, swipe down to dismiss
-- **🔒 Private by design** — your own Telegram API credentials, encrypted on-device, no third-party backend
-- **🌐 Proxy & DNS options** — MTProto proxy support and a choice of DNS resolvers for restrictive networks
+- **Telegram library** — sync music from your channels and chats.
+- **YouTube Music** — search, discover, stream and download songs.
+- **Spotify & local imports** — import playlists, albums or audio files from your phone.
+- **Personal Home** — Continue Listening, Recently Played, mixes and community playlists.
+- **Organised library** — songs, albums, artists and playlists, with automatic metadata and artwork.
+- **Offline listening** — download favourites and manage your streaming cache.
+- **Synced lyrics** — follow lyrics line by line or word by word when available.
+- **Now Playing** — full-cover artwork, animated backgrounds and an expandable mini player.
+- **Dark & light themes** — choose Dark, Light or follow your system.
+- **Playback controls** — background playback, home-screen widgets, Bluetooth and Android Auto.
 
 ---
 
