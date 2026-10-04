@@ -11,6 +11,22 @@ import org.json.JSONObject
  */
 object BrowseParser {
 
+    fun relatedBrowseId(response: JSONObject): String? =
+        collectRenderers(response, "browseEndpoint").firstOrNull { endpoint ->
+            endpoint.optJSONObject("browseEndpointContextSupportedConfigs")
+                ?.optJSONObject("browseEndpointContextMusicConfig")
+                ?.optString("pageType") == "MUSIC_PAGE_TYPE_TRACK_RELATED"
+        }?.optString("browseId")?.takeIf { it.isNotBlank() }
+
+    /** Keep the song recommendations separate from performances and artist discographies. */
+    fun parseRelatedSongs(response: JSONObject): List<BrowseTrack> {
+        val shelf = collectRenderers(response, "musicCarouselShelfRenderer").firstOrNull {
+            it.optJSONObject("header")?.optJSONObject("musicCarouselShelfBasicHeaderRenderer")
+                ?.optJSONObject("title")?.runs().equals("You might also like", ignoreCase = true)
+        } ?: return emptyList()
+        return parseSearchSongs(shelf)
+    }
+
     fun parseHomeFeed(response: JSONObject): List<HomeSection> {
         val tabs = response.opt("contents").obj()?.opt("singleColumnBrowseResultsRenderer").obj()?.opt("tabs").arr()
         val shelves = tabs?.optJSONObject(0)?.opt("tabRenderer").obj()?.opt("content").obj()

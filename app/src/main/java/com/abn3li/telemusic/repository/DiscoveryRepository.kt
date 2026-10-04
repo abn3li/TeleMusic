@@ -34,6 +34,27 @@ class DiscoveryRepository(
     @Volatile private var cachedGenres: List<BrowseCollection>? = null
     @Volatile private var cachedCommunity: HomeSection? = null
 
+    private val relatedMutex = kotlinx.coroutines.sync.Mutex()
+    private val relatedCache = LinkedHashMap<String, List<BrowseTrack>>()
+
+    /** Asked only when Related opens; a small session cache avoids repeated requests. */
+    suspend fun relatedSongs(videoId: String, force: Boolean = false): List<BrowseTrack> {
+        relatedMutex.lock()
+        try {
+            if (!force) relatedCache[videoId]?.let { return it }
+            val tracks = withContext(Dispatchers.IO) {
+                val browseId = BrowseParser.relatedBrowseId(client.next(videoId))
+                    ?: return@withContext emptyList<BrowseTrack>()
+                BrowseParser.parseRelatedSongs(client.browse(browseId)).filter { it.videoId != videoId }
+            }
+            relatedCache[videoId] = tracks
+            if (relatedCache.size > 20) relatedCache.remove(relatedCache.keys.first())
+            return tracks
+        } finally {
+            relatedMutex.unlock()
+        }
+    }
+
     /** YouTube Music's new releases, for Home. Of the anonymous home feed itself only the
      * community playlists are used (see [communityPlaylists]); its other shelves aren't shown. */
     suspend fun newReleases(): HomeSection? {

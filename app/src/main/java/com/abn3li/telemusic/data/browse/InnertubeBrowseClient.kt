@@ -56,6 +56,14 @@ class InnertubeBrowseClient {
     fun browseContinuation(continuation: String): JSONObject =
         post("browse", JSONObject().apply { put("continuation", continuation) })
 
+    fun next(videoId: String): JSONObject = post("next", JSONObject().apply {
+        put("videoId", videoId)
+        put("playlistId", "RDAMVM$videoId")
+        put("enablePersistentPlaylistPanel", true)
+        put("isAudioOnly", true)
+        put("tunerSettingValue", "AUTOMIX_SETTING_NORMAL")
+    })
+
     // An anonymous visitor id, like the one the website gets on its first visit. Sent with
     // every request, it makes these look like one returning visitor instead of a stranger each
     // time - fewer "are you a bot" refusals. Minted once per run; kept from any response too.

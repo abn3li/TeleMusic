@@ -47,6 +47,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.MoreHoriz
 import androidx.compose.material.icons.rounded.MusicNote
 import androidx.compose.material.icons.rounded.Star
+import androidx.compose.material.icons.rounded.KeyboardArrowUp
 import androidx.compose.material.icons.rounded.StarBorder
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -248,7 +249,12 @@ private fun NowPlayingContent(
     var showSongInfoDialog by remember { mutableStateOf(false) }
     var showManualLyricsDialog by remember { mutableStateOf(false) }
     var showLyricsSourceDialog by remember { mutableStateOf(false) }
+    var showRelated by remember { mutableStateOf(false) }
     var overflowSong by remember { mutableStateOf<SongEntity?>(null) }
+
+    LaunchedEffect(state.song?.youtubeVideoId) {
+        if (state.song?.youtubeVideoId.isNullOrBlank()) showRelated = false
+    }
 
     val onInteraction: () -> Unit = {
         lastInteractionMs = SystemClock.uptimeMillis()
@@ -266,6 +272,7 @@ private fun NowPlayingContent(
         snapshotFlow { expansionFraction.value }.first { it <= 0.001f }
         page = PlayerPage.ARTWORK
         showControls = true
+        showRelated = false
     }
 
     // On the Lyrics page the controls step aside after a few seconds without a touch, as long as
@@ -381,7 +388,7 @@ private fun NowPlayingContent(
                         Modifier
                             .fillMaxWidth()
                             .padding(horizontal = 26.dp)
-                            .padding(top = 6.dp, bottom = 36.dp)
+                            .padding(top = 6.dp, bottom = if (!state.song?.youtubeVideoId.isNullOrBlank()) 8.dp else 36.dp)
                     ) {
                         PlayerScrubber(viewModel = viewModel, active = playerVisible, onInteraction = onInteraction)
                         TransportRow(
@@ -404,9 +411,46 @@ private fun NowPlayingContent(
                                 page = if (page == PlayerPage.QUEUE) PlayerPage.ARTWORK else PlayerPage.QUEUE
                             }
                         )
+                        if (!state.song?.youtubeVideoId.isNullOrBlank()) {
+                            Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                                IconButton(
+                                    onClick = { onInteraction(); showRelated = true },
+                                    modifier = Modifier.pointerInput(Unit) {
+                                        val openDistance = 24.dp.toPx()
+                                        var dragDistance = 0f
+                                        // Keep small finger movements as taps; open only after an upward swipe.
+                                        detectVerticalDragGestures(
+                                            onDragStart = { dragDistance = 0f },
+                                            onDragEnd = {
+                                                if (dragDistance <= -openDistance) {
+                                                    onInteraction()
+                                                    showRelated = true
+                                                }
+                                            },
+                                            onDragCancel = { dragDistance = 0f },
+                                            onVerticalDrag = { change, dragAmount ->
+                                                change.consume()
+                                                dragDistance += dragAmount
+                                            }
+                                        )
+                                    }
+                                ) {
+                                    Icon(
+                                        androidx.compose.material.icons.Icons.Rounded.KeyboardArrowUp,
+                                        contentDescription = "Related songs",
+                                        tint = Color.White.copy(alpha = 0.7f),
+                                        modifier = Modifier.size(24.dp)
+                                    )
+                                }
+                            }
+                        }
                     }
                 }
             }
+        }
+
+        if (showRelated && isExpanded && !state.song?.youtubeVideoId.isNullOrBlank()) {
+            RelatedSongsSheet(state, viewModel, onDismiss = { showRelated = false })
         }
 
         overflowSong?.let { song ->

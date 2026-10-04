@@ -44,6 +44,13 @@ data class QueueUiState(
     val upNext: List<SongEntity> = emptyList()
 )
 
+data class RelatedUiState(
+    val videoId: String? = null,
+    val tracks: List<BrowseTrack> = emptyList(),
+    val loading: Boolean = false,
+    val error: String? = null
+)
+
 data class NowPlayingUiState(
     val song: SongEntity? = null,
     val lyricLines: List<LyricLine> = emptyList(),
@@ -87,6 +94,74 @@ class NowPlayingViewModel(
     private var prefetchJob: Job? = null
     private var lyricsJob: Job? = null
     private var lyricsSourceJob: Job? = null
+
+    private val _relatedState = MutableStateFlow(RelatedUiState())
+    val relatedState: StateFlow<RelatedUiState> = _relatedState
+    private var relatedJob: Job? = null
+
+    fun fetchRelated(force: Boolean = false) {
+        val id = _uiState.value.song?.youtubeVideoId?.takeIf { it.isNotBlank() } ?: return
+        if (!force && _relatedState.value.videoId == id && relatedJob?.isActive == true) return
+        relatedJob?.cancel()
+        _relatedState.value = RelatedUiState(videoId = id, loading = true)
+        relatedJob = viewModelScope.launch {
+            try {
+                val tracks = (context.applicationContext as com.abn3li.telemusic.TgMusicApp)
+                    .discoveryRepository.relatedSongs(id, force)
+                if (_uiState.value.song?.youtubeVideoId == id) {
+                    _relatedState.value = RelatedUiState(videoId = id, tracks = tracks)
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                if (_uiState.value.song?.youtubeVideoId == id) {
+                    _relatedState.value = RelatedUiState(videoId = id, error = "Couldn't load recommendations. Check your connection and try again.")
+                }
+            }
+        }
+    }
+
+    fun closeRelated() {
+        relatedJob?.cancel()
+        _relatedState.value = RelatedUiState()
+    }
+
+    fun playRelated(tracks: List<BrowseTrack>, index: Int) {
+        viewModelScope.launch {
+            val ids = withContext(Dispatchers.Default) { repository.queueIdsForStreams(tracks) }
+            playFromQueue(ids, index)
+        }
+    }
+
+    fun queueRelated(track: BrowseTrack) {
+        viewModelScope.launch {
+            val id = withContext(Dispatchers.Default) { repository.queueIdsForStreams(listOf(track)).first() }
+            playNext(id)
+        }
+    }
+
+    fun downloadRelated(track: BrowseTrack) {
+        if (!relatedDownloads.add(track.videoId)) return
+        android.widget.Toast.makeText(context, "Downloading ${track.title}", android.widget.Toast.LENGTH_SHORT).show()
+        viewModelScope.launch {
+            try {
+                withContext(Dispatchers.IO) {
+                    val id = repository.queueIdsForStreams(listOf(track)).first()
+                    val song = repository.getSongById(id) ?: error("Song not found")
+                    if (!song.isExplicitDownload) repository.downloadExplicitly(song)
+                }
+                android.widget.Toast.makeText(context, "Downloaded ${track.title}", android.widget.Toast.LENGTH_SHORT).show()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                android.widget.Toast.makeText(context, "Couldn't download this song", android.widget.Toast.LENGTH_SHORT).show()
+            } finally {
+                relatedDownloads.remove(track.videoId)
+            }
+        }
+    }
+
+    private val relatedDownloads = mutableSetOf<String>()
 
     // The Queue page's two sections. Kept out of NowPlayingUiState so the queue list only
     // recomposes on a real queue change, never on the 300ms position tick.
