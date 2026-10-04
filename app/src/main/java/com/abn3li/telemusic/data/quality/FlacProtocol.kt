@@ -70,41 +70,87 @@ internal data class FlacCandidate(val user: String, val filename: String, val si
 
 internal fun normalizedRecording(value: String): String = Normalizer.normalize(value, Normalizer.Form.NFKD)
     .replace(Regex("\\p{M}"), "").lowercase(Locale.ROOT)
+    .replace(Regex("(?<=\\p{L})['’‘](?=\\p{L})"), "")
     .replace(Regex("[^\\p{L}\\p{N}]+"), " ").trim()
 
+private val bracketedCredit = Regex("(?i)[\\[(]\\s*(?:feat(?:uring)?\\.?|ft\\.?|with)\\s+([^\\])]+)[\\])]")
+private val trailingCredit = Regex("(?i)\\s+(?:feat(?:uring)?\\.?|ft\\.?)\\s+([^\\[\\]()]+)")
+
+private fun withoutCredits(value: String) = value.replace(bracketedCredit, " ").replace(trailingCredit, " ")
+
+private fun creditWords(value: String): List<String> {
+    val cleaned = value.replace(Regex("(?i)\\.(?:flac|mp3|m4a|ogg|opus|wav)$"), "")
+    return (bracketedCredit.findAll(cleaned) + trailingCredit.findAll(cleaned))
+        .map { it.groupValues[1] }.joinToString(" ").let(::normalizedRecording)
+        .split(' ').filter { it.isNotBlank() }
+}
+
 internal fun cleanFlacTitle(value: String): String {
-    val labels = "(?:official\\s+(?:music\\s+)?(?:video|audio|visuali[sz]er)|(?:official\\s+)?lyric(?:s|\\s+video)|(?:official\\s+)?(?:hd|4k)\\s+video)"
+    val labels = "(?:(?:official\\s+)?(?:music\\s+)?(?:video|audio|visuali[sz]er)|(?:official\\s+)?lyric(?:s|\\s+video)|(?:official\\s+)?(?:hd|4k)\\s+video)"
     val cleaned = value.replace(Regex("(?i)[\\[(]\\s*$labels\\s*[\\])]"), " ")
         .replace(Regex("(?i)\\s*[-–|]\\s*$labels\\s*$"), "")
+        .replace(Regex("(?i)\\.(?:flac|mp3|m4a|ogg|opus|wav)$"), "")
+        // Only numbered file prefixes with punctuation; "7 Rings" is a real title.
+        .replace(Regex("^\\d{1,3}\\s*[._-]\\s*"), "")
+        .let(::withoutCredits)
         .replace(Regex("\\s+"), " ").trim()
-    return cleaned.takeIf { it.length >= 2 } ?: value.trim()
+    return cleaned.ifBlank { value.trim() }
 }
 
 internal fun cleanFlacArtist(value: String): String = value
     .replace(Regex("(?i)\\s*-\\s*Topic$|VEVO$"), "").trim()
 
+private fun primaryArtist(value: String) = withoutCredits(cleanFlacArtist(value))
+    .split(Regex("\\s*[,;]\\s*|\\s+[&×]\\s+"), limit = 2).first().trim()
+
 private fun titleWords(value: String) = normalizedRecording(cleanFlacTitle(value)).split(' ').filter { it.isNotBlank() }
-private fun artistWords(value: String) = normalizedRecording(cleanFlacArtist(value))
+private fun artistWords(value: String) = normalizedRecording(primaryArtist(value))
     .split(' ').filter { it.isNotBlank() }.let { if (it.size > 1 && it.first() == "the") it.drop(1) else it }
 
 private fun containsWords(value: String, words: List<String>): Boolean {
-    val available = normalizedRecording(value).split(' ').toSet()
-    return words.isNotEmpty() && words.all { it in available }
+    if (words.isEmpty()) return false
+    val available = normalizedRecording(value).split(' ').filter { it.isNotBlank() }
+    if (words.all { it in available }) return true
+    // Joined or separated punctuation can spell the same name, such as AC/DC and ACDC.
+    // Compare whole tokens so Thunder never matches Thunderstruck.
+    val joined = words.joinToString("")
+    return joined.length >= 4 && available.indices.any { start ->
+        (1..minOf(words.size + 2, available.size - start)).any { count ->
+            available.subList(start, start + count).joinToString("") == joined
+        }
+    }
+}
+
+private fun recordingTitle(target: FlacTarget): String {
+    val title = cleanFlacTitle(target.title)
+    val parts = title.split(Regex("\\s+[-–—|]\\s+"), limit = 2)
+    if (parts.size == 2 && containsWords(parts[0], artistWords(target.artist)) &&
+        containsWords(primaryArtist(target.artist), titleWords(parts[0]))) return parts[1]
+    return title
+}
+
+private fun creditsMatch(value: String, target: FlacTarget, artist: String = ""): Boolean {
+    val expected = creditWords(target.title) + creditWords(target.artist)
+    val actual = creditWords(value) + creditWords(artist)
+    // Credits are often absent in filenames. Conflicting explicit credits are unsafe.
+    return expected.isEmpty() || actual.isEmpty() ||
+        (containsWords(actual.joinToString(" "), expected) && containsWords(expected.joinToString(" "), actual))
 }
 
 internal fun flacSearchQueries(target: FlacTarget): List<String> {
-    val title = normalizedRecording(cleanFlacTitle(target.title))
-    val artist = normalizedRecording(cleanFlacArtist(target.artist))
+    val title = normalizedRecording(recordingTitle(target))
+    val artist = normalizedRecording(primaryArtist(target.artist))
     return listOf("$artist $title".trim(), title).filter { it.length >= 2 }.distinct().map { it.take(250) }
 }
 
 internal fun recordingMatches(path: String, target: FlacTarget, requireArtist: Boolean = true): Boolean {
-    if (!containsWords(path, titleWords(target.title))) return false
+    if (!containsWords(path, titleWords(recordingTitle(target)))) return false
     if (requireArtist && !containsWords(path, artistWords(target.artist))) return false
+    if (!creditsMatch(path.substringAfterLast('\\').substringAfterLast('/'), target)) return false
     // A shared directory may contain several versions of a song; never guess across versions.
     val variants = listOf("live", "remix", "acoustic", "instrumental", "karaoke", "demo", "remaster", "remastered")
-    val normalized = normalizedRecording(path.substringAfterLast('\\').substringAfterLast('/'))
-    val original = normalizedRecording(cleanFlacTitle(target.title))
+    val normalized = normalizedRecording(withoutCredits(path.substringAfterLast('\\').substringAfterLast('/')))
+    val original = normalizedRecording(recordingTitle(target))
     return variants.none { (" $normalized ").contains(" $it ") != (" $original ").contains(" $it ") }
 }
 
@@ -238,10 +284,12 @@ internal fun verifiedRecording(header: FlacHeader, target: FlacTarget, path: Str
     if (kotlin.math.abs(header.durationMs - target.durationMs) > 2500) return false
     val title = header.tags["TITLE"].orEmpty()
     val artist = header.tags["ARTIST"].orEmpty()
+    val actualTitle = recordingTitle(target.copy(title = title))
     val titleMatches = if (title.isBlank()) path != null && recordingMatches(path, target)
-        else containsWords(title, titleWords(target.title)) && containsWords(cleanFlacTitle(target.title), titleWords(title)) &&
+        else containsWords(actualTitle, titleWords(recordingTitle(target))) &&
+            containsWords(recordingTitle(target), titleWords(actualTitle)) &&
             recordingMatches(title, target, requireArtist = false)
     val artistMatches = if (artist.isBlank()) path != null && containsWords(path, artistWords(target.artist))
         else containsWords(artist, artistWords(target.artist))
-    return titleMatches && artistMatches
+    return titleMatches && artistMatches && creditsMatch(title, target, artist)
 }
