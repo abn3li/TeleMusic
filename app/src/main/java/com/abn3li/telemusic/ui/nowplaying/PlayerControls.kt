@@ -156,6 +156,7 @@ internal fun PlayerScrubber(
     viewModel: NowPlayingViewModel,
     active: Boolean,
     onInteraction: () -> Unit,
+    qualityStatus: @Composable () -> Unit,
     modifier: Modifier = Modifier
 ) {
     // The player stays composed while collapsed; following the 300ms position tick there would
@@ -190,6 +191,7 @@ internal fun PlayerScrubber(
                 letterSpacing = 0.3.sp,
                 modifier = Modifier.weight(1f)
             )
+            qualityStatus()
             Text(
                 "-${formatMs((durationMs - shownPositionMs).coerceAtLeast(0))}",
                 color = Color.White.copy(alpha = 0.45f),

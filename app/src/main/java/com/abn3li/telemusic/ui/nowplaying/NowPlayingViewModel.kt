@@ -580,7 +580,9 @@ class NowPlayingViewModel(
 
     fun downloadCurrentSong() {
         val song = _uiState.value.song ?: return
-        if (song.isExplicitDownload) return
+        val app = context.applicationContext as com.abn3li.telemusic.TgMusicApp
+        val activeFlac = app.flacUpgradeStore.activeFlac.value?.songId == song.telegramMessageId.toString()
+        if (_uiState.value.isDownloading || song.isExplicitDownload && (!activeFlac || song.sourceMime == "audio/flac")) return
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(isDownloading = true)
             val failure = runCatching { repository.downloadExplicitly(song) }.exceptionOrNull()

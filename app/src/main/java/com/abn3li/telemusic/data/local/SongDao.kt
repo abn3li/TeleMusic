@@ -42,6 +42,9 @@ interface SongDao {
     @Query("UPDATE songs SET sourceSizeBytes = :sizeBytes, sourceMime = :mime WHERE telegramMessageId = :id")
     suspend fun setSourceInfo(id: Long, sizeBytes: Long, mime: String?)
 
+    @Query("UPDATE songs SET localFilePath = :path, isExplicitDownload = 1, exportedFileUri = :exportedUri, sourceSizeBytes = :sizeBytes, sourceMime = 'audio/flac' WHERE telegramMessageId = :id")
+    suspend fun setFlacDownloaded(id: Long, path: String, exportedUri: String?, sizeBytes: Long): Int
+
     /** Library songs from YouTube with this title and artist (any letter case). */
     @Query("SELECT * FROM songs WHERE youtubeVideoId IS NOT NULL AND LOWER(TRIM(title)) = LOWER(TRIM(:title)) AND LOWER(TRIM(artist)) = LOWER(TRIM(:artist))")
     suspend fun findYoutubeByTitleAndArtist(title: String, artist: String): List<SongEntity>
@@ -94,6 +97,9 @@ interface SongDao {
 
     @Query("UPDATE songs SET localFilePath = :path WHERE telegramMessageId = :id")
     suspend fun setLocalFilePath(id: Long, path: String?)
+
+    @Query("UPDATE songs SET localFilePath = :path WHERE telegramMessageId = :id AND isExplicitDownload = 0")
+    suspend fun setCachedFilePath(id: Long, path: String)
 
     /** A finished Telegram download. [exportedUri] null keeps whatever folder copy was recorded. */
     @Query("UPDATE songs SET telegramFileId = :fileId, localFilePath = :path, isExplicitDownload = 1, exportedFileUri = COALESCE(:exportedUri, exportedFileUri) WHERE telegramMessageId = :id")

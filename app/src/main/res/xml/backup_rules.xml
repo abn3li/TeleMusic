@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<full-backup-content>
+    <!-- Keystore keys cannot be restored alongside encrypted account preferences. -->
+    <exclude domain="sharedpref" path="quality_account.xml" />
+</full-backup-content>

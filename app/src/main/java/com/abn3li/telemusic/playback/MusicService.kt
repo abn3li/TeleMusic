@@ -67,13 +67,17 @@ class MusicService : MediaLibraryService() {
     private var mediaSession: MediaLibrarySession? = null
     private lateinit var player: ExoPlayer
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+    private var flacUpgrade: FlacUpgradeController? = null
 
     @OptIn(UnstableApi::class)
     override fun onCreate() {
         super.onCreate()
         running = this
         val app = application as TgMusicApp
-        val dataSourceFactory = DefaultDataSource.Factory(this, ResolvingDataSource.Factory(app.tdlibManager))
+        val normalDataSourceFactory = DefaultDataSource.Factory(this, ResolvingDataSource.Factory(app.tdlibManager))
+        val dataSourceFactory = androidx.media3.datasource.DataSource.Factory {
+            FlacRoutingDataSource(normalDataSourceFactory.createDataSource())
+        }
 
         val extractorsFactory = DefaultExtractorsFactory()
             .setConstantBitrateSeekingEnabled(true)
@@ -103,16 +107,26 @@ class MusicService : MediaLibraryService() {
             .setHandleAudioBecomingNoisy(true)
             .build()
         player.addListener(object : Player.Listener {
-            override fun onPlayerError(error: PlaybackException) = refreshExpiredStreamLink(error)
+            override fun onPlayerError(error: PlaybackException) {
+                if (player.currentMediaItem?.localConfiguration?.uri?.scheme == "quality") {
+                    Log.i("FlacTransfer", "FLAC playback error: ${error.errorCodeName}")
+                }
+                if (flacUpgrade?.fallback() != true) refreshExpiredStreamLink(error)
+            }
 
             // The end-of-song advance lives here, in the service, so the queue keeps playing
             // with the app closed (it used to live only in Now Playing's listener, which goes
             // away with the app's screen). The app follows along via its transition listener.
             override fun onPlaybackStateChanged(playbackState: Int) {
+                if (playbackState == Player.STATE_READY) flacUpgrade?.onReady()
                 if (playbackState == Player.STATE_ENDED) advanceAfterSongEnded()
             }
 
             override fun onEvents(player: Player, events: Player.Events) {
+                if (events.containsAny(Player.EVENT_MEDIA_ITEM_TRANSITION, Player.EVENT_IS_PLAYING_CHANGED,
+                        Player.EVENT_PLAY_WHEN_READY_CHANGED, Player.EVENT_TIMELINE_CHANGED)) {
+                    flacUpgrade?.onPlayerEvent()
+                }
                 if (events.containsAny(
                         Player.EVENT_MEDIA_ITEM_TRANSITION, Player.EVENT_IS_PLAYING_CHANGED,
                         Player.EVENT_PLAYBACK_STATE_CHANGED, Player.EVENT_POSITION_DISCONTINUITY
@@ -120,6 +134,7 @@ class MusicService : MediaLibraryService() {
                 ) onPlayerChangedForWidgets()
             }
         })
+        flacUpgrade = FlacUpgradeController(app, player, serviceScope)
         ContextCompat.registerReceiver(
             this, screenReceiver,
             IntentFilter().apply {
@@ -377,6 +392,7 @@ class MusicService : MediaLibraryService() {
         MusicWidgets.onPlayerChanged(
             this, last.copy(isPlaying = false, positionMs = last.positionNow(), atElapsedMs = SystemClock.elapsedRealtime())
         )
+        flacUpgrade?.close()
         serviceScope.cancel()
         mediaSession?.run { player.release(); release(); mediaSession = null }
         super.onDestroy()

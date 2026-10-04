@@ -19,6 +19,7 @@ import com.abn3li.telemusic.data.local.PlaylistEntity
 import com.abn3li.telemusic.data.local.PlaylistSongCrossRef
 import com.abn3li.telemusic.data.local.SongDao
 import com.abn3li.telemusic.data.local.SongEntity
+import com.abn3li.telemusic.data.local.displayArtwork
 import com.abn3li.telemusic.data.download.DownloadQuality
 import com.abn3li.telemusic.data.download.MediaFolderExporter
 import com.abn3li.telemusic.data.download.YtDlpRepository
@@ -1127,6 +1128,47 @@ class MusicRepository(
      * see importPlaylistTrackAsStreamable) goes through yt-dlp instead of TDLib, same real
      * download [importDownloadedSong] already does for a search-result row. */
     suspend fun downloadExplicitly(song: SongEntity): String {
+        val flac = (appContext.applicationContext as com.abn3li.telemusic.TgMusicApp)
+            .flacUpgradeStore.acquireDownload(song.telegramMessageId.toString())
+        if (flac != null) try { return withContext(Dispatchers.IO) {
+            val (buffer, lease) = flac
+            val destination = File(appContext.filesDir, "flac_downloads").apply { mkdirs() }
+            val saved = File(destination, "${song.telegramMessageId}-${java.util.UUID.randomUUID()}.flac")
+            var exported: Uri? = null
+            var committed = false
+            val wasInLibrary = songDao.getById(song.telegramMessageId) != null
+            try {
+                // Completion is signalled by the writer; a partial stream is never saved as a download.
+                buffer.awaitComplete()
+                check(buffer.file.length() == buffer.totalSize) { "FLAC download is incomplete" }
+                buffer.file.copyTo(saved)
+                exported = exportToDownloadFolderIfConfigured(saved, sanitizedFileName(song.title, song.artist, "flac"))
+                val finalPath = exported?.toString() ?: saved.absolutePath
+                database.withTransaction {
+                    if (songDao.getById(song.telegramMessageId) == null && !wasInLibrary) {
+                        // Playing a search result need not create a library row until Download.
+                        songDao.upsert(song.copy(localFilePath = finalPath, isExplicitDownload = true,
+                            exportedFileUri = exported?.toString(), sourceSizeBytes = buffer.totalSize, sourceMime = "audio/flac"))
+                    } else {
+                        check(songDao.setFlacDownloaded(song.telegramMessageId, finalPath, exported?.toString(), buffer.totalSize) == 1) {
+                            "Song was removed while downloading"
+                        }
+                    }
+                }
+                committed = true
+                if (exported != null) saved.delete()
+                keepArtworkForOffline(song.displayArtwork)
+                finalPath
+            } finally {
+                lease.close()
+                if (!committed) {
+                    saved.delete()
+                    exported?.let { runCatching { mediaFolderExporter.delete(it) } }
+                }
+            }
+        } } finally {
+            withContext(kotlinx.coroutines.NonCancellable + Dispatchers.IO) { flac.second.close() }
+        }
         if (song.isLocalImport) return song.localFilePath ?: error("Local import ${song.telegramMessageId} has no file path")
         if (song.youtubeVideoId != null && song.localFilePath == null) {
             val destDir = File(appContext.filesDir, "youtube_downloads")
@@ -1222,6 +1264,8 @@ class MusicRepository(
             val progress = tdlibManager.getCachedFileProgress(song.telegramFileId)
             if (progress?.local?.isDownloadingCompleted == true) {
                 val current = songDao.getById(song.telegramMessageId) ?: return
+                // An original-source cache completion must never replace a saved FLAC.
+                if (current.isExplicitDownload) return
                 // Always sync to TDLib's real current path, not just when it was null - a song
                 // cancelled+deleted mid-stream (see TdlibManager.cancelDownload's own doc) and
                 // later replayed to a fresh completion still had its OLD, now-deleted path
@@ -1229,7 +1273,7 @@ class MusicRepository(
                 // that fresh file's real path unrecorded forever - orphaned on disk, invisible to
                 // enforceCacheLimit()'s DB-driven accounting no matter how correctly it ran.
                 if (current.localFilePath != progress.local.path) {
-                    songDao.setLocalFilePath(current.telegramMessageId, progress.local.path)
+                    songDao.setCachedFilePath(current.telegramMessageId, progress.local.path)
                 }
                 enforceCacheLimit(excludeSongId = song.telegramMessageId)
                 return
@@ -1368,7 +1412,7 @@ class MusicRepository(
         database.spotifyDao().deleteAllMatches()
         ytDlpRepository.clearStreamCache()
         withContext(Dispatchers.IO) {
-            for (dir in listOf("thumbnails", "artwork", "local_imports")) {
+            for (dir in listOf("thumbnails", "artwork", "local_imports", "flac_downloads")) {
                 File(appContext.filesDir, dir).listFiles()?.forEach { it.deleteRecursively() }
             }
         }

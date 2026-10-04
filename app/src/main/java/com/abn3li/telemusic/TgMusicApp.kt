@@ -25,6 +25,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 class TgMusicApp : Application(), ImageLoaderFactory {
+    val flacUpgradeStore by lazy { com.abn3li.telemusic.data.quality.FlacUpgradeStore(this) }
     lateinit var tdlibManager: TdlibManager; private set
     lateinit var musicRepository: MusicRepository; private set
     lateinit var spotifyImporter: com.abn3li.telemusic.repository.SpotifyImporter; private set

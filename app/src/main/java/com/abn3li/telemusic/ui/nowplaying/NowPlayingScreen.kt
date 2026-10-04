@@ -250,11 +250,13 @@ private fun NowPlayingContent(
     var showManualLyricsDialog by remember { mutableStateOf(false) }
     var showLyricsSourceDialog by remember { mutableStateOf(false) }
     var showRelated by remember { mutableStateOf(false) }
+    var showQuality by remember { mutableStateOf(false) }
     var overflowSong by remember { mutableStateOf<SongEntity?>(null) }
 
     LaunchedEffect(state.song?.youtubeVideoId) {
         if (state.song?.youtubeVideoId.isNullOrBlank()) showRelated = false
     }
+    LaunchedEffect(state.song?.telegramMessageId) { showQuality = false }
 
     val onInteraction: () -> Unit = {
         lastInteractionMs = SystemClock.uptimeMillis()
@@ -273,6 +275,7 @@ private fun NowPlayingContent(
         page = PlayerPage.ARTWORK
         showControls = true
         showRelated = false
+        showQuality = false
     }
 
     // On the Lyrics page the controls step aside after a few seconds without a touch, as long as
@@ -390,7 +393,13 @@ private fun NowPlayingContent(
                             .padding(horizontal = 26.dp)
                             .padding(top = 6.dp, bottom = if (!state.song?.youtubeVideoId.isNullOrBlank()) 8.dp else 36.dp)
                     ) {
-                        PlayerScrubber(viewModel = viewModel, active = playerVisible, onInteraction = onInteraction)
+                        PlayerScrubber(viewModel = viewModel, active = playerVisible, onInteraction = onInteraction,
+                            qualityStatus = {
+                                state.song?.let { song ->
+                                    QualityUpgradeButton(song, active = isExpanded,
+                                        onClick = { onInteraction(); showQuality = true })
+                                }
+                            })
                         TransportRow(
                             state = state,
                             onPrevious = { onInteraction(); viewModel.previousSong() },
@@ -451,6 +460,9 @@ private fun NowPlayingContent(
 
         if (showRelated && isExpanded && !state.song?.youtubeVideoId.isNullOrBlank()) {
             RelatedSongsSheet(state, viewModel, onDismiss = { showRelated = false })
+        }
+        state.song?.takeIf { showQuality && isExpanded }?.let { song ->
+            QualityUpgradeSheet(song, onDismiss = { showQuality = false; onInteraction() })
         }
 
         overflowSong?.let { song ->
@@ -615,13 +627,16 @@ private fun PlayerPageArea(
                     // every frame (~45% CPU while it runs), so it shouldn't repeat.
                     modifier = if (isExpanded) Modifier.basicMarquee(iterations = 1) else Modifier
                 )
-                Text(
-                    text = song?.artist ?: "",
-                    color = Color.White.copy(alpha = 0.55f),
-                    fontSize = 18.sp,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = song?.artist ?: "",
+                        color = Color.White.copy(alpha = 0.55f),
+                        fontSize = 18.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f)
+                    )
+                }
                 state.errorMessage?.let { error ->
                     Text(
                         text = error,

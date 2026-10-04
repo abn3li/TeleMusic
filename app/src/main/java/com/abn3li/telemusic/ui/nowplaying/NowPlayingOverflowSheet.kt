@@ -32,6 +32,9 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.collectAsState
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -70,6 +73,9 @@ internal fun NowPlayingOverflowSheet(
     onOpenArtist: (String) -> Unit,
     onOpenAlbum: (String) -> Unit
 ) {
+    val app = LocalContext.current.applicationContext as com.abn3li.telemusic.TgMusicApp
+    val flac by app.flacUpgradeStore.activeFlac.collectAsState()
+    val hasActiveFlac = flac?.songId == song.telegramMessageId.toString()
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val scope = rememberCoroutineScope()
     val haptics = LocalHapticFeedback.current
@@ -162,14 +168,15 @@ internal fun NowPlayingOverflowSheet(
             ) {
                 // A real local import is already on the device; a YouTube "Play" stream (local
                 // import flag but no file yet) can still be downloaded for real.
-                val isRealLocalImport = song.isLocalImport && song.localFilePath != null
+                val isRealLocalImport = song.isLocalImport && song.localFilePath != null && !song.isExplicitDownload && !hasActiveFlac
                 if (!isRealLocalImport) {
-                    val downloaded = song.isExplicitDownload
+                    val downloaded = song.isExplicitDownload && (!hasActiveFlac || song.sourceMime == "audio/flac")
                     SheetAction(
                         icon = if (downloaded) Icons.Rounded.CloudDone else Icons.Rounded.CloudDownload,
                         label = when {
                             downloaded -> "Downloaded"
                             isDownloading -> "Downloading…"
+                            hasActiveFlac -> "Download FLAC"
                             else -> "Download"
                         },
                         enabled = !downloaded && !isDownloading,

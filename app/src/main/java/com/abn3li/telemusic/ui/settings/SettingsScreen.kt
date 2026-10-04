@@ -229,6 +229,8 @@ fun SettingsScreen(onBack: () -> Unit, onOpenSpotify: () -> Unit, onLoggedOut: (
             )
         }
 
+        item("audio_quality") { FlacQualitySettingsGroup() }
+
         item("appearance") {
             GroupHeader("Appearance")
             GroupCard {

@@ -25,6 +25,7 @@ import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.produceState
+import androidx.compose.runtime.collectAsState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -50,6 +51,9 @@ private data class FileDetails(val format: String, val bitrate: String, val size
 @Composable
 internal fun SongInfoSheet(song: SongEntity, onDismiss: () -> Unit) {
     val context = LocalContext.current
+    val app = context.applicationContext as com.abn3li.telemusic.TgMusicApp
+    val activeFlac by app.flacUpgradeStore.activeFlac.collectAsState()
+    val flac = activeFlac?.takeIf { it.songId == song.telegramMessageId.toString() }
     // Reads the file's header and size - kept off the main thread.
     val details by produceState<FileDetails?>(null, song.telegramMessageId, song.localFilePath) {
         value = withContext(Dispatchers.IO) {
@@ -60,9 +64,10 @@ internal fun SongInfoSheet(song: SongEntity, onDismiss: () -> Unit) {
         }
     }
     val source = when {
+        flac != null -> "Streaming FLAC from Soulseek"
+        song.isExplicitDownload -> "Downloaded"
         // A YouTube "Play" stream is also flagged isLocalImport; only a real import has a file.
         song.isLocalImport && song.localFilePath != null -> "Imported from device"
-        song.isExplicitDownload -> "Downloaded"
         song.localFilePath != null -> "Cached"
         song.isLocalImport || song.youtubeVideoId != null -> "Streaming from YouTube"
         else -> "Streaming from Telegram"
@@ -120,12 +125,27 @@ internal fun SongInfoSheet(song: SongEntity, onDismiss: () -> Unit) {
                 InfoRow("Duration", formatMs(song.durationSeconds * 1000L))
             }
             InfoSection("Audio") {
-                InfoRow("Format", details?.format ?: "…")
+                InfoRow("Format", if (flac != null) {
+                    if (flac.bitDepth > 16 || flac.sampleRate > 48000) "FLAC · Hi-Res Lossless" else "FLAC · Lossless"
+                } else details?.format ?: "…")
                 InfoDivider()
-                InfoRow("Quality", details?.bitrate?.ifBlank { "Unknown" } ?: "…")
+                InfoRow("Quality", if (flac != null)
+                    "${flac.bitDepth}-bit / ${String.format(Locale.US, if (flac.sampleRate % 1000 == 0) "%.0f" else "%.1f", flac.sampleRate / 1000.0)} kHz"
+                    else details?.bitrate?.ifBlank { "Unknown" } ?: "…")
+                if (flac != null) {
+                    InfoDivider()
+                    InfoRow("Channels", if (flac.channels == 2) "Stereo" else "Mono")
+                }
             }
             InfoSection("File") {
-                InfoRow("Size", details?.size ?: "…")
+                InfoRow("Size", if (flac != null) String.format(Locale.US, "%.2f MB", flac.sizeBytes / (1024.0 * 1024.0)) else details?.size ?: "…")
+                if (flac != null) {
+                    val received by flac.downloadedBytes.collectAsState()
+                    if (received < flac.sizeBytes) {
+                        InfoDivider()
+                        InfoRow("Buffered", String.format(Locale.US, "%.2f / %.2f MB", received / (1024.0 * 1024.0), flac.sizeBytes / (1024.0 * 1024.0)))
+                    }
+                }
                 InfoDivider()
                 InfoRow("Source", source)
             }
