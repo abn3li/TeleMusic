@@ -1,0 +1,60 @@
+{
+  "media3_commit": "b01c6ffcb3fca3d038476dab5d3bc9c9f2010781",
+  "sources": [
+    {
+      "path": "third_party/media3-ffmpeg/src/main/java/androidx/media3/decoder/ffmpeg/FfmpegAudioDecoder.java",
+      "url": "https://raw.githubusercontent.com/androidx/media/b01c6ffcb3fca3d038476dab5d3bc9c9f2010781/libraries/decoder_ffmpeg/src/main/java/androidx/media3/decoder/ffmpeg/FfmpegAudioDecoder.java",
+      "sha256": "3e29133f941d3f94af40496d05fb18b96754e0066c23a95951baee276524e1e5"
+    },
+    {
+      "path": "third_party/media3-ffmpeg/src/main/java/androidx/media3/decoder/ffmpeg/FfmpegAudioRenderer.java",
+      "url": "https://raw.githubusercontent.com/androidx/media/b01c6ffcb3fca3d038476dab5d3bc9c9f2010781/libraries/decoder_ffmpeg/src/main/java/androidx/media3/decoder/ffmpeg/FfmpegAudioRenderer.java",
+      "sha256": "340a614e99c0725a38a6c978539fe36fe28a99414da53534a9914e6242a55234"
+    },
+    {
+      "path": "third_party/media3-ffmpeg/src/main/java/androidx/media3/decoder/ffmpeg/FfmpegDecoderException.java",
+      "url": "https://raw.githubusercontent.com/androidx/media/b01c6ffcb3fca3d038476dab5d3bc9c9f2010781/libraries/decoder_ffmpeg/src/main/java/androidx/media3/decoder/ffmpeg/FfmpegDecoderException.java",
+      "sha256": "9e73968d0802b2d7f8add911ec4dc5a6e621777e997eca74332e173c5463ad7a"
+    },
+    {
+      "path": "third_party/media3-ffmpeg/src/main/java/androidx/media3/decoder/ffmpeg/FfmpegLibrary.java",
+      "url": "https://raw.githubusercontent.com/androidx/media/b01c6ffcb3fca3d038476dab5d3bc9c9f2010781/libraries/decoder_ffmpeg/src/main/java/androidx/media3/decoder/ffmpeg/FfmpegLibrary.java",
+      "sha256": "d7d00601c1864f742c3e0d73f7e9b77d9946f2a9dbe5a6e8e255272bc54d2356"
+    },
+    {
+      "path": "third_party/media3-ffmpeg/src/main/java/androidx/media3/decoder/ffmpeg/package-info.java",
+      "url": "https://raw.githubusercontent.com/androidx/media/b01c6ffcb3fca3d038476dab5d3bc9c9f2010781/libraries/decoder_ffmpeg/src/main/java/androidx/media3/decoder/ffmpeg/package-info.java",
+      "sha256": "1d75d02151fcec7a1c0036ee4a216e885ae91e1f85e8c9ddfbd72b4def6709be"
+    },
+    {
+      "path": "third_party/media3-ffmpeg/src/main/jni/ffmpeg_jni.cc",
+      "url": "https://raw.githubusercontent.com/androidx/media/b01c6ffcb3fca3d038476dab5d3bc9c9f2010781/libraries/decoder_ffmpeg/src/main/jni/ffmpeg_jni.cc",
+      "sha256": "7b5421215e963e099004eb04528dcd39ca36869ab9e2412ff5e3b950980daad9"
+    },
+    {
+      "path": "third_party/sources/ffmpeg-6.1.4.tar.xz",
+      "url": "https://ffmpeg.org/releases/ffmpeg-6.1.4.tar.xz",
+      "sha256": "a231e3d5742c44b1cdaebfb98ad7b6200d12763e0b6db9e1e2c5891f2c083a18",
+      "version": "6.1.4",
+      "commit": "34277e12e80031c7f89494ba543684bc1dd0be8f",
+      "license": "LGPL-3.0-or-later",
+      "changes": "none"
+    },
+    {
+      "path": "third_party/sources/mutagen-1.48.1.tar.gz",
+      "url": "https://files.pythonhosted.org/packages/df/70/1675da133ea92227da41bf5b24e1c66be597ff736a1533ade41da986852f/mutagen-1.48.1.tar.gz",
+      "sha256": "8f95637ab9f6f305cec6bd1294e197debe207998e3e068596563c74f86b0a173",
+      "version": "1.48.1",
+      "license": "GPL-2.0-or-later",
+      "changes": "none"
+    },
+    {
+      "path": "third_party/sources/yt_dlp-2026.8.19.tar.gz",
+      "url": "https://files.pythonhosted.org/packages/1e/e0/832fa4ca334b766a06933a196066edc3dba37cdb6f14cd98d59bcc69a4b4/yt_dlp-2026.8.19.tar.gz",
+      "sha256": "9e213e48cea35c66b378e4447903f118f6392a5fa380a2b6d7070ec86f4e0af1",
+      "version": "2026.8.19",
+      "license": "Unlicense",
+      "changes": "none"
+    }
+  ]
+}

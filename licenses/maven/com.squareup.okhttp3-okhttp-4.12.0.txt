@@ -1,0 +1,22 @@
+com.squareup.okhttp3:okhttp:4.12.0
+Apache License 2.0
+
+Copyright (C) 2010 The Android Open Source Project
+Copyright (C) 2011 The Android Open Source Project
+Copyright (C) 2012 Square, Inc.
+Copyright (C) 2012 The Android Open Source Project
+Copyright (C) 2013 Square, Inc.
+Copyright (C) 2014 Square, Inc.
+Copyright (C) 2015 Square, Inc.
+Copyright (C) 2016 Square, Inc.
+Copyright (C) 2017 Square, Inc.
+Copyright (C) 2018 Square, Inc.
+Copyright (C) 2019 Square, Inc.
+Copyright (C) 2020 Square, Inc.
+Copyright 2013 Twitter, Inc.
+
+Note that publicsuffixes.gz is compiled from The Public Suffix List:
+https://publicsuffix.org/list/public_suffix_list.dat
+
+It is subject to the terms of the Mozilla Public License, v. 2.0:
+https://mozilla.org/MPL/2.0/

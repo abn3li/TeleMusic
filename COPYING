@@ -1,0 +1,16 @@
+TeleMusic
+Copyright (c) 2026 abn3li
+
+Original TeleMusic source code and build scripts are free software: you can
+redistribute them and/or modify them under the terms of the GNU General Public
+License as published by the Free Software Foundation, version 3 only.
+
+TeleMusic is distributed in the hope that it will be useful, but WITHOUT ANY
+WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR
+A PARTICULAR PURPOSE. See LICENSE for the complete GNU General Public License.
+
+The additional linking permission in OPENSSL_PERMISSION applies to original
+TeleMusic code. Third-party components and vendored sources retain their own
+copyright notices and licenses, as recorded in THIRD_PARTY_NOTICES.md and the
+licenses and third_party directories. No ownership or exception is asserted
+on behalf of those copyright holders.

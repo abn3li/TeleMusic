@@ -11,8 +11,8 @@ import java.util.concurrent.TimeUnit
  * Browse-only client for YouTube Music's public Innertube API (music.youtube.com/youtubei/v1) -
  * fetches the home feed and lets a browse card's own browseId be opened further (a playlist's
  * track list, an artist's page, a chart). Deliberately does NOT touch the /player endpoint or
- * do any signature/cipher deciphering - that's the part that would need NewPipeExtractor's
- * GPL-3.0 code (see data/download/YtDlpService's own doc on staying MIT). A real download still
+ * do any signature/cipher deciphering. Playback and downloads use the downloader's extraction
+ * path instead of maintaining a second implementation. A real download still
  * only ever happens through yt-dlp (data/download) once the user picks a track here - this
  * client only ever returns metadata (titles, thumbnails, ids), never a stream URL.
  *

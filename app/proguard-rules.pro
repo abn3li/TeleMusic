@@ -24,3 +24,10 @@
 -keep class com.abn3li.telemusic.data.local.*Entity { *; }
 -keep class com.abn3li.telemusic.data.local.*Summary { *; }
 -keep class com.abn3li.telemusic.data.local.*CrossRef { *; }
+
+# Media3 discovers the renderer by name, and JNI looks up its decoder callbacks.
+-keep class androidx.media3.decoder.ffmpeg.FfmpegAudioRenderer { public <init>(...); }
+-keepclasseswithmembernames class androidx.media3.decoder.ffmpeg.** { native <methods>; }
+-keep, includedescriptorclasses class androidx.media3.decoder.ffmpeg.FfmpegAudioDecoder {
+    private java.nio.ByteBuffer growOutputBuffer(androidx.media3.decoder.SimpleDecoderOutputBuffer, int);
+}

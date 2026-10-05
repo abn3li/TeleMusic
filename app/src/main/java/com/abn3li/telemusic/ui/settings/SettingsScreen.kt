@@ -104,6 +104,7 @@ fun SettingsScreen(onBack: () -> Unit, onOpenSpotify: () -> Unit, onLoggedOut: (
     val themeMode by app.settingsStore.themeMode.collectAsState()
     var cacheLimit by remember { mutableStateOf(app.settingsStore.maxCacheSizeBytes) }
     var cacheOptionsOpen by remember { mutableStateOf(false) }
+    var licensesOpen by remember { mutableStateOf(false) }
 
     // DNS and proxy save as they're changed - no Save buttons. Before Telegram is set up (Sync
     // tab) there's nothing to connect or restart.
@@ -421,6 +422,13 @@ fun SettingsScreen(onBack: () -> Unit, onOpenSpotify: () -> Unit, onLoggedOut: (
                 GroupDivider(start = 57.dp)
                 LinkRow("GitHub", "abn3li/TeleMusic", Icons.Rounded.Code, TileGrey) { uriHandler.openUri("https://github.com/abn3li/TeleMusic") }
                 GroupDivider(start = 57.dp)
+                GroupRow(
+                    title = "Open-source Licenses",
+                    icon = { GroupIcon(Icons.Rounded.Code, TileGrey) },
+                    onClick = { licensesOpen = true },
+                    trailing = { GroupValue("GPLv3") }
+                )
+                GroupDivider(start = 57.dp)
                 LinkRow("Developer", "@hjil_l", Icons.AutoMirrored.Rounded.Send, TileBlue) { uriHandler.openUri("https://t.me/hjil_l") }
                 GroupDivider(start = 57.dp)
                 LinkRow("Community", "t.me/telemusicco", Icons.Rounded.Groups, TileGreen) { uriHandler.openUri("https://t.me/telemusicco") }
@@ -429,6 +437,8 @@ fun SettingsScreen(onBack: () -> Unit, onOpenSpotify: () -> Unit, onLoggedOut: (
             Spacer(Modifier.height(12.dp))
         }
     }
+
+    if (licensesOpen) LicensesSheet(onDismiss = { licensesOpen = false })
 
     if (showClearCacheConfirm) {
         AppAlert(

@@ -1,0 +1,9 @@
+# Preserve reviewed upstream text and source hashes across Windows checkouts.
+licenses/** -text
+third_party/sources/** -text
+third_party/media3-ffmpeg/** text eol=lf
+third_party/sources.json text eol=lf
+tools/licensing/** text eol=lf
+LICENSE -text
+COPYING -text
+OPENSSL_PERMISSION -text

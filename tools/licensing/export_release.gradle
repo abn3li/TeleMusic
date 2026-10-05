@@ -1,0 +1,20 @@
+// Copyright (c) 2026 abn3li
+// SPDX-License-Identifier: GPL-3.0-only
+import groovy.json.JsonOutput
+
+gradle.projectsEvaluated {
+    def app = rootProject.project(':app')
+    app.tasks.register('exportReleaseComponents') {
+        doLast {
+            def artifacts = app.configurations.getByName('releaseRuntimeClasspath').resolvedConfiguration.resolvedArtifacts.collect { artifact ->
+                [group: artifact.moduleVersion.id.group, name: artifact.moduleVersion.id.name,
+                 version: artifact.moduleVersion.id.version, classifier: artifact.classifier,
+                 file: artifact.file.absolutePath, extension: artifact.extension]
+            }.sort { a, b -> (a.group + ':' + a.name) <=> (b.group + ':' + b.name) }
+            def destination = rootProject.file('build/licensing/release-components.json')
+            destination.parentFile.mkdirs()
+            destination.text = JsonOutput.prettyPrint(JsonOutput.toJson(artifacts))
+            println("Exported ${artifacts.size()} release artifacts.")
+        }
+    }
+}
