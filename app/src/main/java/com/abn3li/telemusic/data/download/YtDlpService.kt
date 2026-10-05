@@ -54,9 +54,9 @@ data class YtDlpPlaylistMetadata(
 
 /**
  * Kotlin-side wrapper around app/src/main/python/ytdlp_bridge.py, which does the actual work via
- * real yt-dlp (Unlicense/public domain) running on Chaquopy's bundled Python interpreter - see
- * that file's own doc for why this, not the GPL-3.0 youtubedl-android wrapper, is what this repo
- * uses to stay MIT. Every call here blocks on network/disk I/O - always invoke from a background
+ * yt-dlp running on Chaquopy's bundled Python interpreter. Keeping the gateway small lets
+ * extraction and downloads share one Python integration. Every call here blocks on
+ * network/disk I/O - always invoke from a background
  * dispatcher (see YtDlpRepository), never from a composable or the main thread directly.
  */
 class YtDlpService(private val context: Context) {

@@ -1,0 +1,166 @@
+[
+  {
+    "name": "Chaquopy",
+    "version": "17.0.0",
+    "url": "https://codeload.github.com/chaquo/chaquopy/tar.gz/e01057c72fdd737f202bd1be1de85af51e06cad0",
+    "sha256": "b703cc3f4b4795f0ffde3a36dae5bf5401b1f733d3b71bfcc25c7fb2c4f39b56",
+    "source_file": "build/licensing/upstream-sources/chaquopy-17.0.0.tar.gz",
+    "license_files": [
+      "licenses/Chaquopy-17.0.0-LICENSE.txt",
+      "licenses/chaquopy-runtime/product__runtime__src__main__python__java___vendor__pyelftools-0.26.dist-info__LICENSE.txt",
+      "licenses/chaquopy-runtime/product__runtime__src__main__python__setuptools-68.2.2.dist-info__LICENSE"
+    ],
+    "license_sha256": {
+      "licenses/Chaquopy-17.0.0-LICENSE.txt": "345a9fdfeed355d37b18569ef277ba56eb0ab7c0b17a08a90163ce8d33d2b862",
+      "licenses/chaquopy-runtime/product__runtime__src__main__python__java___vendor__pyelftools-0.26.dist-info__LICENSE.txt": "ae18bf4cb82f92af7547259177bc28bc48e4fc732518bcedfe690226288d3445",
+      "licenses/chaquopy-runtime/product__runtime__src__main__python__setuptools-68.2.2.dist-info__LICENSE": "86da0f01aeae46348a3c3d465195dc1ceccde79f79e87769a64b8da04b2a4741"
+    }
+  },
+  {
+    "name": "TDLib",
+    "version": "dd1b761fda7e47f4e0275c4d319f80a04db1997f",
+    "url": "https://codeload.github.com/tdlib/td/tar.gz/dd1b761fda7e47f4e0275c4d319f80a04db1997f",
+    "sha256": "b5e2a20eb38044b124650dbc72b3cc9d134e1c7861df2227f0e649b427c29fa4",
+    "source_file": "build/licensing/upstream-sources/tdlib-dd1b761.tar.gz",
+    "license_files": [
+      "licenses/TDLib-Boost-LICENSE.txt"
+    ],
+    "license_sha256": {
+      "licenses/TDLib-Boost-LICENSE.txt": "c9bff75738922193e67fa726fa225535870d2aa1059f91452c411736284ad566"
+    }
+  },
+  {
+    "name": "OpenSSL",
+    "version": "1.1.1w",
+    "url": "https://codeload.github.com/openssl/openssl/tar.gz/refs/tags/OpenSSL_1_1_1w",
+    "sha256": "2130e8c2fb3b79d1086186f78e59e8bc8d1a6aedf17ab3907f4cb9ae20918c41",
+    "source_file": "build/licensing/upstream-sources/openssl-1.1.1w.tar.gz",
+    "license_files": [
+      "licenses/OpenSSL-1.1.1w-LICENSE.txt"
+    ],
+    "license_sha256": {
+      "licenses/OpenSSL-1.1.1w-LICENSE.txt": "c32913b33252e71190af2066f08115c69bc9fddadf3bf29296e20c835389841c"
+    }
+  },
+  {
+    "name": "OpenSSL",
+    "version": "3.0.18",
+    "url": "https://codeload.github.com/openssl/openssl/tar.gz/refs/tags/openssl-3.0.18",
+    "sha256": "8037cdcb2a932d2db4f2fad79eda7e379c10bf17c5b3c8cb4ce9d084ad269a67",
+    "source_file": "build/licensing/upstream-sources/openssl-3.0.18.tar.gz",
+    "license_files": [
+      "licenses/OpenSSL-3.0.18-LICENSE.txt"
+    ],
+    "license_sha256": {
+      "licenses/OpenSSL-3.0.18-LICENSE.txt": "7d5450cb2d142651b8afa315b5f238efc805dad827d91ba367d8516bc9d49e7a"
+    }
+  },
+  {
+    "name": "bzip2",
+    "version": "1.0.8",
+    "url": "https://sourceware.org/pub/bzip2/bzip2-1.0.8.tar.gz",
+    "sha256": "ab5a03176ee106d3f0fa90e381da478ddae405918153cca248e682cd0c4a2269",
+    "source_file": "build/licensing/upstream-sources/bzip2-1.0.8.tar.gz",
+    "license_files": [
+      "licenses/bzip2-1.0.8-LICENSE.txt"
+    ],
+    "license_sha256": {
+      "licenses/bzip2-1.0.8-LICENSE.txt": "c6dbbf828498be844a89eaa3b84adbab3199e342eb5cb2ed2f0d4ba7ec0f38a3"
+    }
+  },
+  {
+    "name": "libffi",
+    "version": "3.4.4",
+    "url": "https://codeload.github.com/libffi/libffi/tar.gz/refs/tags/v3.4.4",
+    "sha256": "828639972716ed18833df7b659b32060591fe0eb625a8d34078920d33c2dc867",
+    "source_file": "build/licensing/upstream-sources/libffi-3.4.4.tar.gz",
+    "license_files": [
+      "licenses/libffi-3.4.4-LICENSE.txt"
+    ],
+    "license_sha256": {
+      "licenses/libffi-3.4.4-LICENSE.txt": "2c9c2acb9743e6b007b91350475308aee44691d96aa20eacef8e199988c8c388"
+    }
+  },
+  {
+    "name": "xz",
+    "version": "5.4.6",
+    "url": "https://codeload.github.com/tukaani-project/xz/tar.gz/refs/tags/v5.4.6",
+    "sha256": "60831005fddb270824fa9f7cdd28a59da8757fe95466ed5b10bcfe23379f17d9",
+    "source_file": "build/licensing/upstream-sources/xz-5.4.6.tar.gz",
+    "license_files": [
+      "licenses/xz-5.4.6-COPYING.txt",
+      "licenses/xz-5.4.6-COPYING.LGPLv2.1.txt"
+    ],
+    "license_sha256": {
+      "licenses/xz-5.4.6-COPYING.txt": "29a1e305b2e34eefe5d4602d00cde1d528b71c5d9f2eec5106972cf6ddb6f73f",
+      "licenses/xz-5.4.6-COPYING.LGPLv2.1.txt": "dc626520dcd53a22f727af3ee42c770e56c97a64fe3adb063799d8ab032fe551"
+    }
+  },
+  {
+    "name": "SQLite",
+    "version": "3.50.4",
+    "url": "https://www.sqlite.org/2025/sqlite-amalgamation-3500400.zip",
+    "sha256": "1d3049dd0f830a025a53105fc79fd2ab9431aea99e137809d064d8ee8356b032",
+    "source_file": "build/licensing/upstream-sources/sqlite-3.50.4.zip",
+    "license_files": [
+      "licenses/SQLite-3.50.4-NOTICE.txt"
+    ],
+    "license_sha256": {
+      "licenses/SQLite-3.50.4-NOTICE.txt": "f80868c0b4c9af9f952197bf0b3d6c8ba253e3c2fc51529465217fbab50eee74"
+    }
+  },
+  {
+    "name": "CPython",
+    "version": "3.13.9",
+    "url": "https://www.python.org/ftp/python/3.13.9/Python-3.13.9.tar.xz",
+    "sha256": "ed5ef34cda36cfa2f3a340f07cac7e7814f91c7f3c411f6d3562323a866c5c66",
+    "source_file": "build/licensing/upstream-sources/Python-3.13.9.tar.xz",
+    "license_files": [
+      "licenses/Python-3.13.9-LICENSE.txt",
+      "licenses/python-runtime/Modules__expat__COPYING"
+    ],
+    "license_sha256": {
+      "licenses/Python-3.13.9-LICENSE.txt": "78b12c3a81360b357002334f0e70ea0e92eebf7a9b358805c03c48484945f3bb",
+      "licenses/python-runtime/Modules__expat__COPYING": "122f2c27000472a201d337b9b31f7eb2b52d091b02857061a8880371612d9534"
+    }
+  },
+  {
+    "name": "Tink build/source",
+    "version": "1.8.0",
+    "url": "https://codeload.github.com/tink-crypto/tink-java/tar.gz/refs/tags/v1.8.0",
+    "sha256": "cbc9380fb5422f74daad3b1ec9b72a78a1cd28be8f26ea00d8ba380679317ad4",
+    "source_file": "build/licensing/upstream-sources/tink-java-1.8.0.tar.gz",
+    "license_files": [
+      "licenses/Tink-java-1.8.0-LICENSE.txt"
+    ],
+    "license_sha256": {
+      "licenses/Tink-java-1.8.0-LICENSE.txt": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+    }
+  },
+  {
+    "name": "Protobuf shaded by Tink",
+    "version": "3.19.6",
+    "url": "https://codeload.github.com/protocolbuffers/protobuf/tar.gz/refs/tags/v3.19.6",
+    "sha256": "9a301cf94a8ddcb380b901e7aac852780b826595075577bb967004050c835056",
+    "source_file": "build/licensing/upstream-sources/protobuf-3.19.6.tar.gz",
+    "license_files": [
+      "licenses/Protobuf-3.19.6-LICENSE.txt"
+    ],
+    "license_sha256": {
+      "licenses/Protobuf-3.19.6-LICENSE.txt": "6e5e117324afd944dcf67f36cf329843bc1a92229a8cd9bb573d7a83130fea7d"
+    }
+  },
+  {
+    "name": "Certifi CA bundle",
+    "version": "2025.8.3",
+    "url": "https://files.pythonhosted.org/packages/dc/67/960ebe6bf230a96cda2e0abcf73af550ec4f090005363542f0765df162e0/certifi-2025.8.3.tar.gz",
+    "sha256": "e564105f78ded564e3ae7c923924435e1daa7463faeab5bb932bc53ffae63407",
+    "source_file": "build/licensing/upstream-sources/certifi-2025.8.3.tar.gz",
+    "license_files": [
+      "licenses/Certifi-2025.8.3-LICENSE.txt"
+    ],
+    "license_sha256": {
+      "licenses/Certifi-2025.8.3-LICENSE.txt": "e93716da6b9c0d5a4a1df60fe695b370f0695603d21f6f83f053e42cfc10caf7"
+    }
+  }
+]

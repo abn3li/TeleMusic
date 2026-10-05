@@ -1,0 +1,22 @@
+TeleMusic — additional permission under GNU GPL version 3, section 7
+
+Copyright (c) 2026 abn3li
+
+For original TeleMusic code covered by this copyright, if you modify this
+Program, or any covered work, by linking or combining it with OpenSSL (or a
+modified version of that library), containing parts covered by the OpenSSL
+License and the original SSLeay License, the copyright holder grants you
+additional permission to convey the resulting work.
+
+Corresponding Source for a non-source form of such a combination shall include
+the source code for the parts of OpenSSL used as well as that of the covered
+work. The OpenSSL and SSLeay copyright notices, license conditions and required
+acknowledgments must be preserved.
+
+This permission applies only to original TeleMusic code for which abn3li can
+grant permission. It does not relicense third-party components or grant an
+exception on behalf of their copyright holders. Modified versions may remove
+this additional permission as permitted by section 7 of the GPLv3.
+
+The complete GNU GPL version 3 is in LICENSE. The shipped legacy OpenSSL
+license is preserved in licenses/OpenSSL-1.1.1w-LICENSE.txt.

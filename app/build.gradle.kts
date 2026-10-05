@@ -1,4 +1,5 @@
 import java.util.Properties
+import groovy.json.JsonOutput
 
 plugins {
     id("com.android.application")
@@ -17,6 +18,11 @@ val localProperties = Properties().apply {
     if (file.exists()) file.inputStream().use { load(it) }
 }
 val releaseStoreFile = localProperties.getProperty("release.storeFile")
+// A fresh checkout can use its own Python installation without changing source.
+val ownerPython = "C:\\Users\\abn3l\\AppData\\Local\\Python\\pythoncore-3.13-64\\python.exe"
+val buildPythonExecutable = providers.environmentVariable("TELEMUSIC_BUILD_PYTHON").orNull
+    ?: ownerPython.takeIf { file(it).isFile }
+    ?: "python3"
 
 kotlin {
     jvmToolchain(17)
@@ -25,6 +31,7 @@ kotlin {
 android {
     namespace = "com.abn3li.telemusic"
     compileSdk = 36
+    ndkVersion = "26.1.10909125"
     defaultConfig {
         applicationId = "com.abn3li.telemusic"
         minSdk = 26
@@ -63,6 +70,10 @@ android {
         }
     }
     buildFeatures { compose = true }
+    sourceSets.getByName("main") {
+        java.srcDir(rootProject.file("third_party/media3-ffmpeg/src/main/java"))
+        assets.srcDir(layout.buildDirectory.dir("generated/openSourceNotices"))
+    }
     lint {
         checkReleaseBuilds = false
         abortOnError = false
@@ -73,7 +84,8 @@ android {
     }
     kotlinOptions { jvmTarget = "17" }
     packaging {
-        resources.excludes.add("/META-INF/{AL2.0,LGPL2.1}")
+        // Preserve upstream license/NOTICE files even when several jars supply them.
+        resources.merges.addAll(listOf("META-INF/AL2.0", "META-INF/LGPL2.1", "META-INF/LICENSE", "META-INF/LICENSE.txt", "META-INF/NOTICE", "META-INF/NOTICE.txt"))
         jniLibs.useLegacyPackaging = true
     }
 }
@@ -81,18 +93,11 @@ android {
 chaquopy {
     defaultConfig {
         version = "3.13"
-        // Chaquopy needs a real Python on this machine at build time (to resolve/download the
-        // pip packages baked into the APK) - separate from the interpreter it bundles into the
-        // app itself for the device to run. Pointed at the exact install rather than relying on
-        // its own PATH detection, which didn't pick up a install made mid-session.
-        buildPython("C:\\Users\\abn3l\\AppData\\Local\\Python\\pythoncore-3.13-64\\python.exe")
+        buildPython(buildPythonExecutable)
         pip {
-            // yt-dlp itself (not the GPL-3.0 youtubedl-android wrapper) - see data/download's
-            // own doc. mutagen is yt-dlp's own optional dependency for writing ID3/MP4 tags
-            // straight onto the downloaded file so a track has real metadata with no separate
-            // tagging step.
-            install("yt-dlp")
-            install("mutagen")
+            // Pin the packages so the release's supplied source and notices stay in sync.
+            install("yt-dlp==2026.8.19")
+            install("mutagen==1.48.1")
         }
     }
 }
@@ -119,7 +124,8 @@ dependencies {
     implementation("androidx.media3:media3-exoplayer:1.4.0")
     implementation("androidx.media3:media3-session:1.4.0")
     implementation("androidx.media3:media3-common:1.4.0")
-    implementation(files("libs/media3-ffmpeg-audio.aar"))
+    // The decoder's Java/JNI source is vendored; native binaries have a verified build recipe.
+    compileOnly("org.checkerframework:checker-qual:3.13.0")
 
     implementation("androidx.room:room-runtime:2.6.1")
     implementation("androidx.room:room-ktx:2.6.1")
@@ -136,3 +142,34 @@ dependencies {
     // https://jitpack.io/#tdlibx/td for the latest tag if this one ever breaks.
     implementation("com.github.tdlibx:td:1.8.56")
 }
+
+val licensingInventory = rootProject.layout.buildDirectory.file("licensing/release-components.json")
+val licensingAssets = layout.buildDirectory.dir("generated/openSourceNotices/licenses")
+val prepareOpenSourceNotices = tasks.register<Exec>("prepareOpenSourceNotices") {
+    doFirst {
+        val artifacts = configurations.getByName("releaseRuntimeClasspath").resolvedConfiguration.resolvedArtifacts.map { artifact ->
+            mapOf("group" to artifact.moduleVersion.id.group, "name" to artifact.moduleVersion.id.name,
+                "version" to artifact.moduleVersion.id.version, "classifier" to artifact.classifier,
+                "file" to artifact.file.absolutePath, "extension" to artifact.extension)
+        }
+        licensingInventory.get().asFile.apply {
+            parentFile.mkdirs()
+            writeText(JsonOutput.prettyPrint(JsonOutput.toJson(artifacts)))
+        }
+    }
+    commandLine(buildPythonExecutable, rootProject.file("tools/licensing/release.py"),
+        "--inventory", licensingInventory.get().asFile, "--assets", licensingAssets.get().asFile)
+}
+tasks.named("preBuild") { dependsOn(prepareOpenSourceNotices) }
+
+val packageCorrespondingSource = tasks.register<Exec>("packageCorrespondingSource") {
+    dependsOn("assembleRelease")
+    onlyIf {
+        val assembled = tasks.getByName("assembleRelease").state
+        assembled.executed && assembled.failure == null
+    }
+    commandLine(buildPythonExecutable, rootProject.file("tools/licensing/release.py"),
+        "--inventory", licensingInventory.get().asFile, "--assets", licensingAssets.get().asFile,
+        "--apk", layout.buildDirectory.file("outputs/apk/release/app-release.apk").get().asFile)
+}
+tasks.matching { it.name == "assembleRelease" }.configureEach { finalizedBy(packageCorrespondingSource) }

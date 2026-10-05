@@ -69,6 +69,8 @@ Copyright (c) 2026 abn3li.
 
 TeleMusic's original code is free software: you can redistribute it and/or modify it under the terms of the GNU General Public License as published by the Free Software Foundation, version 3 only (`GPL-3.0-only`).
 
-It is distributed without any warranty; see [LICENSE](LICENSE) for the full terms. Third-party components retain their own licenses; see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+It is distributed without any warranty; see [LICENSE](LICENSE) and [COPYING](COPYING) for the full terms. Original TeleMusic code has a narrow [additional permission to link OpenSSL](OPENSSL_PERMISSION) for the Telegram library. Third-party components retain their own licenses; see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+
+Release builds also create a matching corresponding-source archive. See [BUILDING.md](BUILDING.md).
 
 Earlier releases remain under the license terms distributed with them.
