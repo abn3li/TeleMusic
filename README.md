@@ -8,7 +8,7 @@
 <p align="center">
   <img src="https://img.shields.io/badge/Android-8.0%2B-green?style=for-the-badge&logo=android" alt="Android 8.0+">
   <img src="https://img.shields.io/badge/Kotlin-100%25-purple?style=for-the-badge&logo=kotlin" alt="Kotlin">
-  <img src="https://img.shields.io/badge/License-MIT-blue?style=for-the-badge" alt="MIT License">
+  <img src="https://img.shields.io/badge/License-GPLv3-blue?style=for-the-badge" alt="GNU GPL v3 License">
 </p>
 
 ---
@@ -65,4 +65,10 @@ https://t.me/telemusicco
 
 ## 📄 License
 
-MIT — see [LICENSE](LICENSE).
+Copyright (c) 2026 abn3li.
+
+TeleMusic's original code is free software: you can redistribute it and/or modify it under the terms of the GNU General Public License as published by the Free Software Foundation, version 3 only (`GPL-3.0-only`).
+
+It is distributed without any warranty; see [LICENSE](LICENSE) for the full terms. Third-party components retain their own licenses; see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+
+Earlier releases remain under the license terms distributed with them.
