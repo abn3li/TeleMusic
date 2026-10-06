@@ -54,4 +54,27 @@ class FlacUpgradeStatusTest {
         val current = FlacUpgradeStatus("song", FlacUpgradeStage.LOSSLESS, "Upgraded", transfer)
         assertSame(current, flacStatusForSong(current, "song", true, true, true))
     }
+
+    @Test fun searchingAndConnectingStillReadOriginal() {
+        for (stage in listOf(FlacUpgradeStage.READY, FlacUpgradeStage.SEARCHING, FlacUpgradeStage.REQUESTING, FlacUpgradeStage.PREPARING)) {
+            assertEquals("Original" to -1, flacSteadyLabel(stage, 0, 0, -1))
+        }
+        // The first bytes (under 1%) don't count as upgrading yet.
+        assertEquals("Original" to 0, flacSteadyLabel(FlacUpgradeStage.BUFFERING, 5, 1000, -1))
+        assertEquals("Upgrading · 1%" to 1, flacSteadyLabel(FlacUpgradeStage.BUFFERING, 10, 1000, -1))
+        assertEquals("Upgrading · 40%" to 40, flacSteadyLabel(FlacUpgradeStage.BUFFERING, 40, 100, -1))
+    }
+
+    @Test fun percentageHoldsThroughARetryAndNeverGoesBackwards() {
+        // First uploader reached 38%, then cut out: connecting again keeps 38%.
+        assertEquals("Upgrading · 38%" to 38, flacSteadyLabel(FlacUpgradeStage.REQUESTING, 0, 0, 38))
+        // The new uploader starts from 0: still 38% until it passes.
+        assertEquals("Upgrading · 38%" to 38, flacSteadyLabel(FlacUpgradeStage.BUFFERING, 5, 100, 38))
+        assertEquals("Upgrading · 44%" to 44, flacSteadyLabel(FlacUpgradeStage.BUFFERING, 44, 100, 38))
+    }
+
+    @Test fun finishedStatesShowTheResultAndForgetTheHeldPercentage() {
+        assertEquals("Lossless" to -1, flacSteadyLabel(FlacUpgradeStage.LOSSLESS, 0, 0, 80))
+        assertEquals("Original" to -1, flacSteadyLabel(FlacUpgradeStage.UNAVAILABLE, 0, 0, 80))
+    }
 }

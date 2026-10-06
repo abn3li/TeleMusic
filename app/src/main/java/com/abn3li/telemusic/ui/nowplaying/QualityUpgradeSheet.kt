@@ -53,7 +53,10 @@ internal fun QualityUpgradeButton(song: SongEntity, active: Boolean, onClick: ()
     val progress by if (active && status.stage == FlacUpgradeStage.BUFFERING && transfer != null)
         transfer.progress.collectAsState()
     else remember(transfer) { mutableStateOf(transfer?.progress?.value ?: FlacTransferProgress()) }
-    val label = flacStatusLabel(status.stage, progress.downloadedBytes, transfer?.sizeBytes ?: 0)
+    // The highest percentage shown for this song, held through retries (see flacSteadyLabel).
+    val held = remember(song.telegramMessageId) { IntArray(1) { -1 } }
+    val (label, nextHeld) = flacSteadyLabel(status.stage, progress.downloadedBytes, transfer?.sizeBytes ?: 0, held[0])
+    held[0] = nextHeld
     Row(Modifier.height(32.dp).widthIn(max = 200.dp).clip(RoundedCornerShape(10.dp))
         .clickable(role = Role.Button, onClick = onClick)
         .semantics(mergeDescendants = true) { contentDescription = "$label. Open quality upgrade status" }

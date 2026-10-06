@@ -42,6 +42,32 @@ internal fun flacStatusLabel(stage: FlacUpgradeStage, receivedBytes: Long, total
     FlacUpgradeStage.UNAVAILABLE -> "Original"
 }
 
+/**
+ * The label under the seek bar, kept calm: searching and connecting aren't shown - it reads
+ * "Original" until the FLAC download really starts (1%), then "Upgrading" with the percentage.
+ * The percentage never goes backwards - when a new uploader starts over, it holds at
+ * [heldPercent] until the new download passes it. Returns the label and the percentage to hold
+ * next time (-1: none yet).
+ */
+internal fun flacSteadyLabel(stage: FlacUpgradeStage, receivedBytes: Long, totalBytes: Long,
+    heldPercent: Int): Pair<String, Int> {
+    fun upgrading(percent: Int) = if (percent >= 1) "Upgrading · $percent%" else "Original"
+    return when (stage) {
+        FlacUpgradeStage.OFF -> "Quality off" to -1
+        // Waiting for the song to play: it's the original that plays.
+        FlacUpgradeStage.READY -> "Original" to -1
+        FlacUpgradeStage.SEARCHING, FlacUpgradeStage.REQUESTING, FlacUpgradeStage.PREPARING ->
+            upgrading(heldPercent) to heldPercent
+        FlacUpgradeStage.BUFFERING -> {
+            val percent = if (totalBytes > 0) (receivedBytes.coerceIn(0, totalBytes) * 100 / totalBytes).toInt() else -1
+            val shown = maxOf(heldPercent, percent)
+            upgrading(shown) to shown
+        }
+        FlacUpgradeStage.LOSSLESS -> "Lossless" to -1
+        FlacUpgradeStage.UNAVAILABLE -> "Original" to -1
+    }
+}
+
 // The first packet is too brief to measure. Later values change only when actual bytes arrive.
 internal fun flacTransferRate(receivedBytes: Long, elapsedMs: Long): Long =
     if (elapsedMs < 1000) 0 else receivedBytes * 1000 / elapsedMs
