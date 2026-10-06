@@ -73,16 +73,20 @@ internal class FlacUpgradeController(
             // account changes and real transfer failures still own their normal cleanup.
             return
         }
-        if (!store.preferences.value.enabled || !player.isPlaying || item == null || item.mediaId == attempted?.mediaId || original != null) return
+        // Starts as soon as the song is chosen - alongside YouTube's own buffering, not after it.
+        if (!store.preferences.value.enabled || item == null || item.mediaId == attempted?.mediaId || original != null) return
         if (item.localConfiguration?.uri?.scheme !in listOf("http", "https", "file", "content")) return
-        val duration = player.duration
-        if (duration == C.TIME_UNSET || duration <= 0) return
+        // Not known before the stream is prepared: the library's own length is used then.
+        val duration = player.duration.takeIf { it != C.TIME_UNSET && it > 0 } ?: 0L
         val title = item.mediaMetadata.title?.toString().orEmpty()
         val artist = item.mediaMetadata.artist?.toString().orEmpty()
         if (title.isBlank() || artist.isBlank() || artist == "Unknown artist") return
         attempted = item
         idleClose?.cancel()
         job = scope.launch {
+            // A song skipped within this moment is never searched: tapping through several songs
+            // sends one search, for the one that stays.
+            delay(SEARCH_SETTLE_MS)
             var requestClient: PeerFlacClient? = client
             requestLock.withLock {
                 idleClose?.cancel()
@@ -126,7 +130,9 @@ internal class FlacUpgradeController(
             store.status(item.mediaId, FlacUpgradeStage.LOSSLESS, "Already playing FLAC.")
             return
         }
-        val target = FlacTarget(title, artist, librarySong?.album, duration)
+        val durationMs = duration.takeIf { it > 0 } ?: (librarySong.durationSeconds * 1000L)
+        if (durationMs <= 0) return
+        val target = FlacTarget(title, artist, librarySong?.album, durationMs)
         val cacheToken = withContext(Dispatchers.IO) { app.flacCache.token() }
         val cached = withContext(NonCancellable + Dispatchers.IO) {
             app.flacCache.acquire(item.mediaId, target) {
@@ -320,6 +326,10 @@ internal class FlacUpgradeController(
             if (buffer != null) buffer.deleteWhenUnused() else oldFile?.delete()
             app.musicRepository.enforceCacheLimit()
         }
+    }
+
+    private companion object {
+        const val SEARCH_SETTLE_MS = 400L
     }
 
     fun close() {
