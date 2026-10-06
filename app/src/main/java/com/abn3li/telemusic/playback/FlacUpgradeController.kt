@@ -31,6 +31,7 @@ internal class FlacUpgradeController(
     private var streamKey: String? = null
     private var file: File? = null
     private var activeHeader: FlacHeader? = null
+    private var cachedKey: String? = null
     private var changingSource = false
     private var nextLoginAt = 0L
     private val detachedSessions = mutableSetOf<PeerFlacClient>()
@@ -73,7 +74,7 @@ internal class FlacUpgradeController(
             return
         }
         if (!store.preferences.value.enabled || !player.isPlaying || item == null || item.mediaId == attempted?.mediaId || original != null) return
-        if (item.localConfiguration?.uri?.scheme !in listOf("http", "https", "tdlib")) return
+        if (item.localConfiguration?.uri?.scheme !in listOf("http", "https", "file", "content")) return
         val duration = player.duration
         if (duration == C.TIME_UNSET || duration <= 0) return
         val title = item.mediaMetadata.title?.toString().orEmpty()
@@ -82,7 +83,7 @@ internal class FlacUpgradeController(
         attempted = item
         idleClose?.cancel()
         job = scope.launch {
-            var requestClient: PeerFlacClient? = null
+            var requestClient: PeerFlacClient? = client
             requestLock.withLock {
                 idleClose?.cancel()
                 try { upgrade(item, title, artist, duration) { requestClient = it } }
@@ -116,13 +117,41 @@ internal class FlacUpgradeController(
 
     private suspend fun upgrade(item: MediaItem, title: String, artist: String, duration: Long,
         onSession: (PeerFlacClient) -> Unit) {
-        val credentials = store.credentials() ?: return
         val librarySong = withContext(Dispatchers.IO) { item.mediaId.toLongOrNull()?.let { app.musicRepository.getSongById(it) } }
+        // Telegram must play its own file, including when that file is cached locally.
+        // Check the song's source before credentials, cached upgrades or peer searches.
+        if (librarySong?.youtubeVideoId == null || librarySong.isLocalImport) return
+        val credentials = store.credentials() ?: return
         if (librarySong?.sourceMime?.contains("flac", ignoreCase = true) == true) {
             store.status(item.mediaId, FlacUpgradeStage.LOSSLESS, "Already playing FLAC.")
             return
         }
         val target = FlacTarget(title, artist, librarySong?.album, duration)
+        val cacheToken = withContext(Dispatchers.IO) { app.flacCache.token() }
+        val cached = withContext(NonCancellable + Dispatchers.IO) {
+            app.flacCache.acquire(item.mediaId, target) {
+                app.workScope.launch(Dispatchers.IO) { app.musicRepository.enforceCacheLimit() }
+            }
+        }
+        if (cached != null) {
+            var switched = false
+            try {
+                currentCoroutineContext().ensureActive()
+                if (player.currentMediaItem != item) throw CancellationException()
+                cachedKey = cached.key
+                switchToFlac(item, cached.buffer, cached.header)
+                switched = true
+                app.workScope.launch(Dispatchers.IO) { app.musicRepository.enforceCacheLimit(item.mediaId.toLongOrNull()) }
+            } catch (e: CancellationException) { throw e }
+            catch (e: Exception) { fallback(); throw e }
+            finally {
+                if (!switched) withContext(NonCancellable + Dispatchers.IO) { cached.buffer.deleteWhenUnused() }
+            }
+            return
+        }
+        // A saved YouTube original may use a local URI. Reuse its cached upgrade, but
+        // do not start a network search for a locally saved file.
+        if (item.localConfiguration?.uri?.scheme !in listOf("http", "https")) return
         store.status(item.mediaId, FlacUpgradeStage.SEARCHING, "Looking for the same recording in FLAC.")
         val session = withContext(Dispatchers.IO) {
             client?.takeIf { it.isConnected } ?: run {
@@ -147,107 +176,72 @@ internal class FlacUpgradeController(
             return
         }
         val directory = File(app.cacheDir, "quality_streams").apply { mkdirs() }
-        var failureReason = "available peers could not supply FLAC"
-        val triedUsers = mutableSetOf<String>()
-        while (triedUsers.size < 6) {
-            currentCoroutineContext().ensureActive()
-            val candidate = withContext(Dispatchers.IO) { session.nextCandidate(target, triedUsers) } ?: break
-            triedUsers.add(candidate.user)
-            val pendingFile = File(directory, "${UUID.randomUUID()}.flac")
-            var switched = false
-            try {
-                val peerLabel = "peer ${triedUsers.size}"
-                failureReason = "peer could not start the transfer"
-                store.status(item.mediaId, FlacUpgradeStage.REQUESTING, "Requesting FLAC from $peerLabel.")
-                val buffer = withContext(Dispatchers.IO) { session.download(candidate, pendingFile) }
-                var transfer = FlacTransferInfo(buffer.totalSize, buffer.transferProgress)
-                store.status(item.mediaId, FlacUpgradeStage.BUFFERING, "Checking the FLAC recording before switching.", transfer)
-                failureReason = "FLAC transfer interrupted"
-                // Keep a progressing download alive; separately bound silence and total wait.
-                withFlacTimeout(180000, "FLAC download") {
-                    var header: FlacHeader? = null
-                    while (!switched) {
-                        withFlacTimeout(20000, "FLAC data stalled") { buffer.updates.receive() }
-                        buffer.checkFailure()
-                        if (player.currentMediaItem != item) throw CancellationException()
-                        if (header == null) header = withContext(Dispatchers.IO) { readFlacHeader(buffer.prefix()) }
-                        if (header == null) {
-                            check(!buffer.complete) { "Incomplete FLAC metadata" }
-                            continue
-                        }
-                        val verified = header!!
-                        if (!verifiedRecording(verified, target, candidate.filename)) {
-                            failureReason = if (kotlin.math.abs(verified.durationMs - target.durationMs) > 2500)
-                                "FLAC timing differs · unsafe to switch" else "FLAC recording did not match"
-                            error("Different recording")
-                        }
-                        transfer = transfer.copy(sampleRate = verified.sampleRate, bitDepth = verified.bitDepth,
-                            channels = verified.channels)
-                        store.status(item.mediaId, FlacUpgradeStage.BUFFERING,
-                            if (verified.seekTable) "Switches when enough audio is buffered."
-                            else "This FLAC needs the complete file before switching.", transfer)
-                        // Search and handshake delays are not the uploader's transfer speed.
-                        val transferMs = (System.nanoTime() - buffer.firstByteAtNanos) / 1_000_000
-                        // Keep at least 5 MB, and enough audio around the current position.
-                        // A completed smaller file can play immediately.
-                        if (!readyFlacBuffer(buffer.totalSize, verified.durationMs, player.currentPosition,
-                                buffer.available, buffer.complete, verified.seekTable, transferMs)) {
-                            val measuredRate = buffer.available * 1000.0 / transferMs.coerceAtLeast(1)
-                            val playbackRate = buffer.totalSize * 1000.0 / verified.durationMs
-                            if (transferMs >= 5000 && measuredRate < playbackRate * 1.2 &&
-                                session.hasFasterCandidate(target, triedUsers, measuredRate)) {
-                                failureReason = "uploader too slow · trying another peer"
-                                android.util.Log.i("FlacTransfer", "Trying a faster available uploader")
-                                error("Slow FLAC uploader")
-                            }
-                            continue
-                        }
-                        val key = UUID.randomUUID().toString()
-                        FlacStreamRegistry.streams[key] = buffer
-                        original = item
-                        streamKey = key
-                        file = pendingFile
-                        activeHeader = verified
-                        android.util.Log.i("FlacTransfer", "Switching to verified FLAC; received=${buffer.available}/${buffer.totalSize}; transferMs=$transferMs")
-                        changingSource = true
-                        try {
-                            val position = player.currentPosition
-                            val playing = player.playWhenReady
-                            player.setMediaItem(item.buildUpon().setUri(Uri.parse("quality://stream/$key"))
-                                .setMimeType(MimeTypes.AUDIO_FLAC).build(), position)
-                            player.prepare()
-                            // A buffer can become ready while paused; preparing it must stay silent.
-                            player.playWhenReady = playing
-                        } finally { changingSource = false }
-                        store.status(item.mediaId, FlacUpgradeStage.PREPARING, "Preparing FLAC playback at the current position.", transfer)
-                        session.stopSearch()
-                        prepareTimeout?.cancel()
-                        prepareTimeout = scope.launch {
-                            delay(5000)
-                            if (streamKey == key && player.playbackState != androidx.media3.common.Player.STATE_READY) {
-                                android.util.Log.i("FlacTransfer", "FLAC preparation timed out; restoring original audio")
-                                fallback("FLAC playback preparation timed out.")
-                            }
-                        }
-                        switched = true
+        val ready = try {
+            awaitReadyFlacBuffer(session, target, directory, position = {
+                if (player.currentMediaItem != item) throw CancellationException()
+                player.currentPosition
+            }, report = { stage, detail, transfer -> store.status(item.mediaId, stage, detail, transfer) })
+        } catch (e: FlacPeerException) {
+            store.status(item.mediaId, FlacUpgradeStage.UNAVAILABLE, e.reason)
+            return
+        }
+        var switched = false
+        try {
+            if (player.currentMediaItem != item) throw CancellationException()
+            ready.buffer.checkFailure()
+            switchToFlac(item, ready.buffer, ready.header)
+            switched = true
+            session.stopSearch()
+            // Only the winning transfer remains; completion needs no further polling.
+            withContext(Dispatchers.IO) { session.awaitFinished(ready.candidate.user) }
+            // Saving a completed upgrade must never turn successful playback into a failure.
+            withContext(Dispatchers.IO) {
+                try {
+                    if (app.flacCache.store(item.mediaId, target, ready.candidate.filename, ready.buffer, cacheToken)) {
+                        app.musicRepository.enforceCacheLimit(item.mediaId.toLongOrNull())
                     }
-                }
-                // Keep the connection while bytes arrive; completion needs no further polling.
-                withContext(Dispatchers.IO) { session.awaitFinished() }
-                return
-            } catch (e: CancellationException) { throw e }
-            catch (e: Exception) {
-                if (e is FlacTimeoutException) failureReason = "${e.operation} timed out"
-                if (e is FlacPeerException) failureReason = e.reason
-                if (switched) { fallback(failureReason); return }
-                store.status(item.mediaId, FlacUpgradeStage.SEARCHING, "Looking for another uploader. $failureReason")
-            } finally {
-                if (!switched) {
-                    withContext(NonCancellable + Dispatchers.IO) { session.cancelTransfer(); pendingFile.delete() }
-                }
+                } catch (e: CancellationException) { throw e }
+                catch (_: Exception) { android.util.Log.w("FlacCache", "Completed upgrade could not be cached") }
+            }
+        } catch (e: CancellationException) { throw e }
+        catch (e: Exception) {
+            val reason = if (e is FlacPeerException) e.reason else "FLAC transfer interrupted"
+            if (!fallback(reason)) store.status(item.mediaId, FlacUpgradeStage.UNAVAILABLE, reason)
+        } finally {
+            if (!switched) withContext(NonCancellable + Dispatchers.IO) {
+                session.discardTransfer(ready.candidate.user)
+                ready.file.delete()
             }
         }
-        store.status(item.mediaId, FlacUpgradeStage.UNAVAILABLE, failureReason)
+    }
+
+    private fun switchToFlac(item: MediaItem, buffer: FlacStreamBuffer, header: FlacHeader) {
+        val transfer = FlacTransferInfo(buffer.totalSize, buffer.transferProgress,
+            header.sampleRate, header.bitDepth, header.channels)
+        val key = UUID.randomUUID().toString()
+        FlacStreamRegistry.streams[key] = buffer
+        original = item
+        streamKey = key
+        file = buffer.file
+        activeHeader = header
+        changingSource = true
+        try {
+            val position = player.currentPosition
+            val playing = player.playWhenReady
+            player.setMediaItem(item.buildUpon().setUri(Uri.parse("quality://stream/$key"))
+                .setMimeType(MimeTypes.AUDIO_FLAC).build(), position)
+            player.prepare()
+            player.playWhenReady = playing
+        } finally { changingSource = false }
+        store.status(item.mediaId, FlacUpgradeStage.PREPARING,
+            "Preparing FLAC playback at the current position.", transfer)
+        prepareTimeout?.cancel()
+        prepareTimeout = scope.launch {
+            delay(5000)
+            if (streamKey == key && player.playbackState != androidx.media3.common.Player.STATE_READY) {
+                fallback("FLAC playback preparation timed out.")
+            }
+        }
     }
 
     fun onReady() {
@@ -268,6 +262,7 @@ internal class FlacUpgradeController(
     /** A stalled transfer or seek beyond received bytes restores normal playback at the same time. */
     fun fallback(reason: String = "FLAC playback or transfer became unavailable."): Boolean {
         val item = original ?: return false
+        cachedKey?.let { key -> app.workScope.launch(Dispatchers.IO) { app.flacCache.invalidate(key) } }
         original = null
         changingSource = true
         try {
@@ -320,8 +315,10 @@ internal class FlacUpgradeController(
         val oldFile = file
         file = null
         activeHeader = null
+        cachedKey = null
         app.workScope.launch(Dispatchers.IO) {
             if (buffer != null) buffer.deleteWhenUnused() else oldFile?.delete()
+            app.musicRepository.enforceCacheLimit()
         }
     }
 

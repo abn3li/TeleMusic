@@ -26,6 +26,7 @@ import kotlinx.coroutines.withContext
 
 class TgMusicApp : Application(), ImageLoaderFactory {
     val flacUpgradeStore by lazy { com.abn3li.telemusic.data.quality.FlacUpgradeStore(this) }
+    internal val flacCache by lazy { com.abn3li.telemusic.data.quality.FlacCache(java.io.File(filesDir, "flac_cache")) }
     lateinit var tdlibManager: TdlibManager; private set
     lateinit var musicRepository: MusicRepository; private set
     lateinit var spotifyImporter: com.abn3li.telemusic.repository.SpotifyImporter; private set
@@ -89,6 +90,7 @@ class TgMusicApp : Application(), ImageLoaderFactory {
         appScope.launch { musicRepository.normalizeArtistCredits() }
         appScope.launch { musicRepository.reconcileOrphanedTdlibFiles() }
         appScope.launch { musicRepository.migrateDownloadsToSingleCopy() }
+        appScope.launch { musicRepository.enforceCacheLimit() }
         appScope.launch { musicRepository.upgradeYouTubeArtwork() }
         appScope.launch { musicRepository.backfillLyricsCache() }
         // The Search tab's categories: ready from the saved copy before Search is opened, then

@@ -13,7 +13,9 @@ import java.util.concurrent.locks.ReentrantLock
 import kotlin.concurrent.withLock
 
 /** Readers sleep on a condition until a writer supplies bytes; partial EOF is never song EOF. */
-internal class FlacStreamBuffer(val file: File, val totalSize: Long) {
+internal class FlacStreamBuffer(val file: File, val totalSize: Long,
+    private val dispose: () -> Unit = { file.delete(); Unit }) {
+    val seekIndex = FlacSeekIndex()
     private val lock = ReentrantLock()
     private val changed = lock.newCondition()
     private var failure: IOException? = null
@@ -27,19 +29,23 @@ internal class FlacStreamBuffer(val file: File, val totalSize: Long) {
     private val receivedStats = MutableStateFlow(FlacTransferProgress())
     val transferProgress: StateFlow<FlacTransferProgress> = receivedStats
     private var fileUsers = 0
+    private var downloadUsers = 0
     private var deleteRequested = false
-    val shouldFinishDownload: Boolean get() = lock.withLock { fileUsers > 0 && failure == null && !complete }
+    private var disposed = false
+    val shouldFinishDownload: Boolean get() = lock.withLock { downloadUsers > 0 && failure == null && !complete }
 
-    fun retainFile(): Closeable = lock.withLock {
+    fun retainFile(forDownload: Boolean = true): Closeable = lock.withLock {
         check(!deleteRequested) { "FLAC cache expired" }
         fileUsers++
+        if (forDownload) downloadUsers++
         var released = false
         Closeable {
             lock.withLock {
                 if (!released) {
                     released = true
                     fileUsers--
-                    if (deleteRequested && fileUsers == 0) file.delete()
+                    if (forDownload) downloadUsers--
+                    if (deleteRequested && fileUsers == 0) disposeOnce()
                 }
             }
         }
@@ -47,22 +53,45 @@ internal class FlacStreamBuffer(val file: File, val totalSize: Long) {
 
     fun deleteWhenUnused() = lock.withLock {
         deleteRequested = true
-        if (fileUsers == 0) file.delete()
+        if (fileUsers == 0) disposeOnce()
+    }
+
+    private fun disposeOnce() {
+        if (!disposed) { disposed = true; dispose() }
+    }
+
+    companion object {
+        /** Finished files use Media3's normal seek map; no progressive frame scan is needed. */
+        fun completed(file: File, size: Long, dispose: () -> Unit): FlacStreamBuffer {
+            require(size > 0 && file.length() == size)
+            return FlacStreamBuffer(file, size, dispose).apply {
+                available = size
+                complete = true
+                received.value = size
+                receivedStats.value = FlacTransferProgress(size, 0)
+                finished.complete(Unit)
+            }
+        }
     }
 
     suspend fun awaitComplete() { finished.await(); checkFailure() }
 
-    fun publish(size: Long, done: Boolean = false) = lock.withLock {
-        require(size in available..totalSize)
-        if (size > 0 && firstByteAtNanos == 0L) firstByteAtNanos = System.nanoTime()
-        available = size
-        complete = done && size == totalSize
-        received.value = size
-        receivedStats.value = FlacTransferProgress(size,
-            flacTransferRate(size, if (firstByteAtNanos == 0L) 0 else (System.nanoTime() - firstByteAtNanos) / 1_000_000))
-        if (complete) finished.complete(Unit)
-        changed.signalAll()
-        updates.trySend(Unit)
+    fun publish(size: Long, done: Boolean = false) {
+        val receivedAtNanos = System.nanoTime()
+        // The writer flushed these bytes. Scan outside the reader lock so playback can continue.
+        seekIndex.update(file, size, done && size == totalSize)
+        lock.withLock {
+            require(size in available..totalSize)
+            if (size > 0 && firstByteAtNanos == 0L) firstByteAtNanos = receivedAtNanos
+            available = size
+            complete = done && size == totalSize
+            received.value = size
+            receivedStats.value = FlacTransferProgress(size,
+                flacTransferRate(size, if (firstByteAtNanos == 0L) 0 else (System.nanoTime() - firstByteAtNanos) / 1_000_000))
+            if (complete) finished.complete(Unit)
+            changed.signalAll()
+            updates.trySend(Unit)
+        }
     }
 
     fun fail(message: String) = lock.withLock {

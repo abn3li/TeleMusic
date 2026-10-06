@@ -25,6 +25,9 @@
 -keep class com.abn3li.telemusic.data.local.*Summary { *; }
 -keep class com.abn3li.telemusic.data.local.*CrossRef { *; }
 
+# Automatic FLAC cache metadata must retain the same JSON fields across signed releases.
+-keep class com.abn3li.telemusic.data.quality.FlacCache$Entry { *; }
+
 # Media3 discovers the renderer by name, and JNI looks up its decoder callbacks.
 -keep class androidx.media3.decoder.ffmpeg.FfmpegAudioRenderer { public <init>(...); }
 -keepclasseswithmembernames class androidx.media3.decoder.ffmpeg.** { native <methods>; }

@@ -83,7 +83,8 @@ class MusicService : MediaLibraryService() {
             .setConstantBitrateSeekingEnabled(true)
             .setMp4ExtractorFlags(Mp4Extractor.FLAG_READ_SEF_DATA)
 
-        val mediaSourceFactory = DefaultMediaSourceFactory(dataSourceFactory, extractorsFactory)
+        val mediaSourceFactory = DefaultMediaSourceFactory(dataSourceFactory,
+            FlacStreamingExtractorsFactory(extractorsFactory))
 
         // Dynamic Audio Engine: Prioritize software extension decoders (FFmpeg ALAC/FLAC/Opus) over system MediaCodec
         val isFfmpegAvailable = FfmpegLibrary.isAvailable()

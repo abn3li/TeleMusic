@@ -23,14 +23,18 @@ internal class FlacDataSource : BaseDataSource(true) {
     private var position = 0L
     private var remaining = 0L
     private var opened = false
+    private var fileLease: java.io.Closeable? = null
 
     override fun open(dataSpec: DataSpec): Long {
         transferInitializing(dataSpec)
         val buffer = FlacStreamRegistry.streams[dataSpec.uri.lastPathSegment] ?: throw IOException("FLAC cache expired")
         buffer.checkFailure()
         if (dataSpec.position > buffer.totalSize) throw IOException("FLAC position outside file")
+        val lease = buffer.retainFile(forDownload = false)
+        try { reader = RandomAccessFile(buffer.file, "r") }
+        catch (e: Exception) { lease.close(); throw e }
+        fileLease = lease
         source = buffer
-        reader = RandomAccessFile(buffer.file, "r")
         uri = dataSpec.uri
         position = dataSpec.position
         remaining = (buffer.totalSize - position).let {
@@ -51,7 +55,7 @@ internal class FlacDataSource : BaseDataSource(true) {
 
     override fun getUri(): Uri? = uri
     override fun close() {
-        reader?.close()
+        try { reader?.close() } finally { fileLease?.close(); fileLease = null }
         reader = null
         source = null
         uri = null

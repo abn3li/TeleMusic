@@ -18,3 +18,13 @@ internal fun readyFlacBuffer(totalBytes: Long, durationMs: Long, positionMs: Lon
     return receivedBytes >= requiredFlacBufferBytes(totalBytes, durationMs, positionMs) &&
         receivedBytes * 1000.0 / transferElapsedMs > compressedRate * 1.2
 }
+
+/** Count complete audio frames rather than estimating a timestamp from compressed file size. */
+internal fun readyIndexedFlacBuffer(totalBytes: Long, durationMs: Long, positionMs: Long,
+    receivedBytes: Long, complete: Boolean, bufferedUntilMs: Long, indexReady: Boolean,
+    transferElapsedMs: Long): Boolean {
+    if (complete) return true
+    if (!indexReady || transferElapsedMs < 1000 || receivedBytes < 5L * 1024 * 1024) return false
+    return bufferedUntilMs >= minOf(durationMs, positionMs.coerceAtLeast(0) + 15_000) &&
+        receivedBytes * 1000.0 / transferElapsedMs > totalBytes * 1000.0 / durationMs * 1.2
+}

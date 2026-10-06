@@ -230,8 +230,6 @@ fun SettingsScreen(onBack: () -> Unit, onOpenSpotify: () -> Unit, onLoggedOut: (
             )
         }
 
-        item("audio_quality") { FlacQualitySettingsGroup() }
-
         item("appearance") {
             GroupHeader("Appearance")
             GroupCard {
@@ -241,6 +239,8 @@ fun SettingsScreen(onBack: () -> Unit, onOpenSpotify: () -> Unit, onLoggedOut: (
                 }
             }
         }
+
+        item("audio_quality") { FlacQualitySettingsGroup() }
 
         item("now_playing") {
             GroupHeader("Now Playing")
@@ -334,6 +334,7 @@ fun SettingsScreen(onBack: () -> Unit, onOpenSpotify: () -> Unit, onLoggedOut: (
                             GroupOption(label = label, selected = cacheLimit == bytes, startPadding = 57) {
                                 cacheLimit = bytes
                                 app.settingsStore.maxCacheSizeBytes = bytes
+                                scope.launch { app.musicRepository.enforceCacheLimit() }
                                 cacheOptionsOpen = false
                             }
                         }
@@ -552,7 +553,7 @@ fun SettingsScreen(onBack: () -> Unit, onOpenSpotify: () -> Unit, onLoggedOut: (
 
 /** A small, secondary note under a group: a muted info icon and one line of text. */
 @Composable
-private fun SettingsNote(text: String) {
+internal fun SettingsNote(text: String) {
     Row(
         Modifier.fillMaxWidth().padding(start = 32.dp, end = 32.dp, top = 7.dp),
         verticalAlignment = Alignment.CenterVertically

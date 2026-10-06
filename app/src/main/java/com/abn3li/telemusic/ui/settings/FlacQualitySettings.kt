@@ -55,10 +55,10 @@ internal fun FlacQualitySettingsGroup() {
             trailing = { GroupValue(preferences.username.ifBlank { "Set Up" }) },
             onClick = { username = preferences.username; password = ""; error = null; accountOpen = true })
     }
-    GroupFooter("Finds a matching FLAC while the original audio plays. Tap the quality status below the seek bar for progress and details. Uses temporary storage and extra data. File sharing is off.")
+    SettingsNote("Quality upgrades use a lot of mobile data. Wi-Fi is recommended.")
     if (accountOpen) AppAlert(
         title = "Soulseek Account",
-        message = "Use your own account. The password is stored encrypted on this device.",
+        message = "Use your existing Soulseek account, or create a new one with a unique username and password.",
         onDismiss = { if (!saving) { accountOpen = false; password = "" } },
         actions = listOf(
             AlertAction("Cancel", enabled = !saving) { accountOpen = false; password = "" },

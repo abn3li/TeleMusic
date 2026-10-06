@@ -2,6 +2,8 @@ package com.abn3li.telemusic.data.quality
 
 import kotlinx.coroutines.*
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.selects.select
 import java.io.Closeable
 import java.io.File
@@ -42,7 +44,7 @@ internal class PeerFlacClient(
     private val peerLimit = Semaphore(12)
     // Search connections must leave room for the file connection we actually need.
     private val controlPeerLimit = Semaphore(8)
-    private val filePeerLimit = Semaphore(2)
+    private val filePeerLimit = Semaphore(4)
     private val peers = ConcurrentHashMap<String, Socket>()
     private val peerLock = Any()
     private val retainedSearchPeers = mutableMapOf<Socket, FlacCandidate>()
@@ -67,9 +69,12 @@ internal class PeerFlacClient(
     private val results = Channel<Pair<CompletableDeferred<Unit>, FlacCandidate>>(64)
     private val candidates = ConcurrentHashMap<String, FlacCandidate>()
     private val candidateUpdates = Channel<Unit>(Channel.CONFLATED)
+    private val candidateVersion = MutableStateFlow(0L)
+    // The buffer race observes replies without consuming the candidate picker's wake-up.
+    val candidateChanges = candidateVersion.asStateFlow()
     private var searchCollection: Job? = null
     private var searchFinished = CompletableDeferred<Unit>()
-    @Volatile private var transfer: PendingTransfer? = null
+    private val transfers = ConcurrentHashMap<String, PendingTransfer>()
 
     private class PendingTransfer(val candidate: FlacCandidate, @Volatile var buffer: FlacStreamBuffer) {
         @Volatile var controlSocket: Socket? = null
@@ -77,6 +82,7 @@ internal class PeerFlacClient(
         val accepted = CompletableDeferred<Unit>()
         val started = CompletableDeferred<Unit>()
         val finished = CompletableDeferred<Unit>()
+        val writerStopped = CompletableDeferred<Unit>()
         val receiving = AtomicBoolean(false)
         val failed = AtomicBoolean(false)
         val connected = CompletableDeferred<Unit>()
@@ -127,7 +133,7 @@ internal class PeerFlacClient(
                             val user = body.string(); val type = body.string()
                             val ip = body.int(); val port = body.int(); val token = body.int()
                             endpoints[user] = ipAddress(ip) to port
-                            val pending = transfer?.takeIf { it.candidate.user == user && !it.failed.get() }
+                            val pending = transfers[user]?.takeIf { !it.failed.get() }
                             if (type == "F" && pending == null) continue
                             val limit = if (type == "F") filePeerLimit else peerLimit
                             if (type in listOf("P", "F") && limit.tryAcquire()) scope.launch {
@@ -152,7 +158,7 @@ internal class PeerFlacClient(
                 serverAlive = false
                 runCatching { socket.close() }
                 login.completeExceptionally(IOException("Soulseek connection failed"))
-                transfer?.let { failTransfer(it.candidate.user, "Soulseek connection closed") }
+                transfers.values.forEach { failTransfer(it.candidate.user, "Soulseek connection closed", it) }
             }
         }
         withFlacTimeout(12000, "sign-in") { login.await() }
@@ -178,6 +184,26 @@ internal class PeerFlacClient(
             try {
                 coroutineScope {
                     val searchStartedAt = System.nanoTime()
+                    val speedSelectionStarted = AtomicBoolean(false)
+                    var speedSelection: Job? = null
+                    fun chooseFirstUploader() {
+                        if (first.isCompleted) return
+                        val available = orderedCandidates(recording)
+                        val best = available.firstOrNull() ?: return
+                        // A fast peer can fill the minimum buffer promptly. Give a slow or
+                        // unknown-speed first reply one short chance to gain a better backup.
+                        if (best.speed >= 2L * 1024 * 1024) {
+                            speedSelection?.cancel()
+                            if (first.complete(available)) diagnostic("Uploader selected immediately; reportedBytesPerSecond=" + best.speed)
+                        } else if (speedSelectionStarted.compareAndSet(false, true)) {
+                            speedSelection = launch {
+                                delay(700)
+                                val selected = orderedCandidates(recording)
+                                if (first.complete(selected)) diagnostic("Uploader selected after speed window; reportedBytesPerSecond=" +
+                                    (selected.firstOrNull()?.speed ?: 0))
+                            }
+                        }
+                    }
                     val queries = flacSearchQueries(recording)
                     searchToken = tokens.incrementAndGet()
                     activeSearchTokens.add(searchToken)
@@ -188,7 +214,7 @@ internal class PeerFlacClient(
                         delay(fallbackDelay)
                         if (!first.isCompleted) startFallbackSearch(recording)
                         delay(searchWindowMs - fallbackDelay)
-                        if (candidates.isNotEmpty()) first.complete(orderedCandidates(recording))
+                        chooseFirstUploader()
                     }
                     withTimeoutOrNull(backupSearchWindowMs) {
                         var received = 0
@@ -202,15 +228,17 @@ internal class PeerFlacClient(
                             // Keep bounded backups, but allow a later better uploader to replace one.
                             orderedCandidates(recording).drop(32).forEach { candidates.remove(it.user, it) }
                             candidateUpdates.trySend(Unit)
+                            candidateVersion.value += 1
                             // Start quickly, while the same bounded search still gathers backups.
                             if ((recordingMatches(candidate.filename, recording) && candidate.duration > 0 &&
                                 kotlin.math.abs(candidate.duration * 1000L - recording.durationMs) <= 2500) ||
                                 (System.nanoTime() - searchStartedAt) / 1_000_000 >= searchWindowMs) {
-                                first.complete(orderedCandidates(recording))
+                                chooseFirstUploader()
                             }
                         }
                     }
                     broaden.cancel()
+                    speedSelection?.cancel()
                 }
                 lastSearchSummary = when {
                     searchStats.sawUnavailable && candidates.isEmpty() -> "matching FLAC peers have no free upload slot"
@@ -232,6 +260,7 @@ internal class PeerFlacClient(
                 }
                 finished.complete(Unit)
                 candidateUpdates.trySend(Unit)
+                candidateVersion.value += 1
             }
         }
         try { return first.await() }
@@ -255,9 +284,12 @@ internal class PeerFlacClient(
     private fun candidateOrder(recording: FlacTarget) = compareByDescending<FlacCandidate> {
         recordingMatches(it.filename, recording) && it.duration > 0 &&
             kotlin.math.abs(it.duration * 1000L - recording.durationMs) <= 2500
-    }.thenBy { it.queueLength > 0 }.thenByDescending { it.speed }.thenBy { it.size }
+    }.thenByDescending { it.speed }.thenBy { it.queueLength > 0 }.thenBy { it.size }
 
     private fun orderedCandidates(recording: FlacTarget) = candidates.values.sortedWith(candidateOrder(recording))
+
+    fun availableCandidates(recording: FlacTarget, triedUsers: Set<String>): List<FlacCandidate> =
+        orderedCandidates(recording).filter { it.user !in triedUsers }
 
     private fun startFallbackSearch(recording: FlacTarget) {
         if (target != recording || searchFinished.isCompleted || searchCollection?.isActive != true) return
@@ -281,9 +313,9 @@ internal class PeerFlacClient(
     }
 
     private fun closeUnusedSearchPeers() = synchronized(peerLock) {
-        val activeSocket = transfer?.controlSocket
+        val activeSockets = transfers.values.mapNotNull { it.controlSocket }.toSet()
         (peers.values + retainedSearchPeers.keys).distinct().forEach { socket ->
-            if (activeSocket !== socket) closeSearchPeer(socket)
+            if (socket !in activeSockets) closeSearchPeer(socket)
         }
     }
 
@@ -296,12 +328,12 @@ internal class PeerFlacClient(
     private fun retainSearchPeer(socket: Socket, recording: FlacTarget,
         best: FlacCandidate?): Boolean = synchronized(peerLock) {
         if (best != null) retainedSearchPeers[socket] = best
-        val active = transfer?.controlSocket
+        val active = transfers.values.mapNotNull { it.controlSocket }.toSet()
         // Two useful sockets keep the first request quick; other replies release their slots.
-        val idle = retainedSearchPeers.entries.filter { it.key !== active }
+        val idle = retainedSearchPeers.entries.filter { it.key !in active }
             .sortedWith { a, b -> candidateOrder(recording).compare(a.value, b.value) }
         idle.drop(2).forEach { closeSearchPeer(it.key) }
-        if (active !== socket && socket !in retainedSearchPeers) {
+        if (socket !in active && socket !in retainedSearchPeers) {
             closeSearchPeer(socket)
             return@synchronized false
         }
@@ -325,7 +357,8 @@ internal class PeerFlacClient(
         val pending = PendingTransfer(candidate, FlacStreamBuffer(file, candidate.size))
         file.createNewFile()
         val existingPeer = synchronized(peerLock) {
-            transfer = pending
+            check(transfers.size < 2 && !transfers.containsKey(candidate.user)) { "FLAC transfer slots occupied" }
+            transfers[candidate.user] = pending
             peers[candidate.user]?.takeUnless { it.isClosed }?.also { pending.controlSocket = it }
         }
         diagnostic("Requesting FLAC; bytes=${candidate.size}")
@@ -346,29 +379,59 @@ internal class PeerFlacClient(
         } catch (e: Exception) {
             if (e !is CancellationException) diagnostic("Transfer start failed: " +
                 if (e is FlacTimeoutException) "${e.operation} timed out" else e.javaClass.simpleName)
-            pending.buffer.fail("Peer did not start promptly")
-            pending.fallbackConnection?.cancel()
-            pending.fileSockets.forEach { runCatching { it.close() } }
-            transfer = null
-            file.delete()
+            transfers.remove(candidate.user, pending)
+            withContext(NonCancellable) {
+                cancelPending(pending)
+                if (pending.receiving.get()) pending.writerStopped.await()
+                file.delete()
+            }
             throw e
         }
         return pending.buffer
     }
 
-    suspend fun awaitFinished() { transfer?.finished?.await() }
+    suspend fun awaitFinished(user: String? = null) {
+        val pending = if (user == null) transfers.values.toList() else listOfNotNull(transfers[user])
+        pending.forEach { it.finished.await() }
+    }
 
-    fun cancelTransfer() {
-        transfer?.let {
-            it.fallbackConnection?.cancel()
-            it.fileSockets.forEach { socket -> runCatching { socket.close() } }
-            it.buffer.fail("Transfer cancelled")
-            it.accepted.cancel()
-            it.started.cancel()
-            it.finished.cancel()
-        }
-        transfer = null
+    fun cancelTransfer(user: String? = null) {
+        val users = if (user == null) transfers.keys.toList() else listOf(user)
+        users.forEach { transfers.remove(it)?.let(::cancelPending) }
         // Backup search sockets belong to the current song, not to the failed file attempt.
+    }
+
+    suspend fun discardTransfer(user: String) {
+        val pending = transfers.remove(user) ?: return
+        cancelPending(pending)
+        if (pending.receiving.get()) pending.writerStopped.await()
+        pending.buffer.deleteWhenUnused()
+    }
+
+    suspend fun discardWaitingTransfer(user: String): Boolean {
+        val pending = transfers[user] ?: return true
+        // First-byte ownership uses the same lock. A queued progress event cannot
+        // make a newly receiving file look empty to the buffer race.
+        synchronized(pending) {
+            if (pending.receiving.get() || pending.buffer.available > 0 || pending.buffer.complete) return false
+            if (!transfers.remove(user, pending)) return false
+            pending.failed.set(true)
+        }
+        cancelPending(pending)
+        pending.buffer.deleteWhenUnused()
+        return true
+    }
+
+    private fun cancelPending(pending: PendingTransfer) {
+        // Synchronize with writer ownership so cleanup cannot miss a writer starting now.
+        synchronized(pending) { pending.failed.set(true) }
+        pending.fallbackConnection?.cancel()
+        pending.fileSockets.forEach { socket -> runCatching { socket.close() } }
+        pending.controlSocket?.let { runCatching { it.close() } }
+        pending.buffer.fail("Transfer cancelled")
+        pending.accepted.cancel()
+        pending.started.cancel()
+        pending.finished.cancel()
     }
 
     private suspend fun openPeer(user: String, type: String): Socket {
@@ -378,7 +441,14 @@ internal class PeerFlacClient(
         val (ip, port) = try {
             withFlacTimeout(10000, "peer address") { address.await() }
         } finally { addresses.remove(user, address) }
-        val socket = try { dial(ip, port) } catch (_: IOException) {
+        val requested = transfers[user]
+        val socket = try { dial(ip, port) { connecting ->
+            if (type == "P" && requested != null) synchronized(peerLock) {
+                if (transfers[user] === requested) requested.controlSocket = connecting
+                else connecting.close()
+            }
+        } } catch (_: IOException) {
+            currentCoroutineContext().ensureActive()
             val token = tokens.incrementAndGet()
             val pending = CompletableDeferred<Socket>()
             pendingPeers[token] = pending
@@ -392,7 +462,7 @@ internal class PeerFlacClient(
         if (type == "P") {
             synchronized(peerLock) {
                 peers[user] = socket
-                transfer?.takeIf { it.candidate.user == user }?.controlSocket = socket
+                transfers[user]?.controlSocket = socket
             }
             scope.launch {
                 try { handlePeer(socket, user, type) } catch (_: Exception) { }
@@ -422,16 +492,16 @@ internal class PeerFlacClient(
         if (type == "F") { receiveFile(socket, user); return }
         if (type != "P") return
         // An uploader request must not wait behind unrelated search replies.
-        val searchConnection = transfer?.candidate?.user != user
+        val searchConnection = !transfers.containsKey(user)
         if (searchConnection && !controlPeerLimit.tryAcquire()) return
         synchronized(peerLock) {
-            val pending = transfer?.takeIf { it.candidate.user == user }
+            val pending = transfers[user]
             if (pending?.controlSocket == null) {
                 peers[user] = socket
                 pending?.controlSocket = socket
             }
         }
-        socket.soTimeout = if (transfer?.candidate?.user == user) 45000 else 6000
+        socket.soTimeout = if (transfers.containsKey(user)) 45000 else 6000
         try {
             while (!closed) {
                 val (code, body) = socket.getInputStream().readFrame()
@@ -439,7 +509,7 @@ internal class PeerFlacClient(
                     9 -> {
                         val recording = target
                         if (recording == null) {
-                            if (transfer?.candidate?.user != user) return
+                            if (!transfers.containsKey(user)) return
                             continue
                         }
                         val generation = searchFinished
@@ -456,13 +526,13 @@ internal class PeerFlacClient(
                     40 -> {
                         val direction = body.int(); val token = body.int(); val filename = body.string()
                         val size = if (direction == 1) body.long() else 0
-                        val pending = transfer
+                        val pending = transfers[user]
                         val matches = pending != null && direction == 1 && pending.candidate.user == user &&
                             pending.candidate.filename == filename
                         val invalidSize = matches && size !in 42..MAX_FLAC_BYTES
                         var firstOffer = false
                         val allowed = pending != null && synchronized(pending) {
-                            if (!matches || invalidSize || transfer !== pending || pending.failed.get()) false
+                            if (!matches || invalidSize || transfers[user] !== pending || pending.failed.get()) false
                             else if (pending.token == null) {
                                 // Search metadata may describe an older copy. The upload offer
                                 // supplies its actual length; recording tags are still verified.
@@ -487,11 +557,11 @@ internal class PeerFlacClient(
                                 // Prefer the uploader's connection. Some clients need us to
                                 // initiate it; mobile networks often reject inbound sockets.
                                 delay(fileConnectFallbackMs)
-                                if (transfer !== pending || pending.connected.isCompleted || pending.failed.get()) return@launch
+                                if (transfers[user] !== pending || pending.connected.isCompleted || pending.failed.get()) return@launch
                                 var audio: Socket? = null
                                 try {
                                     val (ip, port) = peerAddress(user)
-                                    if (transfer !== pending || pending.connected.isCompleted || pending.failed.get()) return@launch
+                                    if (transfers[user] !== pending || pending.connected.isCompleted || pending.failed.get()) return@launch
                                     diagnostic("Opening outbound file connection")
                                     audio = dial(ip, port) { registerFileRoute(pending, it) }
                                     audio.getOutputStream().sendFrame(1,
@@ -513,7 +583,7 @@ internal class PeerFlacClient(
                     }
                     44 -> {
                         val filename = body.string(); val place = body.int().toLong() and 0xffffffffL
-                        val pending = transfer?.takeIf { it.candidate.filename == filename && it.candidate.user == user }
+                        val pending = transfers[user]?.takeIf { it.candidate.filename == filename }
                         if (place > 0 && pending != null) {
                             if (pending.token == null) failTransfer(user, "Peer is queued", pending)
                             else diagnostic("Late queue update ignored after upload acceptance")
@@ -521,7 +591,7 @@ internal class PeerFlacClient(
                     }
                     50, 46 -> {
                         val failure = readFlacPeerFailure(code, body, listOf(password, username))
-                        transfer?.takeIf { it.candidate.filename == failure.filename && it.candidate.user == user }?.let {
+                        transfers[user]?.takeIf { it.candidate.filename == failure.filename }?.let {
                             if (it.buffer.complete) {
                                 diagnostic("Late peer failure ignored after completion; code=$code")
                             } else if (code == 46 && it.competingFileRoutes.get() && it.receiving.get()) {
@@ -546,7 +616,7 @@ internal class PeerFlacClient(
             val pendingToFail = synchronized(peerLock) {
                 retainedSearchPeers.remove(socket)
                 val wasCurrent = peers.remove(user, socket)
-                transfer?.takeIf { wasCurrent && it.controlSocket === socket && it.token == null }
+                transfers[user]?.takeIf { wasCurrent && it.controlSocket === socket && it.token == null }
             }
             if (searchConnection) controlPeerLimit.release()
             // A replacement connection from this uploader may already be active.
@@ -556,7 +626,7 @@ internal class PeerFlacClient(
     }
 
     private fun failTransfer(user: String, reason: String, expected: PendingTransfer? = null) {
-        transfer?.takeIf { (expected == null || it === expected) && it.candidate.user == user &&
+        transfers[user]?.takeIf { (expected == null || it === expected) &&
             !it.buffer.complete && it.failed.compareAndSet(false, true) }?.let {
             diagnostic("Transfer failed: $reason; accepted=${it.token != null}; received=${it.buffer.available}/${it.buffer.totalSize}")
             it.buffer.fail(reason)
@@ -567,14 +637,14 @@ internal class PeerFlacClient(
     }
 
     private fun receiveFile(socket: Socket, user: String, offeredToken: Int? = null) {
-        val expected = transfer?.takeIf { it.candidate.user == user && !it.failed.get() } ?: return
+        val expected = transfers[user]?.takeIf { !it.failed.get() } ?: return
         registerFileRoute(expected, socket)
         socket.soTimeout = firstByteTimeoutMs.coerceIn(1, Int.MAX_VALUE.toLong()).toInt()
         var stream = expected.buffer
         var ownsWriter = false
         try {
             val ticket = offeredToken ?: WireReader(socket.getInputStream()).int()
-            if (transfer !== expected || expected.token != ticket || expected.failed.get() || expected.receiving.get()) return
+            if (transfers[user] !== expected || expected.token != ticket || expected.failed.get() || expected.receiving.get()) return
             stream = expected.buffer
             diagnostic("File route connected; waiting for FLAC bytes")
             socket.getOutputStream().write(WireWriter().long(0).bytes())
@@ -582,7 +652,10 @@ internal class PeerFlacClient(
             val chunk = ByteArray(65536)
             val firstCount = socket.getInputStream().read(chunk, 0, minOf(chunk.size.toLong(), stream.totalSize).toInt())
             if (firstCount <= 0) throw java.io.EOFException("File route ended before audio arrived")
-            if (transfer !== expected || expected.failed.get() || !expected.receiving.compareAndSet(false, true)) return
+            val selected = synchronized(expected) {
+                transfers[user] === expected && !expected.failed.get() && expected.receiving.compareAndSet(false, true)
+            }
+            if (!selected) return
             ownsWriter = true
             expected.connected.complete(Unit)
             // A TCP handshake alone does not prove this route can supply the file.
@@ -598,7 +671,7 @@ internal class PeerFlacClient(
                 expected.started.complete(Unit)
                 var lastPublish = bytes
                 var lastPublishedAt = System.nanoTime()
-                while (bytes < stream.totalSize && !closed && transfer === expected) {
+                while (bytes < stream.totalSize && !closed && transfers[user] === expected) {
                     val count = socket.getInputStream().read(chunk, 0, minOf(chunk.size.toLong(), stream.totalSize - bytes).toInt())
                     if (count < 0) throw java.io.EOFException("Incomplete FLAC transfer")
                     output.write(chunk, 0, count)
@@ -621,16 +694,24 @@ internal class PeerFlacClient(
             if (ownsWriter) {
                 diagnostic("File read failed: ${socketFailure(e)}; received=${stream.available}/${stream.totalSize}")
                 failTransfer(user, "FLAC transfer stopped receiving data", expected)
-            } else if (transfer === expected && !expected.receiving.get() && !expected.failed.get()) {
+            } else if (transfers[user] === expected && !expected.receiving.get() && !expected.failed.get()) {
                 // Another direct or server-arranged route can still deliver the first byte.
                 diagnostic("File route failed before audio; ${socketFailure(e)}; keeping other routes available")
             }
+        } finally {
+            if (ownsWriter) expected.writerStopped.complete(Unit)
         }
     }
 
     private fun registerFileRoute(pending: PendingTransfer, socket: Socket) {
-        pending.fileSockets.add(socket)
-        if (pending.fileSockets.size > 1) pending.competingFileRoutes.set(true)
+        synchronized(pending) {
+            if (pending.failed.get() || transfers[pending.candidate.user] !== pending) {
+                socket.close()
+                return
+            }
+            pending.fileSockets.add(socket)
+            if (pending.fileSockets.size > 1) pending.competingFileRoutes.set(true)
+        }
     }
 
     private suspend fun peerAddress(user: String): Pair<InetAddress, Int> {

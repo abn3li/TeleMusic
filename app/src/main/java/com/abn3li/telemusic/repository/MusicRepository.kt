@@ -103,6 +103,8 @@ class MusicRepository(
     private val songsInUse: suspend () -> Set<Long> = { emptySet() }
 ) {
     private val appContext = context.applicationContext
+    private val cacheLock = kotlinx.coroutines.sync.Mutex()
+    private val flacCache get() = (appContext as com.abn3li.telemusic.TgMusicApp).flacCache
 
     // Song ids already confirmed to have a working telegramFileId THIS app run - see
     // getFreshFileIdForSong's own doc for why this exists: without it, EVERY play of a Telegram
@@ -1300,28 +1302,31 @@ class MusicRepository(
      * up empty. [keepSongId] - the song playing right now - keeps its file, as does whatever
      * TDLib is still streaming, so playback isn't cut off mid-song.
      */
-    suspend fun clearStreamingCache(keepSongId: Long? = null): CacheClearResult {
-        var count = 0
-        var freed = 0L
-        for (song in songDao.getAutoCachedSongsOldestFirst()) {
-            if (song.telegramMessageId == keepSongId) continue
-            val path = song.localFilePath ?: continue
-            val file = File(path)
-            if (file.exists()) {
-                freed += file.length()
-                file.delete()
+    suspend fun clearStreamingCache(keepSongId: Long? = null): CacheClearResult = withContext(Dispatchers.IO) {
+        cacheLock.withLock {
+            var count = 0
+            var freed = 0L
+            for (song in songDao.getAutoCachedSongsOldestFirst()) {
+                if (song.telegramMessageId == keepSongId) continue
+                val path = song.localFilePath ?: continue
+                val file = File(path)
+                if (file.exists()) {
+                    freed += file.length()
+                    file.delete()
+                }
+                songDao.setLocalFilePath(song.telegramMessageId, null)
+                tdlibManager.deleteDownloadedFile(song.telegramFileId)
+                count++
             }
-            songDao.setLocalFilePath(song.telegramMessageId, null)
-            tdlibManager.deleteDownloadedFile(song.telegramFileId)
-            count++
+            val (partial, partialBytes) = purgePartialAudioFiles()
+            val (ytLeftovers, ytBytes) = purgeYouTubeDownloadLeftovers(everything = false)
+            // YouTube streams play straight from the internet - nothing of them is on disk; only the
+            // links already looked up are remembered (in memory), and those go too.
+            ytDlpRepository.clearStreamCache()
+            val lyrics = clearAllLyrics()
+            val (flacCount, flacBytes) = flacCache.clear()
+            CacheClearResult(count + flacCount, partial + ytLeftovers, freed + partialBytes + ytBytes + flacBytes, lyrics)
         }
-        val (partial, partialBytes) = purgePartialAudioFiles()
-        val (ytLeftovers, ytBytes) = purgeYouTubeDownloadLeftovers(everything = false)
-        // YouTube streams play straight from the internet - nothing of them is on disk; only the
-        // links already looked up are remembered (in memory), and those go too.
-        ytDlpRepository.clearStreamCache()
-        val lyrics = clearAllLyrics()
-        return CacheClearResult(count, partial + ytLeftovers, freed + partialBytes + ytBytes, lyrics)
     }
 
     /** Every saved lyric - on the songs and in the lookup cache. Opening a song's lyrics (or the
@@ -1387,6 +1392,8 @@ class MusicRepository(
      * See [releaseLocalFile] for why a local import's localFilePath isn't always safe to delete
      * outright - a referenced (not copied) one is the user's own original file. */
     suspend fun clearAllLibrarySongs() {
+        withContext(Dispatchers.IO) { cacheLock.withLock { flacCache.clear() } }
+
         val allSongs = songDao.observeAll().firstOrNull().orEmpty()
         for (song in allSongs) {
             song.localFilePath?.takeIf { it != song.exportedFileUri }?.let(::releaseLocalFile)
@@ -1535,26 +1542,35 @@ class MusicRepository(
         return song.telegramFileId
     }
 
-    /** Evicts least-recently-played AUTO-CACHED files (isExplicitDownload == false) once their
-     * total size exceeds the configured limit. Explicit downloads are NEVER touched, NEVER
-     * counted toward the limit, and persist until the user manually removes them. The
-     * currently-playing song is always excluded. */
-    suspend fun enforceCacheLimit(excludeSongId: Long? = null) {
-        val limit = settingsStore.maxCacheSizeBytes
-        if (limit == AppSettingsStore.UNLIMITED) return
-
-        val autoCached = songDao.getAutoCachedSongsOldestFirst().filter { it.telegramMessageId != excludeSongId }
-        var totalSize = autoCached.sumOf { File(it.localFilePath!!).length() }
-        if (totalSize <= limit) return
-
-        for (song in autoCached) {
-            if (totalSize <= limit) break
-            val file = File(song.localFilePath!!)
-            val size = file.length()
-            if (file.exists()) file.delete()
-            songDao.setLocalFilePath(song.telegramMessageId, null)
-            tdlibManager.deleteDownloadedFile(song.telegramFileId)
-            totalSize -= size
+    /** Original streams and completed FLAC upgrades share one budget and one oldest-first order.
+     * Active playback is counted but protected; explicit downloads never enter this list. */
+    suspend fun enforceCacheLimit(excludeSongId: Long? = null) = withContext(Dispatchers.IO) {
+        cacheLock.withLock {
+            val limit = settingsStore.maxCacheSizeBytes
+            if (limit == AppSettingsStore.UNLIMITED) return@withLock
+            val playing = withContext(Dispatchers.Main) {
+                (appContext as com.abn3li.telemusic.TgMusicApp).playbackController.currentSongId()
+            }
+            val protectedIds = setOfNotNull(playing, excludeSongId)
+            val original = songDao.getAutoCachedSongsOldestFirst()
+            val upgrades = flacCache.snapshot()
+            val files = original.map { song ->
+                val file = File(song.localFilePath!!)
+                val size = file.length()
+                com.abn3li.telemusic.data.quality.AutomaticCacheFile(size, song.lastPlayedAtMillis) {
+                    if (song.telegramMessageId in protectedIds || file.exists() && !file.delete()) 0L
+                    else {
+                        songDao.setLocalFilePath(song.telegramMessageId, null)
+                        tdlibManager.deleteDownloadedFile(song.telegramFileId)
+                        size
+                    }
+                }
+            } + upgrades.map { entry ->
+                com.abn3li.telemusic.data.quality.AutomaticCacheFile(entry.size, entry.lastPlayed) {
+                    if (entry.songId.toLongOrNull() in protectedIds) 0L else flacCache.evict(entry.key)
+                }
+            }
+            com.abn3li.telemusic.data.quality.trimAutomaticCache(files, limit)
         }
     }
 

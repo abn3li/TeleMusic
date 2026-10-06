@@ -150,8 +150,9 @@ class FlacSearchTest {
         val peer = ServerSocket(0).also { it.soTimeout = 3000 }
         val returned = CompletableDeferred<Unit>()
         val done = CompletableDeferred<Unit>()
+        // Cover the first uploader's comparison window and the deliberate late reply.
         val client = PeerFlacClient("local-test", "fixture-password", "127.0.0.1", server.localPort,
-            searchWindowMs = 150)
+            searchWindowMs = 150, backupSearchWindowMs = 3000)
         val fixture = async(Dispatchers.IO) {
             server.accept().use { control ->
                 login(control)
@@ -215,6 +216,7 @@ class FlacSearchTest {
             withContext(Dispatchers.IO) { client.connect() }
             val candidate = withTimeout(2000) { client.search(target) }.single()
             val buffer = withTimeout(3000) { withContext(Dispatchers.IO) { client.download(candidate, file) } }
+            assertFalse(withContext(Dispatchers.IO) { client.discardWaitingTransfer(candidate.user) })
             client.stopSearch()
             stopped.complete(Unit)
             withTimeout(3000) { buffer.awaitComplete() }
