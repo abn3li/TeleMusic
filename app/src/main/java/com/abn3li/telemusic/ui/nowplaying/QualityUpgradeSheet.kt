@@ -57,14 +57,18 @@ internal fun QualityUpgradeButton(song: SongEntity, active: Boolean, onClick: ()
     val held = remember(song.telegramMessageId) { IntArray(1) { -1 } }
     val (label, nextHeld) = flacSteadyLabel(status.stage, progress.downloadedBytes, transfer?.sizeBytes ?: 0, held[0])
     held[0] = nextHeld
+    // Only an upgrade under way (or done) opens the sheet - "Original" is just a label.
+    val tappable = label != "Original"
     Row(Modifier.height(32.dp).widthIn(max = 200.dp).clip(RoundedCornerShape(10.dp))
-        .clickable(role = Role.Button, onClick = onClick)
-        .semantics(mergeDescendants = true) { contentDescription = "$label. Open quality upgrade status" }
+        .then(if (tappable) Modifier.clickable(role = Role.Button, onClick = onClick) else Modifier)
+        .semantics(mergeDescendants = true) {
+            contentDescription = if (tappable) "$label. Open quality upgrade status" else label
+        }
         .padding(horizontal = 6.dp), verticalAlignment = Alignment.CenterVertically) {
         Icon(Icons.Rounded.GraphicEq, null, tint = Color.White.copy(alpha = 0.75f), modifier = Modifier.size(14.dp))
         Text(label, color = Color.White.copy(alpha = 0.75f), fontSize = 11.sp, fontWeight = FontWeight.Medium,
             maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(horizontal = 4.dp))
-        Icon(Icons.Rounded.ChevronRight, null, tint = Color.White.copy(alpha = 0.4f), modifier = Modifier.size(11.dp))
+        if (tappable) Icon(Icons.Rounded.ChevronRight, null, tint = Color.White.copy(alpha = 0.4f), modifier = Modifier.size(11.dp))
     }
 }
 
