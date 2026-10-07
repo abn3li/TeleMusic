@@ -378,7 +378,12 @@ internal class PeerFlacClient(
             withFlacTimeout(firstByteTimeoutMs, "file connection") { pending.started.await() }
         } catch (e: Exception) {
             if (e !is CancellationException) diagnostic("Transfer start failed: " +
-                if (e is FlacTimeoutException) "${e.operation} timed out" else e.javaClass.simpleName)
+                when (e) {
+                    is FlacTimeoutException -> "${e.operation} timed out"
+                    is FlacPeerException -> e.reason
+                    // Release builds shorten class names ("h"), so the message says more.
+                    else -> e.message ?: e.javaClass.simpleName
+                })
             transfers.remove(candidate.user, pending)
             withContext(NonCancellable) {
                 cancelPending(pending)

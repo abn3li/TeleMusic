@@ -114,7 +114,7 @@ fun SpotifyAccountRow(onOpenPlaylists: () -> Unit, onHelp: () -> Unit) {
         message = "Create a free app at developer.spotify.com (Dashboard → Create app). Set its Redirect URI to telemusic://spotify, tick Web API, and add your Spotify email under User Management. Then paste its Client ID here. TeleMusic can only read your Liked Songs and playlists.",
         onDismiss = { connecting = false },
         actions = listOf(
-            AlertAction("How to Get One") { onHelp() },
+            AlertAction("Help") { onHelp() },
             AlertAction("Connect", bold = true, enabled = clientId.isNotBlank()) {
                 account.clientId = clientId
                 connecting = false

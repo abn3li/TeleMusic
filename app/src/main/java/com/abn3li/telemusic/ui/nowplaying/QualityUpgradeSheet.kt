@@ -85,6 +85,9 @@ internal fun QualityUpgradeSheet(song: SongEntity, onDismiss: () -> Unit) {
         else null
     }
     val upgraded = status.stage == FlacUpgradeStage.LOSSLESS
+    val subtitleLine = if (upgraded) {
+        if (transfer != null) "Quality upgraded successfully." else "Already playing FLAC."
+    } else "Original audio remains selected."
     val title = when (status.stage) {
         FlacUpgradeStage.OFF -> "Automatic upgrade is off"
         FlacUpgradeStage.READY -> "Ready to upgrade"
@@ -128,9 +131,7 @@ internal fun QualityUpgradeSheet(song: SongEntity, onDismiss: () -> Unit) {
                 }
                 Column(Modifier.weight(1f).padding(start = 12.dp)) {
                     Text(title, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                    Text(if (upgraded) {
-                        if (transfer != null) "Quality upgraded successfully." else "Already playing FLAC."
-                    } else "Original audio remains selected.",
+                    Text(subtitleLine,
                         fontSize = 12.sp, color = Color.White.copy(alpha = 0.6f), modifier = Modifier.padding(top = 4.dp))
                 }
             }
@@ -144,7 +145,8 @@ internal fun QualityUpgradeSheet(song: SongEntity, onDismiss: () -> Unit) {
             else "FLAC only"
             QualityDetailRow(if (upgraded) "Quality" else "Upgrade", format)
             if (transfer != null) key(transfer.progress) { QualityTransferSpeed(transfer) }
-            Text(status.detail, fontSize = 12.sp, lineHeight = 17.sp, color = Color.White.copy(alpha = 0.6f),
+            // Not when it only repeats the line under the title ("Quality upgraded successfully.").
+            if (status.detail != subtitleLine) Text(status.detail, fontSize = 12.sp, lineHeight = 17.sp, color = Color.White.copy(alpha = 0.6f),
                 maxLines = 4, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 14.dp))
         }
     }

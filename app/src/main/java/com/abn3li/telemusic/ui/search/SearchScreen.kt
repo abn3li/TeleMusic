@@ -535,8 +535,17 @@ private fun YoutubeSongRow(result: YtDlpSearchResult, state: YouTubeDownloadUiSt
     }
 }
 
-@Composable private fun CollectionRow(value: BrowseCollection, open: (BrowseCollection) -> Unit) =
-    CollectionRow(value.title, "${value.kind.label()}${value.subtitle?.let { " · $it" } ?: ""}", value.kind == BrowseKind.ARTIST, value.thumbnailUrl) { open(value) }
+@Composable private fun CollectionRow(value: BrowseCollection, open: (BrowseCollection) -> Unit) {
+    val label = value.kind.label()
+    // YouTube's own line often starts with the kind already ("Album • Linkin Park • 2010").
+    val subtitle = value.subtitle?.takeIf { it.isNotBlank() }
+    val line = when {
+        subtitle == null -> label
+        subtitle.startsWith(label, ignoreCase = true) -> subtitle
+        else -> "$label · $subtitle"
+    }
+    CollectionRow(value.title, line, value.kind == BrowseKind.ARTIST, value.thumbnailUrl) { open(value) }
+}
 
 @Composable
 private fun CollectionRow(title: String, subtitle: String, round: Boolean, art: String?, onClick: () -> Unit) {

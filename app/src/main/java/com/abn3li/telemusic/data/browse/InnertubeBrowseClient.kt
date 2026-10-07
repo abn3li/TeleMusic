@@ -61,13 +61,43 @@ class InnertubeBrowseClient(
     /** The signed-in account's name and picture (YouTube Music's own account menu). */
     fun accountMenu(): JSONObject = post("account/account_menu", JSONObject())
 
-    /** Metadata for history registration only; stream URLs still come from yt-dlp. */
+    /**
+     * Where to report a listen (history registration only; stream URLs still come from yt-dlp).
+     * YouTube now answers the website's own player request with "Video unavailable" for apps
+     * like this one, so it's asked as the iPhone app - anonymously: the address it returns is
+     * the same stats endpoint, and the report itself carries the account (YouTubeHistoryClient).
+     */
+    @Suppress("UNUSED_PARAMETER")
     fun historyTrackingUrl(videoId: String, headers: Map<String, String>): String? {
-        val response = post("player", JSONObject().apply {
+        val body = JSONObject().apply {
+            put("context", JSONObject().apply {
+                put("client", JSONObject().apply {
+                    put("clientName", "IOS")
+                    put("clientVersion", IOS_CLIENT_VERSION)
+                    put("deviceMake", "Apple")
+                    put("deviceModel", "iPhone16,2")
+                    put("osName", "iPhone")
+                    put("osVersion", "18.3.2.22D82")
+                    put("hl", "en")
+                    put("gl", "US")
+                })
+            })
             put("videoId", videoId)
             put("contentCheckOk", true)
             put("racyCheckOk", true)
-        }, headers)
+        }
+        val request = Request.Builder()
+            .url("https://www.youtube.com/youtubei/v1/player?prettyPrint=false")
+            .addHeader("Content-Type", "application/json")
+            .addHeader("X-YouTube-Client-Name", "5")
+            .addHeader("X-YouTube-Client-Version", IOS_CLIENT_VERSION)
+            .addHeader("User-Agent", IOS_USER_AGENT)
+            .post(body.toString().toRequestBody("application/json".toMediaType()))
+            .build()
+        val response = client.newCall(request).execute().use { r ->
+            check(r.isSuccessful) { "Innertube player failed: HTTP ${r.code}" }
+            JSONObject(r.body?.string().orEmpty())
+        }
         val url = response.optJSONObject("playbackTracking")
             ?.optJSONObject("videostatsPlaybackUrl")?.optString("baseUrl")?.takeIf { it.isNotBlank() }
         if (url == null) {
@@ -164,6 +194,8 @@ class InnertubeBrowseClient(
         // for that genre, same as any other browse card (see BrowseParser.parseGenreChips).
         const val GENRES_BROWSE_ID = "FEmusic_moods_and_genres"
         private const val CLIENT_VERSION = "1.20250101.01.00"
+        private const val IOS_CLIENT_VERSION = "20.10.4"
+        private const val IOS_USER_AGENT = "com.google.ios.youtube/20.10.4 (iPhone16,2; U; CPU iOS 18_3_2 like Mac OS X;)"
         private const val WEB_USER_AGENT =
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"
         private val VISITOR_DATA = Regex(""""(Cg[A-Za-z0-9_%-]{40,})"""")
