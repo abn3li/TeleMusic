@@ -25,18 +25,11 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import java.io.File
 
-/** The search result tabs: everything, only what's in the library, or one kind (library matches
- * of that kind first, then YouTube's). */
-enum class SearchTab(val label: String) {
-    ALL("All"), LIBRARY("Library"), SONGS("Songs"), ALBUMS("Albums"), ARTISTS("Artists"), PLAYLISTS("Playlists")
-}
-
 data class YouTubeDownloadUiState(
     val query: String = "",
     // The query the results below belong to; differs from [query] while a new search waits to run.
     val searchedQuery: String = "",
     val isSearching: Boolean = false,
-    val tab: SearchTab = SearchTab.ALL,
     val results: List<YtDlpSearchResult> = emptyList(),
     // The other tabs' results for the same search - pages to open, not songs.
     val albums: List<BrowseCollection> = emptyList(),
@@ -85,10 +78,6 @@ class YouTubeDownloadViewModel(
         } else {
             _uiState.update { it.copy(query = query) }
         }
-    }
-
-    fun selectTab(tab: SearchTab) {
-        _uiState.update { it.copy(tab = tab) }
     }
 
     // The search in flight: a new one cancels it, so an older, slower search can't finish last
@@ -162,23 +151,24 @@ class YouTubeDownloadViewModel(
 
     private fun startDownload(result: YtDlpSearchResult) {
         workScope.launch {
+            if (result.videoId in _uiState.value.downloadingIds || result.videoId in _uiState.value.downloadedIds) return@launch
             _uiState.update { it.copy(downloadingIds = it.downloadingIds + result.videoId) }
-            val destDir = File(context.filesDir, "youtube_downloads")
-            val songId = ytDlpStableSongId(result.videoId)
-            val outcome = ytDlpRepository.download(result.videoId, destDir, songId.toString(), DownloadQuality.BEST.formatSelector)
-            outcome.onSuccess { downloaded ->
+            try {
+                val destDir = File(context.filesDir, "youtube_downloads")
+                val songId = ytDlpStableSongId(result.videoId)
+                val downloaded = ytDlpRepository.download(result.videoId, destDir, songId.toString(), DownloadQuality.BEST.formatSelector).getOrThrow()
                 musicRepository.importDownloadedSong(downloaded, songId, result.videoId)
+                _uiState.update { it.copy(downloadedIds = it.downloadedIds + result.videoId) }
                 // Turns the real YouTube thumbnail URL already on the row into a cached
                 // thumbnailPath - the row is stored pre-enriched (see importDownloadedSong's own
                 // doc), so this artwork backfill pass is the only enrichment it still needs.
                 musicRepository.backfillThumbnails()
-            }
-            _uiState.update {
-                it.copy(
-                    downloadingIds = it.downloadingIds - result.videoId,
-                    downloadedIds = if (outcome.isSuccess) it.downloadedIds + result.videoId else it.downloadedIds,
-                    actionError = outcome.exceptionOrNull()?.let { e -> "Couldn't download \"${result.title}\": ${e.message}" } ?: it.actionError
-                )
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                _uiState.update { it.copy(actionError = "Couldn't save \"${result.title}\": ${e.message}") }
+            } finally {
+                _uiState.update { it.copy(downloadingIds = it.downloadingIds - result.videoId) }
             }
         }
     }

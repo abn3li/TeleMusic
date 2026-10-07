@@ -22,9 +22,9 @@ import com.abn3li.telemusic.ui.settings.rememberTelegramNetworkForm
 
 /**
  * The Telegram API ID/hash (plus DNS and proxy, for networks that block Telegram) - the first
- * step of the Sync tab until they're saved. Only Telegram needs them, so the rest of the app
+ * step of Telegram settings until they're saved. Only Telegram needs them, so the rest of the app
  * (YouTube, Spotify, local files) works without ever filling this in. Saving starts TDLib, and
- * the Sync tab moves on to the phone-number step by itself. What's typed survives switching
+ * Telegram settings moves on to the phone-number step by itself. What's typed survives switching
  * tabs and rotating.
  */
 @Composable

@@ -68,6 +68,7 @@ class MusicService : MediaLibraryService() {
     private lateinit var player: ExoPlayer
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private var flacUpgrade: FlacUpgradeController? = null
+    private var youtubeHistory: YouTubeHistoryReporter? = null
 
     @OptIn(UnstableApi::class)
     override fun onCreate() {
@@ -110,7 +111,7 @@ class MusicService : MediaLibraryService() {
         player.addListener(object : Player.Listener {
             override fun onPlayerError(error: PlaybackException) {
                 if (player.currentMediaItem?.localConfiguration?.uri?.scheme == "quality") {
-                    Log.i("FlacTransfer", "FLAC playback error: ${error.errorCodeName}")
+                    android.util.Log.i("FlacTransfer", "FLAC playback error: ${error.errorCodeName}")
                 }
                 if (flacUpgrade?.fallback() != true) refreshExpiredStreamLink(error)
             }
@@ -136,6 +137,7 @@ class MusicService : MediaLibraryService() {
             }
         })
         flacUpgrade = FlacUpgradeController(app, player, serviceScope)
+        youtubeHistory = YouTubeHistoryReporter(app, player, serviceScope)
         ContextCompat.registerReceiver(
             this, screenReceiver,
             IntentFilter().apply {
@@ -263,6 +265,9 @@ class MusicService : MediaLibraryService() {
                     .setTitle(song.title)
                     .setArtist(song.artist)
                     .setArtworkUri(song.displayArtworkUri)
+                    .setExtras(android.os.Bundle().apply {
+                        putString(EXTRA_PLAYBACK_INSTANCE, java.util.UUID.randomUUID().toString())
+                    })
                     .build()
             )
             .build()
@@ -394,6 +399,7 @@ class MusicService : MediaLibraryService() {
             this, last.copy(isPlaying = false, positionMs = last.positionNow(), atElapsedMs = SystemClock.elapsedRealtime())
         )
         flacUpgrade?.close()
+        youtubeHistory?.close()
         serviceScope.cancel()
         mediaSession?.run { player.release(); release(); mediaSession = null }
         super.onDestroy()

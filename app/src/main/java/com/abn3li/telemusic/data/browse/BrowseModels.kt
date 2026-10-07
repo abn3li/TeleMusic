@@ -28,6 +28,21 @@ enum class BrowseKind { PLAYLIST, ARTIST, ALBUM, OTHER }
  * from YouTube Music's own feed, this app doesn't invent section names. */
 data class HomeSection(val title: String, val items: List<BrowseCollection>)
 
+/** One shelf of a signed-in Home feed: songs to play ("Quick picks", "Listen again") and/or
+ * cards to open (your mixes, recommended albums and playlists). */
+data class HomeShelf(
+    val title: String,
+    val tracks: List<BrowseTrack>,
+    val collections: List<BrowseCollection>,
+    // The small line YouTube Music puts above some titles ("Start radio from a song", "Similar to").
+    val strapline: String? = null,
+    // Songs given as list rows (Quick picks) rather than covers - shown four to a column.
+    val listRows: Boolean = false,
+    // YouTube Music's own "More" page for this shelf, when it has one.
+    val moreBrowseId: String? = null,
+    val moreParams: String? = null
+)
+
 /** One browse page's worth of content: either a track list (a playlist/chart/artist's own
  * songs) or more collection cards (a chart page linking to sub-charts, say) - never
  * meaningfully both at once in practice, same tradeoff the search-side parser makes.

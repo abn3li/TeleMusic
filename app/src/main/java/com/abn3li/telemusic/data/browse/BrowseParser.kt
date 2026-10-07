@@ -27,25 +27,57 @@ object BrowseParser {
         return parseSearchSongs(shelf)
     }
 
-    fun parseHomeFeed(response: JSONObject): List<HomeSection> {
-        val tabs = response.opt("contents").obj()?.opt("singleColumnBrowseResultsRenderer").obj()?.opt("tabs").arr()
-        val shelves = tabs?.optJSONObject(0)?.opt("tabRenderer").obj()?.opt("content").obj()
-            ?.opt("sectionListRenderer").obj()?.opt("contents").arr() ?: return emptyList()
-
-        val sections = mutableListOf<HomeSection>()
-        for (i in 0 until shelves.length()) {
-            val carousel = shelves.optJSONObject(i)?.opt("musicCarouselShelfRenderer").obj() ?: continue
-            val title = carousel.opt("header").obj()?.opt("musicCarouselShelfBasicHeaderRenderer").obj()
-                ?.opt("title").obj()?.runs().orEmpty()
-            val itemsJson = carousel.opt("contents").arr() ?: continue
-            val items = mutableListOf<BrowseCollection>()
-            for (j in 0 until itemsJson.length()) {
-                val renderer = itemsJson.optJSONObject(j)?.opt("musicTwoRowItemRenderer").obj() ?: continue
-                parseTwoRowCollection(renderer)?.let { items.add(it) }
+    /** Every shelf of a home-feed page (the first page or a continuation): its songs and its
+     * cards, in YouTube Music's own order and with its own titles. A song card ("Listen again")
+     * is a two-row item that plays rather than opens. */
+    fun parseHomeShelves(response: JSONObject): List<HomeShelf> =
+        collectRenderers(response, "musicCarouselShelfRenderer").mapNotNull { carousel ->
+            val header = carousel.opt("header").obj()?.opt("musicCarouselShelfBasicHeaderRenderer").obj()
+            val title = header?.opt("title").obj()?.runs().orEmpty().ifBlank { return@mapNotNull null }
+            val strapline = header?.opt("strapline").obj()?.runs()?.takeIf { it.isNotBlank() }
+            val more = header?.opt("moreContentButton").obj()?.opt("buttonRenderer").obj()
+                ?.opt("navigationEndpoint").obj()?.opt("browseEndpoint").obj()
+            val contents = carousel.opt("contents").arr() ?: return@mapNotNull null
+            val tracks = LinkedHashMap<String, BrowseTrack>()
+            val cards = LinkedHashMap<String, BrowseCollection>()
+            var listRows = false
+            for (i in 0 until contents.length()) {
+                val item = contents.optJSONObject(i) ?: continue
+                item.opt("musicResponsiveListItemRenderer").obj()?.let { parseTrackRow(it) }?.let {
+                    listRows = true
+                    tracks.putIfAbsent(it.videoId, it)
+                }
+                item.opt("musicTwoRowItemRenderer").obj()?.let { renderer ->
+                    parseTwoRowTrack(renderer)?.let { tracks.putIfAbsent(it.videoId, it) }
+                        ?: parseTwoRowCollection(renderer)?.let { cards.putIfAbsent(it.browseId + it.params.orEmpty(), it) }
+                }
             }
-            if (items.isNotEmpty()) sections.add(HomeSection(title.ifBlank { "For you" }, items))
+            if (tracks.isEmpty() && cards.isEmpty()) null
+            else HomeShelf(title, tracks.values.toList(), cards.values.toList(), strapline, listRows,
+                more?.optString("browseId")?.takeIf { it.isNotBlank() }, more?.optString("params")?.takeIf { it.isNotBlank() })
         }
-        return sections
+
+    /** A two-row card that plays a song (its own watch link) - null for one that opens a page,
+     * or a video's widescreen card (this app plays audio, see parseTwoRowCollection). */
+    private fun parseTwoRowTrack(renderer: JSONObject): BrowseTrack? {
+        val videoId = renderer.opt("navigationEndpoint").obj()?.opt("watchEndpoint").obj()
+            ?.optString("videoId")?.takeIf { it.isNotBlank() } ?: return null
+        if ("VIDEO" in renderer.optString("aspectRatio")) return null
+        val thumbnails = renderer.opt("thumbnailRenderer").obj()?.opt("musicThumbnailRenderer").obj()
+            ?.opt("thumbnail").obj()?.opt("thumbnails").arr()
+        if (thumbnails.isWidescreen()) return null
+        val title = renderer.opt("title").obj()?.runs().orEmpty().ifBlank { return null }
+        val artist = renderer.opt("subtitle").obj()?.runs()?.let(::isolateParts)
+            ?.split(" • ")?.firstOrNull { it.isNotBlank() && it != "Song" }?.trim().orEmpty()
+        return BrowseTrack(videoId = videoId, title = title, artist = artist, thumbnailUrl = thumbnails.best())
+    }
+
+    /** The signed-in account's name and picture from YouTube Music's account menu. */
+    fun parseAccountProfile(response: JSONObject): Pair<String?, String?> {
+        val header = collectRenderers(response, "activeAccountHeaderRenderer").firstOrNull() ?: return null to null
+        val name = header.opt("accountName").obj()?.runs()?.takeIf { it.isNotBlank() }
+        val photo = header.opt("accountPhoto").obj()?.opt("thumbnails").arr().largestUrl()
+        return name to photo
     }
 
     /** Playlists made by listeners, from the home feed's own community shelves ("Trending

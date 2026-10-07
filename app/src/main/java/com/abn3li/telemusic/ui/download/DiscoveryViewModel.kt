@@ -99,36 +99,120 @@ class DiscoveryViewModel(
 
 data class NewReleasesUiState(
     val isLoading: Boolean = true,
+    val isRefreshing: Boolean = false,
     val section: HomeSection? = null,
     // Listener-made playlists for Home; null until read, empty when the region has none.
-    val community: HomeSection? = null
+    val community: HomeSection? = null,
+    // Signed in to YouTube Music: that account's own Home shelves (null until read).
+    val personal: List<com.abn3li.telemusic.data.browse.HomeShelf>? = null,
+    val account: com.abn3li.telemusic.data.youtube.YouTubeAccountState = com.abn3li.telemusic.data.youtube.YouTubeAccountState()
 )
 
-/** Owns the remote shelves displayed on Home: New releases and community playlists. */
+/** Owns the remote shelves displayed on Home: New releases and community playlists, or - signed
+ * in to YouTube Music - that account's own shelves. */
 class NewReleasesViewModel(
-    private val discoveryRepository: DiscoveryRepository
+    private val discoveryRepository: DiscoveryRepository,
+    private val account: com.abn3li.telemusic.data.youtube.YouTubeAccount,
+    private val settings: com.abn3li.telemusic.data.settings.AppSettingsStore
 ) : ViewModel() {
-    private val _uiState = MutableStateFlow(NewReleasesUiState())
+    private val _uiState = MutableStateFlow(NewReleasesUiState(
+        account = account.state.value,
+        personal = if (account.state.value.signedIn) discoveryRepository.personalHomeIfLoaded() else null
+    ))
     val uiState: StateFlow<NewReleasesUiState> = _uiState
 
     private var loadJob: Job? = null
     private var communityJob: Job? = null
+    private var personalJob: Job? = null
+    private var feedEnabled = settings.homeFeeds.value.youtube
 
-    init { retryIfMissing() }
-
-    /** Loads each shelf that isn't there yet - called on each visit to Home, so one that failed
-     * (offline start) shows up once the connection is back. Nothing runs once both have loaded. */
-    fun retryIfMissing() {
-        if (_uiState.value.section == null && loadJob?.isActive != true) {
-            loadJob = viewModelScope.launch {
-                val section = discoveryRepository.newReleases()
-                _uiState.update { it.copy(isLoading = false, section = section) }
+    init {
+        retryIfMissing()
+        viewModelScope.launch {
+            settings.homeFeeds.collect { feeds ->
+                feedEnabled = feeds.youtube
+                if (feedEnabled) retryIfMissing()
+                else {
+                    loadJob?.cancel()
+                    communityJob?.cancel()
+                    personalJob?.cancel()
+                }
             }
         }
-        if (_uiState.value.community == null && communityJob?.isActive != true) {
+        // Signing in or out swaps Home's YouTube shelves: what was read for the old account goes.
+        viewModelScope.launch {
+            var previousSession = _uiState.value.account.sessionId
+            var firstEmission = true
+            account.state.collect { state ->
+                _uiState.update { it.copy(account = state) }
+                if (previousSession != state.sessionId) {
+                    personalJob?.cancel()
+                    communityJob?.cancel()
+                    loadJob?.cancel()
+                    _uiState.update { it.copy(personal = null, community = null, section = null, isRefreshing = false) }
+                }
+                if (state.signedIn && state.name == null && (firstEmission || previousSession != state.sessionId)) loadProfile()
+                firstEmission = false
+                previousSession = state.sessionId
+                retryIfMissing()
+            }
+        }
+    }
+
+    private fun loadProfile() {
+        viewModelScope.launch {
+            val session = account.state.value.sessionId
+            val (name, photo) = discoveryRepository.accountProfile()
+            if (name != null || photo != null) account.setProfile(name, photo, session)
+        }
+    }
+
+    /** Called only at entry/resume or when feeds are enabled; never starts a background timer. */
+    fun onHomeVisible() = retryIfMissing()
+
+    /** Pull refresh bypasses the cache and waits for active requests, keeping existing shelves. */
+    suspend fun refreshHome() {
+        if (!feedEnabled) return
+        retryIfMissing(force = true)
+        personalJob?.join()
+        loadJob?.join()
+        communityJob?.join()
+    }
+
+    fun retryIfMissing(force: Boolean = false) {
+        if (!feedEnabled) return
+        if (_uiState.value.account.signedIn &&
+            (force || _uiState.value.personal == null || discoveryRepository.personalHomeIsStale()) &&
+            personalJob?.isActive != true) {
+            personalJob = viewModelScope.launch {
+                val session = account.state.value.sessionId
+                _uiState.update { it.copy(isRefreshing = true) }
+                try {
+                    val shelves = discoveryRepository.personalHome(force)
+                    if (session == account.state.value.sessionId && shelves != null) {
+                        _uiState.update { it.copy(personal = shelves) }
+                    }
+                } finally {
+                    if (session == account.state.value.sessionId) _uiState.update { it.copy(isRefreshing = false) }
+                }
+            }
+        }
+        // Signed-in Home uses only the account's own shelves; public defaults return on sign-out.
+        if (_uiState.value.account.signedIn) return
+        if ((force || _uiState.value.section == null) && loadJob?.isActive != true) {
+            loadJob = viewModelScope.launch {
+                val session = account.state.value.sessionId
+                val section = discoveryRepository.newReleases(force)
+                if (session == account.state.value.sessionId) {
+                    _uiState.update { it.copy(isLoading = false, section = section ?: it.section) }
+                }
+            }
+        }
+        if ((force || _uiState.value.community == null) && communityJob?.isActive != true) {
             communityJob = viewModelScope.launch {
-                val community = discoveryRepository.communityPlaylists()
-                _uiState.update { it.copy(community = community) }
+                val session = account.state.value.sessionId
+                val community = discoveryRepository.communityPlaylists(force)
+                if (session == account.state.value.sessionId) _uiState.update { it.copy(community = community ?: it.community) }
             }
         }
     }

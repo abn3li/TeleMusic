@@ -26,8 +26,6 @@ class FlacUpgradeStore(context: Context) {
     val preferences: StateFlow<FlacUpgradePreferences> = _preferences
     private val _upgradeStatus = MutableStateFlow(idleFlacStatus(null, _preferences.value.enabled, _preferences.value.hasAccount))
     val upgradeStatus: StateFlow<FlacUpgradeStatus> = _upgradeStatus
-    private val _playingFlacSongId = MutableStateFlow<String?>(null)
-    val playingFlacSongId: StateFlow<String?> = _playingFlacSongId
     private val _activeFlac = MutableStateFlow<FlacPlaybackInfo?>(null)
     val activeFlac: StateFlow<FlacPlaybackInfo?> = _activeFlac
     private var activeBuffer: FlacStreamBuffer? = null
@@ -36,7 +34,6 @@ class FlacUpgradeStore(context: Context) {
         _activeFlac.value = if (songId != null && header != null && buffer != null)
             FlacPlaybackInfo(songId, header.sampleRate, header.bitDepth, header.channels, buffer.totalSize, buffer.progress)
         else null
-        _playingFlacSongId.value = songId
     }
     @Synchronized internal fun acquireDownload(songId: String): Pair<FlacStreamBuffer, java.io.Closeable>? {
         if (_activeFlac.value?.songId != songId) return null

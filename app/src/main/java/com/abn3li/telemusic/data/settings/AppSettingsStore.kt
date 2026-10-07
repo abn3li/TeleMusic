@@ -5,6 +5,9 @@ import android.net.Uri
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 
+/** Independent visibility of the original library feed and YouTube recommendations on Home. */
+data class HomeFeeds(val telegram: Boolean = true, val youtube: Boolean = true)
+
 /** Now Playing visual effects the user can switch off in Settings. */
 data class PlayerEffects(
     val lyricsGlow: Boolean = true,
@@ -231,7 +234,22 @@ class AppSettingsStore(context: Context) {
         _playerEffects.value = updated
     }
 
+    private val _homeFeeds = MutableStateFlow(HomeFeeds(
+        telegram = prefs.getBoolean(KEY_HOME_TELEGRAM, true),
+        youtube = prefs.getBoolean(KEY_HOME_YOUTUBE, true)
+    ))
+    val homeFeeds: StateFlow<HomeFeeds> = _homeFeeds
+
+    fun updateHomeFeeds(transform: (HomeFeeds) -> HomeFeeds) {
+        val updated = transform(_homeFeeds.value)
+        prefs.edit().putBoolean(KEY_HOME_TELEGRAM, updated.telegram)
+            .putBoolean(KEY_HOME_YOUTUBE, updated.youtube).apply()
+        _homeFeeds.value = updated
+    }
+
     companion object {
+        private const val KEY_HOME_TELEGRAM = "home_feed_telegram"
+        private const val KEY_HOME_YOUTUBE = "home_feed_youtube"
         private const val KEY_THEME_MODE = "theme_mode"
         private const val KEY_LYRICS_GLOW = "player_lyrics_glow"
         private const val KEY_LYRICS_BLUR = "player_lyrics_blur"

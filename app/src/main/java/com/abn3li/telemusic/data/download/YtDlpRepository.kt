@@ -6,24 +6,16 @@ import android.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
-import java.util.concurrent.ConcurrentHashMap
-
-private data class CachedStream(
-    val result: YtDlpStreamResult,
-    val cachedAtMillis: Long = System.currentTimeMillis()
-)
-
-private const val STREAM_CACHE_TTL_MS = 3 * 60 * 60 * 1000L // 3 hours (YouTube stream URLs expire after ~6h)
 
 /** Coroutine-friendly front for [YtDlpService] - every call in there blocks on network/disk I/O
  * (real yt-dlp doing real work), so this is the only place that's ever touched from a ViewModel;
  * nothing here runs on the main thread. */
 class YtDlpRepository(context: Context) {
     private val service = YtDlpService(context.applicationContext)
-    private val streamCache = ConcurrentHashMap<String, CachedStream>()
+    private val streamCache = StreamUrlCache(SystemClock::elapsedRealtime)
 
     fun invalidateStreamCache(videoId: String) {
-        streamCache.remove(videoId)
+        streamCache.invalidate(videoId)
     }
 
     /** Forgets every remembered YouTube stream link (kept in memory only). */
@@ -62,17 +54,16 @@ class YtDlpRepository(context: Context) {
 
     suspend fun resolveStreamUrl(videoId: String, formatSelector: String): Result<YtDlpStreamResult> =
         withContext(Dispatchers.IO) {
-            val now = System.currentTimeMillis()
-            val cached = streamCache[videoId]
-            if (cached != null && (now - cached.cachedAtMillis) < STREAM_CACHE_TTL_MS) {
+            val cached = streamCache.get(videoId, formatSelector)
+            if (cached != null) {
                 Log.d("YtDlpRepository", "resolveStreamUrl(videoId=$videoId): cache hit! (0ms)")
-                return@withContext Result.success(cached.result)
+                return@withContext Result.success(cached)
             }
 
             val result = runCatching { service.resolveStreamUrl(videoId, formatSelector) }
             result.onSuccess { stream ->
                 if (stream.streamUrl.isNotBlank()) {
-                    streamCache[videoId] = CachedStream(stream, now)
+                    streamCache.put(videoId, formatSelector, stream)
                 }
             }
             result

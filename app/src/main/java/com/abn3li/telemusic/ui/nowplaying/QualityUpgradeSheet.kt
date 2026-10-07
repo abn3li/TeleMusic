@@ -57,8 +57,8 @@ internal fun QualityUpgradeButton(song: SongEntity, active: Boolean, onClick: ()
     val held = remember(song.telegramMessageId) { IntArray(1) { -1 } }
     val (label, nextHeld) = flacSteadyLabel(status.stage, progress.downloadedBytes, transfer?.sizeBytes ?: 0, held[0])
     held[0] = nextHeld
-    // Only an upgrade under way (or done) opens the sheet - "Original" is just a label.
-    val tappable = label != "Original"
+    // Always opens the sheet: on "Original" it says why the song wasn't upgraded.
+    val tappable = true
     Row(Modifier.height(32.dp).widthIn(max = 200.dp).clip(RoundedCornerShape(10.dp))
         .then(if (tappable) Modifier.clickable(role = Role.Button, onClick = onClick) else Modifier)
         .semantics(mergeDescendants = true) {
@@ -145,7 +145,7 @@ internal fun QualityUpgradeSheet(song: SongEntity, onDismiss: () -> Unit) {
             QualityDetailRow(if (upgraded) "Quality" else "Upgrade", format)
             if (transfer != null) key(transfer.progress) { QualityTransferSpeed(transfer) }
             Text(status.detail, fontSize = 12.sp, lineHeight = 17.sp, color = Color.White.copy(alpha = 0.6f),
-                maxLines = 3, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 14.dp))
+                maxLines = 4, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 14.dp))
         }
     }
 }

@@ -28,17 +28,20 @@ class SyncService : Service() {
 
     private val job = SupervisorJob()
     private val scope = CoroutineScope(job)
+    private var syncJob: kotlinx.coroutines.Job? = null
 
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        if (syncJob?.isActive == true) return START_NOT_STICKY
         val chatId = intent?.getLongExtra(EXTRA_CHAT_ID, -1) ?: -1
         if (chatId == -1L) { stopSelf(); return START_NOT_STICKY }
 
         startForeground(NOTIFICATION_ID, buildNotification("Syncing..."))
 
         val app = application as TgMusicApp
-        scope.launch {
+        _isRunning.value = true
+        syncJob = scope.launch {
             try {
                 _progress.value = "Fetching musics..."
                 updateNotification("Fetching musics...")
@@ -54,6 +57,8 @@ class SyncService : Service() {
                 }
                 _progress.value = "Done!"
                 updateNotification("Sync complete")
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
             } catch (e: Exception) {
                 _progress.value = "Error: ${e.message}"
                 updateNotification("Sync failed: ${e.message}")
@@ -63,12 +68,12 @@ class SyncService : Service() {
                 stopSelf()
             }
         }
-        _isRunning.value = true
         return START_NOT_STICKY
     }
 
     override fun onDestroy() {
         job.cancel()
+        _isRunning.value = false
         super.onDestroy()
     }
 

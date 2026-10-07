@@ -484,6 +484,11 @@ class MusicRepository(
         val stream = outcome.getOrNull()?.takeIf { it.streamUrl.isNotBlank() } ?: return null
         if (stream.durationSeconds > 0 && song.durationSeconds != stream.durationSeconds) {
             songDao.setDuration(song.telegramMessageId, stream.durationSeconds)
+            // Home shelf tracks often omit duration and have no Room row yet. Keep the
+            // resolved duration on that stream-only song too, for playback and FLAC matching.
+            streamOnlySongs.computeIfPresent(song.telegramMessageId) { _, current ->
+                current.copy(durationSeconds = stream.durationSeconds)
+            }
         }
         return stream.streamUrl.toUri()
     }
@@ -525,7 +530,7 @@ class MusicRepository(
             current.youtubeVideoId != null -> resolveDirectPlaybackUri(current)?.let { PlaybackResolution.Playable(it) }
                 ?: PlaybackResolution.Unplayable("video may be unavailable")
             // A Telegram song with no copy on the phone needs Telegram (not set up, or logged out).
-            !tdlibManager.isStarted -> PlaybackResolution.Unplayable("set up Telegram in the Sync tab to play it")
+            !tdlibManager.isStarted -> PlaybackResolution.Unplayable("set up Telegram in Settings > Telegram to play it")
             else -> PlaybackResolution.Playable(TdlibDataSource.uriFor(getFreshFileIdForSong(current)))
         }
     }

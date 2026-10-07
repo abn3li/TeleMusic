@@ -21,17 +21,21 @@ class MediaFolderExporter(private val context: Context) {
      * SongEntity.exportedFileUri's own doc - so "Delete download" can find and remove this exact
      * copy later), or null if the export failed for any reason. */
     fun export(source: File, folderTreeUri: Uri, displayName: String): Uri? {
+        var createdDocument: Uri? = null
         return runCatching {
             val treeDocumentId = DocumentsContract.getTreeDocumentId(folderTreeUri)
             val parentUri = DocumentsContract.buildDocumentUriUsingTree(folderTreeUri, treeDocumentId)
             val mimeType = mimeTypeFor(source.extension)
             val newDocUri = DocumentsContract.createDocument(context.contentResolver, parentUri, mimeType, displayName)
                 ?: return null
-            context.contentResolver.openOutputStream(newDocUri)?.use { output ->
+            createdDocument = newDocUri
+            val output = context.contentResolver.openOutputStream(newDocUri)
+                ?: throw java.io.IOException("Cannot open exported document")
+            output.use {
                 source.inputStream().use { input -> input.copyTo(output) }
-            } ?: return null
+            }
             newDocUri
-        }.getOrNull()
+        }.onFailure { createdDocument?.let(::delete) }.getOrNull()
     }
 
     /** Best-effort removal of a previously exported copy - a failure here (folder moved, file

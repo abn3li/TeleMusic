@@ -22,9 +22,9 @@
 ## ✨ Features
 
 - **Telegram library** — sync music from your channels and chats.
-- **YouTube Music** — search, discover, stream and download songs.
+- **YouTube Music** — sign in for your personalized Home feed; search, discover, stream and download songs.
 - **Spotify & local imports** — import playlists, albums or audio files from your phone.
-- **Personal Home** — Continue Listening, Recently Played, mixes and community playlists.
+- **Personal Home** — Continue Listening, Recently Played, mixes and community playlists. Settings → Home Feeds lets you enable the Telegram/library and YouTube feeds independently.
 - **Organised library** — songs, albums, artists and playlists, with automatic metadata and artwork.
 - **Offline listening** — download favourites and manage your streaming cache.
 - **Synced lyrics** — follow lyrics line by line or word by word when available.
@@ -53,7 +53,8 @@
 
 1. Get a free `api_id`/`api_hash` from [my.telegram.org](https://my.telegram.org) → API Development Tools
 2. Clone and open in Android Studio, let Gradle sync, then run
-3. Enter your credentials on first launch, sign in, and pick the channel to sync
+3. Open Settings → Accounts → Telegram, enter your credentials, sign in, and pick the channel to sync.
+4. YouTube Music and Spotify sign in from the same Accounts card. Favorites remain local to TeleMusic.
 
 Requires Android 8.0 (API 26) or newer.
 

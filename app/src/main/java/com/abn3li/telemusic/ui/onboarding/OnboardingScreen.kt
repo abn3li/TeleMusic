@@ -100,7 +100,7 @@ private val MixDaily = Color(0xFF72243E)
 /**
  * The hello screens shown once, on the very first start: Welcome, what the app does,
  * notifications (asked here with a reason, instead of a bare pop-up at launch) and where
- * downloads go. Telegram isn't set up here - that stays in the Sync tab for whoever uses it.
+ * downloads go. Telegram isn't set up here - that stays in Settings > Telegram for whoever uses it.
  */
 @Composable
 fun OnboardingScreen(onFinished: () -> Unit) {
@@ -173,7 +173,7 @@ private fun WelcomeStep(onNext: () -> Unit) {
             bottom = {
                 PrimaryButton("Get Started", onNext)
                 Text(
-                    "Telegram needs a quick setup. You can do it any time in the Sync tab.",
+                    "Telegram needs a quick setup. You can do it any time in Settings > Telegram.",
                     color = GroupLabelColor,
                     fontSize = 13.sp,
                     lineHeight = 17.sp,

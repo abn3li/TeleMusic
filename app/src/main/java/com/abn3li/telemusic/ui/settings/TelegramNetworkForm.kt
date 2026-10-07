@@ -12,7 +12,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.listSaver
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -32,7 +31,7 @@ import com.abn3li.telemusic.ui.library.GroupValue
 
 /**
  * The DNS and MTProto proxy fields, as typed but not yet saved - shared by Settings and the
- * Sync tab's Telegram setup, which each decide when to save and apply them. Survives switching
+ * Telegram settings' Telegram setup, which each decide when to save and apply them. Survives switching
  * tabs and rotating, but if the other screen saved new values meanwhile, those win (see
  * [rememberTelegramNetworkForm]) - a stale form must never write old values back.
  */
@@ -122,8 +121,9 @@ internal fun rememberTelegramNetworkForm(store: AppSettingsStore): TelegramNetwo
     val form = rememberSaveable(saver = TelegramNetworkForm.Saver) {
         TelegramNetworkForm(DnsResolver.entries.first(), "", false, "", "443", "").apply { reload(store) }
     }
-    remember(form) {
-        if (form.loadedFrom != TelegramNetworkForm.snapshot(store)) form.reload(store)
+    val savedSnapshot = TelegramNetworkForm.snapshot(store)
+    androidx.compose.runtime.LaunchedEffect(form, savedSnapshot) {
+        if (form.loadedFrom != savedSnapshot) form.reload(store)
     }
     return form
 }

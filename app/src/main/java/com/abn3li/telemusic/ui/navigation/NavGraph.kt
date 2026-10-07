@@ -119,6 +119,7 @@ object Routes {
     const val PLAYLIST = "playlist/{id}/{name}"
     const val SMART_PLAYLIST = "smart_playlist/{kind}"
     const val SEARCH = "search"
+    const val YOUTUBE_SIGN_IN = "youtube_sign_in"
     const val SPOTIFY = "spotify"
     const val YOUTUBE_BROWSE = "youtube_browse/{browseId}/{title}/{params}"
 
@@ -140,7 +141,7 @@ object Routes {
 fun TgMusicNavGraph(navController: NavHostController = rememberNavController()) {
     val app = LocalContext.current.applicationContext as TgMusicApp
     // The hello screens on the very first start, then always Home. Telegram's API ID/hash are
-    // asked for in the Sync tab, only when you use it.
+    // asked for in Settings > Telegram, only when you use it.
     // Decided once: finishing the hello screens must not change the start page mid-session,
     // which would rebuild the whole navigation graph.
     val startDestination = remember { if (app.needsOnboarding()) Routes.ONBOARDING else Routes.HOME }
@@ -267,6 +268,7 @@ fun TgMusicNavGraph(navController: NavHostController = rememberNavController()) 
                         onOpenPlaylist = { id, name -> navController.navigate(Routes.playlist(id, name)) },
                         onOpenSmartPlaylist = { kind -> navController.navigate(Routes.smartPlaylist(kind)) },
                         onOpenCollection = { c -> navController.navigate(Routes.youtubeBrowse(c.browseId, c.title, c.params)) },
+                        onPlayTracks = { tracks, index -> playStreams(tracks, index, false) },
                         nowPlayingId = playerState.song?.telegramMessageId,
                         isPlaying = playerState.isPlaying
                     )
@@ -337,14 +339,18 @@ fun TgMusicNavGraph(navController: NavHostController = rememberNavController()) 
                         }
                     )
                 }
+                composable(Routes.YOUTUBE_SIGN_IN) {
+                    com.abn3li.telemusic.ui.youtube.YouTubeSignInScreen(onDone = { navController.popBackStack() })
+                }
                 composable(Routes.SYNC) { SyncScreen(onBack = { navController.popBackStack() }) }
                 composable(Routes.SETTINGS) {
                     SettingsScreen(
+                        onOpenTelegram = { navController.navigate(Routes.SYNC) },
+                        onYouTubeSignIn = { navController.navigate(Routes.YOUTUBE_SIGN_IN) },
                         onBack = { navController.popBackStack() },
                         onOpenSpotify = { navController.navigate(Routes.SPOTIFY) },
                         onLoggedOut = {
                             navController.navigate(Routes.HOME) { popUpTo(0) { inclusive = true } }
-                            navController.navigate(Routes.SYNC)
                         }
                     )
                 }
@@ -430,7 +436,6 @@ private fun AppBottomNavBar(
         listOf(
             NavigationItem(Routes.HOME, "Home", NavIcons.Home),
             NavigationItem(Routes.SEARCH, "Search", NavIcons.Search),
-            NavigationItem(Routes.SYNC, "Sync", NavIcons.Sync),
             NavigationItem(Routes.LIBRARY, "Library", NavIcons.Library)
         )
     }

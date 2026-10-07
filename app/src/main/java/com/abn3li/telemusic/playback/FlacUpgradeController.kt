@@ -35,10 +35,22 @@ internal class FlacUpgradeController(
     private var changingSource = false
     private var nextLoginAt = 0L
     private val detachedSessions = mutableSetOf<PeerFlacClient>()
+    // The last "not upgraded" reason logged, so a song's repeated player events log it once.
+    private var lastSkip: String? = null
+
+    /** Why this song stays on the original: logged once, and shown in the quality sheet when [show]. */
+    private fun skip(item: MediaItem, reason: String, show: Boolean = true) {
+        val key = item.mediaId + "|" + reason
+        if (key == lastSkip) return
+        lastSkip = key
+        android.util.Log.i("FlacTransfer", "Not upgraded (" + item.mediaMetadata.title + "): " + reason)
+        if (show) store.status(item.mediaId, FlacUpgradeStage.UNAVAILABLE, reason)
+    }
 
     init {
         scope.launch {
             store.preferences.collect {
+                android.util.Log.i("FlacTransfer", "Upgrade settings; enabled=${it.enabled}; hasAccount=${it.hasAccount}")
                 if (!it.enabled || clientUser != null && clientUser != it.username) {
                     fallback()
                     stopRequest()
@@ -47,6 +59,7 @@ internal class FlacUpgradeController(
                     clientUser = null
                     attempted = null
                 }
+                if (it.enabled) onPlayerEvent()
             }
         }
         // A crashed process can leave only this private temporary directory behind.
@@ -58,7 +71,10 @@ internal class FlacUpgradeController(
     fun onPlayerEvent() {
         if (changingSource) return
         val item = player.currentMediaItem
-        if (store.upgradeStatus.value.songId != item?.mediaId) store.resetStatus(item?.mediaId)
+        if (store.upgradeStatus.value.songId != item?.mediaId) {
+            store.resetStatus(item?.mediaId)
+            lastSkip = null
+        }
         if (original != null && item?.localConfiguration?.uri?.scheme != "quality") {
             stopRequest()
             original = null
@@ -74,13 +90,21 @@ internal class FlacUpgradeController(
             return
         }
         // Starts as soon as the song is chosen - alongside YouTube's own buffering, not after it.
-        if (!store.preferences.value.enabled || item == null || item.mediaId == attempted?.mediaId || original != null) return
-        if (item.localConfiguration?.uri?.scheme !in listOf("http", "https", "file", "content")) return
+        if (item == null || item.mediaId == attempted?.mediaId || original != null) return
+        if (!store.preferences.value.enabled) { skip(item, "Automatic upgrade is off.", show = false); return }
+        val scheme = item.localConfiguration?.uri?.scheme
+        if (scheme !in listOf("http", "https", "file", "content")) {
+            skip(item, "This song plays from \"$scheme\", not a YouTube stream or a saved file.")
+            return
+        }
         // Not known before the stream is prepared: the library's own length is used then.
-        val duration = player.duration.takeIf { it != C.TIME_UNSET && it > 0 } ?: 0L
         val title = item.mediaMetadata.title?.toString().orEmpty()
         val artist = item.mediaMetadata.artist?.toString().orEmpty()
-        if (title.isBlank() || artist.isBlank() || artist == "Unknown artist") return
+        if (title.isBlank() || artist.isBlank() || artist == "Unknown artist") {
+            skip(item, "No artist name to search with.")
+            return
+        }
+        android.util.Log.i("FlacTransfer", "Song chosen: " + title + " - " + artist + " (" + scheme + ")")
         attempted = item
         idleClose?.cancel()
         job = scope.launch {
@@ -90,9 +114,10 @@ internal class FlacUpgradeController(
             var requestClient: PeerFlacClient? = client
             requestLock.withLock {
                 idleClose?.cancel()
-                try { upgrade(item, title, artist, duration) { requestClient = it } }
+                try { upgrade(item, title, artist) { requestClient = it } }
                 catch (e: CancellationException) { throw e }
                 catch (e: Exception) {
+                    android.util.Log.i("FlacTransfer", "Upgrade failed: " + e.javaClass.simpleName + ": " + e.message)
                     if (player.currentMediaItem == item) store.status(item.mediaId, FlacUpgradeStage.UNAVAILABLE, if (e is FlacSignInException) {
                         "Check your Soulseek account in Settings → Audio Quality."
                     } else if (e is FlacTimeoutException) {
@@ -119,19 +144,31 @@ internal class FlacUpgradeController(
         }
     }
 
-    private suspend fun upgrade(item: MediaItem, title: String, artist: String, duration: Long,
+    private suspend fun upgrade(item: MediaItem, title: String, artist: String,
         onSession: (PeerFlacClient) -> Unit) {
         val librarySong = withContext(Dispatchers.IO) { item.mediaId.toLongOrNull()?.let { app.musicRepository.getSongById(it) } }
         // Telegram must play its own file, including when that file is cached locally.
         // Check the song's source before credentials, cached upgrades or peer searches.
-        if (librarySong?.youtubeVideoId == null || librarySong.isLocalImport) return
-        val credentials = store.credentials() ?: return
+        if (librarySong?.youtubeVideoId == null || librarySong.isLocalImport) {
+            skip(item, if (librarySong == null) "The song isn't in the library or the play queue."
+                else "Only YouTube songs are upgraded (this one is from Telegram or this phone).")
+            return
+        }
+        val credentials = store.credentials() ?: run {
+            skip(item, "Soulseek account unavailable. Check Settings → Audio Quality.")
+            return
+        }
         if (librarySong?.sourceMime?.contains("flac", ignoreCase = true) == true) {
             store.status(item.mediaId, FlacUpgradeStage.LOSSLESS, "Already playing FLAC.")
             return
         }
-        val durationMs = duration.takeIf { it > 0 } ?: (librarySong.durationSeconds * 1000L)
-        if (durationMs <= 0) return
+        // Read the player's duration now, after stream preparation, rather than capturing
+        // zero from the transition event. A later READY event can retry if still unknown.
+        val durationMs = flacRecordingDuration(player.duration, librarySong.durationSeconds) ?: run {
+            if (attempted === item) attempted = null
+            android.util.Log.i("FlacTransfer", "Upgrade waiting for recording duration")
+            return
+        }
         val target = FlacTarget(title, artist, librarySong?.album, durationMs)
         val cacheToken = withContext(Dispatchers.IO) { app.flacCache.token() }
         val cached = withContext(NonCancellable + Dispatchers.IO) {
@@ -157,7 +194,11 @@ internal class FlacUpgradeController(
         }
         // A saved YouTube original may use a local URI. Reuse its cached upgrade, but
         // do not start a network search for a locally saved file.
-        if (item.localConfiguration?.uri?.scheme !in listOf("http", "https")) return
+        if (item.localConfiguration?.uri?.scheme !in listOf("http", "https")) {
+            skip(item, "This saved copy has no cached FLAC, and saved songs aren't searched.")
+            return
+        }
+        android.util.Log.i("FlacTransfer", "Starting recording search; durationMs=$durationMs")
         store.status(item.mediaId, FlacUpgradeStage.SEARCHING, "Looking for the same recording in FLAC.")
         val session = withContext(Dispatchers.IO) {
             client?.takeIf { it.isConnected } ?: run {
@@ -178,6 +219,7 @@ internal class FlacUpgradeController(
         onSession(session)
         val candidates = withContext(Dispatchers.IO) { session.search(target) }
         if (candidates.isEmpty()) {
+            android.util.Log.i("FlacTransfer", "No FLAC match: " + session.lastSearchSummary)
             store.status(item.mediaId, FlacUpgradeStage.UNAVAILABLE, session.lastSearchSummary)
             return
         }
@@ -251,6 +293,9 @@ internal class FlacUpgradeController(
     }
 
     fun onReady() {
+        // The initial transition can have no duration. Retry that deferred attempt once
+        // the player has prepared; completed searches remain guarded by attempted.
+        if (original == null) onPlayerEvent()
         if (original != null && player.currentMediaItem?.localConfiguration?.uri?.scheme == "quality") {
             prepareTimeout?.cancel()
             prepareTimeout = null

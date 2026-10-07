@@ -77,13 +77,13 @@ class FlacProtocolTest {
     }
 
     private fun searchReply(token: Int, free: Boolean = true, queue: Int = 0, publicFlac: Boolean = true,
-        duration: Int = 200, firstPath: String? = null, user: String = "peer"): ByteArray {
+        duration: Int = 200, firstPath: String? = null, user: String = "peer", speed: Int = 1000000): ByteArray {
         val reply = WireWriter().string(user).int(token).int(3)
         for (name in listOf(firstPath ?: "Imagine Dragons/Evolve/Thunder.${if (publicFlac) "flac" else "mp3"}",
                 "Imagine Dragons/Evolve/Thunder Live.flac", "Imagine Dragons/Evolve/Believer.flac")) {
             reply.byte(1).string(name).long(65536).string("").int(1).int(1).int(duration)
         }
-        reply.byte(if (free) 1 else 0).int(1000000).int(queue).int(0).int(1)
+        reply.byte(if (free) 1 else 0).int(speed).int(queue).int(0).int(1)
         // A private matching copy must never become a candidate.
         reply.byte(1).string("Imagine Dragons/Evolve/Thunder.flac").long(65536).string("").int(1).int(1).int(200)
         val compressed = ByteArrayOutputStream()
@@ -554,7 +554,7 @@ class FlacProtocolTest {
                     .int(0x7f000001).int(primary.localPort).int(111))
                 primary.accept().use { first ->
                     first.getInputStream().readFrame(init = true)
-                    first.getOutputStream().sendFrame(9, WireWriter().raw(searchReply(token)))
+                    first.getOutputStream().sendFrame(9, WireWriter().raw(searchReply(token, speed = 4 * 1024 * 1024)))
                     returned.await()
                     // This uploader arrives after the old short search deadline.
                     delay(300)
@@ -842,8 +842,19 @@ class FlacProtocolTest {
                     messages.soTimeout = 10000
                     assertEquals(0, messages.getInputStream().readFrame(init = true).first)
                     messages.getOutputStream().sendFrame(9, WireWriter().raw(compressed.toByteArray()))
-                    // Ignore the first request, then accept the next one on the same connection.
+                    // A timed-out attempt closes its control socket; retry uses a fresh one.
                     assertEquals(43, messages.getInputStream().readFrame().first)
+                    assertEquals(-1, messages.getInputStream().read())
+                }
+                var addressRequest = control.getInputStream().readFrame()
+                while (addressRequest.first == 26) addressRequest = control.getInputStream().readFrame()
+                assertEquals(3, addressRequest.first)
+                assertEquals("peer", addressRequest.second.string())
+                control.getOutputStream().sendFrame(3, WireWriter().string("peer")
+                    .int(0x7f000001).int(peer.localPort))
+                peer.accept().use { messages ->
+                    messages.soTimeout = 10000
+                    assertEquals(1, messages.getInputStream().readFrame(init = true).first)
                     val request = messages.getInputStream().readFrame()
                     assertEquals(43, request.first)
                     val filename = request.second.string()

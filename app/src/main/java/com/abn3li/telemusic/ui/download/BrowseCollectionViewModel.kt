@@ -132,47 +132,65 @@ class BrowseCollectionViewModel(
         val tracks = current.tracks
         if (tracks.isEmpty()) return
         val name = current.header?.title ?: current.title
+        _uiState.update { it.copy(importProgress = 0 to tracks.size, errorMessage = null) }
         workScope.launch {
-            _uiState.update { it.copy(importProgress = 0 to tracks.size) }
-            if (asAlbum) {
-                // Each song gets this album's name, so they group under Library > Albums.
+            try {
+                if (asAlbum) {
+                    // Each song gets this album's name, so they group under Library > Albums.
+                    tracks.forEachIndexed { index, track ->
+                        musicRepository.importPlaylistTrackAsStreamable(track, name)
+                        _uiState.update { it.copy(importProgress = (index + 1) to tracks.size) }
+                    }
+                    musicRepository.backfillThumbnails()
+                    musicRepository.mergeCrossSourceDuplicates()
+                    _uiState.update { it.copy(importedAsAlbum = true) }
+                    return@launch
+                }
+                val playlistId = unfinishedPlaylistId?.takeIf { musicRepository.playlistExists(it) }
+                    ?: musicRepository.createPlaylist(name).also {
+                        unfinishedPlaylistId = it
+                        unfinishedPlaylistStartedAt = System.currentTimeMillis()
+                    }
                 tracks.forEachIndexed { index, track ->
-                    musicRepository.importPlaylistTrackAsStreamable(track, name)
+                    val song = musicRepository.importPlaylistTrackAsStreamable(track)
+                    musicRepository.addSongToPlaylistAt(playlistId, song.telegramMessageId, unfinishedPlaylistStartedAt - index)
                     _uiState.update { it.copy(importProgress = (index + 1) to tracks.size) }
                 }
                 musicRepository.backfillThumbnails()
                 musicRepository.mergeCrossSourceDuplicates()
-                _uiState.update { it.copy(importProgress = null, importedAsAlbum = true) }
-                return@launch
+                _uiState.update { it.copy(importedPlaylistId = playlistId) }
+                unfinishedPlaylistId = null
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                _uiState.update { it.copy(errorMessage = "Couldn't finish importing: ${e.message}") }
+            } finally {
+                _uiState.update { it.copy(importProgress = null) }
             }
-            val playlistId = musicRepository.createPlaylist(name)
-            tracks.forEachIndexed { index, track ->
-                val song = musicRepository.importPlaylistTrackAsStreamable(track)
-                musicRepository.addSongToPlaylist(playlistId, song)
-                _uiState.update { it.copy(importProgress = (index + 1) to tracks.size) }
-            }
-            musicRepository.backfillThumbnails()
-            musicRepository.mergeCrossSourceDuplicates()
-            _uiState.update { it.copy(importProgress = null, importedPlaylistId = playlistId) }
         }
     }
 
+    // Retry a partly imported playlist rather than creating another copy in the same screen.
+    private var unfinishedPlaylistId: Long? = null
+    private var unfinishedPlaylistStartedAt = 0L
+
     private fun startDownload(track: BrowseTrack) {
         workScope.launch {
+            if (track.videoId in _uiState.value.downloadingIds || track.videoId in _uiState.value.downloadedIds) return@launch
             _uiState.update { it.copy(downloadingIds = it.downloadingIds + track.videoId) }
-            val destDir = File(context.filesDir, "youtube_downloads")
-            val songId = ytDlpStableSongId(track.videoId)
-            val outcome = ytDlpRepository.download(track.videoId, destDir, songId.toString(), DownloadQuality.BEST.formatSelector)
-            outcome.onSuccess { downloaded ->
+            try {
+                val destDir = File(context.filesDir, "youtube_downloads")
+                val songId = ytDlpStableSongId(track.videoId)
+                val downloaded = ytDlpRepository.download(track.videoId, destDir, songId.toString(), DownloadQuality.BEST.formatSelector).getOrThrow()
                 musicRepository.importDownloadedSong(downloaded, songId, track.videoId)
+                _uiState.update { it.copy(downloadedIds = it.downloadedIds + track.videoId) }
                 musicRepository.backfillThumbnails()
-            }
-            _uiState.update {
-                it.copy(
-                    downloadingIds = it.downloadingIds - track.videoId,
-                    downloadedIds = if (outcome.isSuccess) it.downloadedIds + track.videoId else it.downloadedIds,
-                    errorMessage = outcome.exceptionOrNull()?.let { e -> "Couldn't download \"${track.title}\": ${e.message}" }
-                )
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                _uiState.update { it.copy(errorMessage = "Couldn't save \"${track.title}\": ${e.message}") }
+            } finally {
+                _uiState.update { it.copy(downloadingIds = it.downloadingIds - track.videoId) }
             }
         }
     }

@@ -37,6 +37,7 @@
                      looks for. MediaSessionService's action is kept alongside it so any host
                      that only knows the older, non-browsable action can still bind. -->
                 <action android:name="androidx.media3.session.MediaLibraryService" />
+                <action android:name="android.media.browse.MediaBrowserService" />
                 <action android:name="androidx.media3.session.MediaSessionService" />
             </intent-filter>
         </service>

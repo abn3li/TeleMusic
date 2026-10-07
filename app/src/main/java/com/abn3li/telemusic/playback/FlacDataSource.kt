@@ -16,6 +16,7 @@ internal object FlacStreamRegistry {
 }
 
 /** Custom scheme prevents DefaultDataSource treating a growing cache as a finished file. */
+@androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
 internal class FlacDataSource : BaseDataSource(true) {
     private var source: FlacStreamBuffer? = null
     private var reader: RandomAccessFile? = null
@@ -63,6 +64,7 @@ internal class FlacDataSource : BaseDataSource(true) {
     }
 }
 
+@androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
 internal class FlacRoutingDataSource(private val normal: DataSource) : DataSource {
     private val flac = FlacDataSource()
     private var active: DataSource = normal

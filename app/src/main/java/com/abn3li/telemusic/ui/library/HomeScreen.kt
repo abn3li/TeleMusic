@@ -3,6 +3,14 @@ package com.abn3li.telemusic.ui.library
 import com.abn3li.telemusic.ui.theme.LocalPalette
 import com.abn3li.telemusic.ui.theme.paper
 import com.abn3li.telemusic.ui.theme.ink
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.PagerDefaults
+import androidx.compose.foundation.pager.PagerSnapDistance
+import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.Dp
 import androidx.compose.foundation.border
 import com.abn3li.telemusic.data.local.displayArtwork
 import androidx.compose.ui.graphics.Brush
@@ -42,6 +50,15 @@ import androidx.compose.material.icons.rounded.AccountCircle
 import androidx.compose.material.icons.rounded.Shuffle
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.pulltorefresh.PullToRefreshContainer
+import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -49,6 +66,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
@@ -60,6 +78,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import com.abn3li.telemusic.TgMusicApp
+import com.abn3li.telemusic.data.browse.BrowseTrack
 import com.abn3li.telemusic.data.browse.BrowseCollection
 import com.abn3li.telemusic.data.local.SongEntity
 import com.abn3li.telemusic.ui.download.CollectionCard
@@ -73,6 +92,7 @@ private val MixRediscover = Color(0xFF3C3489)
  * out once per library change), with YouTube Music's New releases shelf last.
  */
 @Composable
+@OptIn(ExperimentalMaterial3Api::class)
 fun HomeScreen(
     viewModel: LibraryViewModel,
     callbacks: LibraryCallbacks,
@@ -80,24 +100,49 @@ fun HomeScreen(
     onOpenPlaylist: (Long, String) -> Unit,
     onOpenSmartPlaylist: (SmartPlaylistKind) -> Unit,
     onOpenCollection: (BrowseCollection) -> Unit,
+    onPlayTracks: (List<BrowseTrack>, Int) -> Unit,
     // The song loaded in the player, if any - lets "Continue Listening" pause/resume it in place.
     nowPlayingId: Long? = null,
     isPlaying: Boolean = false
 ) {
     val app = LocalContext.current.applicationContext as TgMusicApp
     val newReleasesViewModel = viewModel<NewReleasesViewModel>(factory = viewModelFactory { initializer {
-        NewReleasesViewModel(app.discoveryRepository)
+        NewReleasesViewModel(app.discoveryRepository, app.youtubeAccount, app.settingsStore)
     } })
     val newReleases by newReleasesViewModel.uiState.collectAsState()
-    LaunchedEffect(Unit) { newReleasesViewModel.retryIfMissing() }
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner, newReleasesViewModel) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) newReleasesViewModel.onHomeVisible()
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+    val homeFeeds by app.settingsStore.homeFeeds.collectAsState()
+    val canRefresh by rememberUpdatedState(homeFeeds.youtube)
+    val refresh = rememberPullToRefreshState(enabled = { canRefresh })
+    LaunchedEffect(refresh.isRefreshing) {
+        if (refresh.isRefreshing) {
+            try { newReleasesViewModel.refreshHome() }
+            finally { refresh.endRefresh() }
+        }
+    }
     val home by viewModel.home.collectAsState()
     val artists by viewModel.artists.collectAsState()
     val pinned by viewModel.pinnedPlaylists.collectAsState()
     val topArtists = remember(artists) { artists.sortedByDescending { it.songCount }.take(12) }
     val pinnedRows = remember(pinned) { pinned.chunked(2) }
 
+    Box(Modifier.fillMaxSize().nestedScroll(refresh.nestedScrollConnection)) {
     LargeTitleList(
         title = "Home",
+        overlay = {
+            // Clip the indicator's animated entry to the feed, below the fixed title bar.
+            Box(Modifier.fillMaxSize().padding(top = LibraryBarHeight).clipToBounds()) {
+                PullToRefreshContainer(state = refresh, containerColor = LibraryFieldColor, contentColor = AppAccent,
+                    modifier = Modifier.align(Alignment.TopCenter))
+            }
+        },
         titleTrailing = {
             Icon(
                 Icons.Rounded.AccountCircle,
@@ -110,7 +155,7 @@ fun HomeScreen(
         }
     ) {
         // The last song played, large, with its own blurred colours: one tap back into it.
-        home.recentlyPlayed.firstOrNull()?.let { last ->
+        if (homeFeeds.telegram) home.recentlyPlayed.firstOrNull()?.let { last ->
             item("continue") {
                 val isCurrent = last.telegramMessageId == nowPlayingId
                 ContinueListeningCard(last, isCurrent && isPlaying) {
@@ -140,7 +185,10 @@ fun HomeScreen(
             }
         }
 
-        if (pinnedRows.isNotEmpty()) {
+        val personal = if (homeFeeds.youtube && newReleases.account.signedIn) newReleases.personal.orEmpty() else emptyList()
+        personal.forEachIndexed { index, shelf -> youTubeShelf(shelf, index, onPlayTracks, onOpenCollection) }
+
+        if (homeFeeds.telegram && pinnedRows.isNotEmpty()) {
             item("pinned_header") { HomeSectionHeader("Pinned") }
             items(pinnedRows, key = { row -> "pinned_" + row.first().key }) { row ->
                 Row(
@@ -165,12 +213,12 @@ fun HomeScreen(
         }
 
         // The rest of Recently Played - the newest is the card at the top.
-        if (home.recentlyPlayed.size > 1) {
+        if (homeFeeds.telegram && home.recentlyPlayed.size > 1) {
             item("recent_played_header") { HomeSectionHeader("Recently Played") }
             item("recent_played") { SongShelf(home.recentlyPlayed.drop(1), callbacks) }
         }
 
-        if (home.dailyMix.isNotEmpty() || home.rediscover.isNotEmpty()) {
+        if (homeFeeds.telegram && (home.dailyMix.isNotEmpty() || home.rediscover.isNotEmpty())) {
             item("mixes_header") { HomeSectionHeader("Made for You") }
             item("mixes") {
                 LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -184,12 +232,12 @@ fun HomeScreen(
             }
         }
 
-        if (home.recentlyAdded.isNotEmpty()) {
+        if (homeFeeds.telegram && home.recentlyAdded.isNotEmpty()) {
             item("recent_added_header") { HomeSectionHeader("Recently Added") }
             item("recent_added") { SongShelf(home.recentlyAdded, callbacks) }
         }
 
-        if (topArtists.isNotEmpty()) {
+        if (homeFeeds.telegram && topArtists.isNotEmpty()) {
             item("artists_header") { HomeSectionHeader("Top Artists") }
             item("artists") {
                 LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -207,7 +255,7 @@ fun HomeScreen(
             }
         }
 
-        newReleases.community?.takeIf { it.items.isNotEmpty() }?.let { community ->
+        newReleases.community?.takeIf { homeFeeds.youtube && !newReleases.account.signedIn && it.items.isNotEmpty() }?.let { community ->
             // A few up front; See All opens the rest as a grid.
             val more = community.items.size > COMMUNITY_SHELF_SIZE
             item("community_header") {
@@ -231,7 +279,7 @@ fun HomeScreen(
             }
         }
 
-        newReleases.section?.takeIf { it.items.isNotEmpty() }?.let { releases ->
+        newReleases.section?.takeIf { homeFeeds.youtube && !newReleases.account.signedIn && it.items.isNotEmpty() }?.let { releases ->
             item("new_releases_header") { HomeSectionHeader("New releases") }
             item("new_releases") {
                 LazyRow(
@@ -246,7 +294,12 @@ fun HomeScreen(
             }
         }
 
+        if (!homeFeeds.telegram && !homeFeeds.youtube) item("feeds_off") {
+            Text("Home feeds are turned off. Enable them in Settings.", color = ink.copy(alpha = 0.55f),
+                modifier = Modifier.padding(horizontal = 18.dp, vertical = 24.dp))
+        }
         item("end") { Spacer(Modifier.height(8.dp)) }
+    }
     }
 }
 
@@ -256,19 +309,46 @@ private const val COMMUNITY_SHELF_SIZE = 5
 private const val CARD_MIN_BRIGHTNESS = 0.2f
 
 @Composable
-private fun HomeSectionHeader(title: String, onSeeAll: (() -> Unit)? = null) {
+private fun HomeSectionHeader(
+    title: String,
+    onSeeAll: (() -> Unit)? = null,
+    strapline: String? = null,
+    // In place of "See All": "Play all" is drawn as an outlined pill.
+    action: String? = null,
+    seeAllLabel: String = "See All"
+) {
     Row(
         Modifier.fillMaxWidth().padding(start = 18.dp, end = 18.dp, top = 24.dp, bottom = 10.dp),
-        verticalAlignment = Alignment.CenterVertically
+        verticalAlignment = Alignment.Bottom
     ) {
-        Text(title, color = ink, fontSize = 21.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+        Column(Modifier.weight(1f)) {
+            if (strapline != null) {
+                Text(strapline.uppercase(), color = ink.copy(alpha = 0.5f), fontSize = 12.sp, fontWeight = FontWeight.Medium,
+                    letterSpacing = 0.3.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+            Text(title, color = ink, fontSize = 21.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
         if (onSeeAll != null) {
-            Text(
-                "See All",
-                color = AppAccent,
-                fontSize = 15.sp,
-                modifier = Modifier.clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onSeeAll)
-            )
+            if (action != null) {
+                Text(
+                    action,
+                    color = ink,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(50))
+                        .border(1.dp, ink.copy(alpha = 0.25f), RoundedCornerShape(50))
+                        .clickable(onClick = onSeeAll)
+                        .padding(horizontal = 12.dp, vertical = 5.dp)
+                )
+            } else {
+                Text(
+                    seeAllLabel,
+                    color = AppAccent,
+                    fontSize = 15.sp,
+                    modifier = Modifier.clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onSeeAll)
+                )
+            }
         }
     }
 }
@@ -395,6 +475,242 @@ private fun MixCard(title: String, subtitle: String, color: Color, songs: List<S
         ) {
             Text(title, color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.ExtraBold, maxLines = 1)
             Text(subtitle, color = Color.White.copy(alpha = 0.8f), fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+    }
+}
+
+private fun androidx.compose.foundation.lazy.LazyListScope.youTubeShelf(
+    shelf: com.abn3li.telemusic.data.browse.HomeShelf,
+    index: Int,
+    onPlayTracks: (List<BrowseTrack>, Int) -> Unit,
+    onOpenCollection: (BrowseCollection) -> Unit
+) {
+    item("yt_header_$index") {
+        val showAll: () -> Unit = {
+            onOpenCollection(
+                BrowseCollection(
+                    shelf.moreBrowseId ?: (DiscoveryRepository.SHELF_BROWSE_PREFIX + shelf.title),
+                    if (shelf.moreBrowseId != null) shelf.moreParams else null,
+                    shelf.title, null, null, BrowseKind.OTHER
+                )
+            )
+        }
+        when {
+            shelf.listRows && shelf.tracks.size > 1 && !shelf.isForgottenFavorites() ->
+                HomeSectionHeader(shelf.title, strapline = shelf.strapline, action = "Play all", onSeeAll = { onPlayTracks(shelf.tracks, 0) })
+            else -> HomeSectionHeader(shelf.title, strapline = shelf.strapline, onSeeAll = showAll, seeAllLabel = "Show all")
+        }
+    }
+    item("yt_shelf_$index") { YouTubeShelf(shelf, index, onPlayTracks, onOpenCollection) }
+}
+
+private fun com.abn3li.telemusic.data.browse.HomeShelf.isForgottenFavorites(): Boolean {
+    val name = title.lowercase()
+    return "forgot" in name && ("favor" in name || "favour" in name)
+}
+
+private val MixColors = listOf(Color(0xFF72243E), Color(0xFF3C3489), Color(0xFF0F5E5A), Color(0xFF7A4A0E), Color(0xFF2B4C7E), Color(0xFF5B2A6E))
+
+/**
+ * One shelf of the signed-in YouTube Music feed, laid out by kind: Quick picks (list rows) four
+ * songs to a column; "Listen again" as a two-row grid of covers; mixes as colour tiles; other
+ * songs as a row of covers; albums, playlists and artists as cards (artists round).
+ */
+@Composable
+private fun YouTubeShelf(
+    shelf: com.abn3li.telemusic.data.browse.HomeShelf,
+    index: Int,
+    onPlayTracks: (List<BrowseTrack>, Int) -> Unit,
+    onOpenCollection: (BrowseCollection) -> Unit
+) {
+    val title = shelf.title.lowercase()
+    when {
+        shelf.isForgottenFavorites() -> HomeCoverShelf(shelf, onPlayTracks, onOpenCollection)
+        shelf.listRows -> QuickPicks(shelf.tracks, onPlayTracks)
+        "listen again" in title -> ListenAgainGrid(shelf, onPlayTracks, onOpenCollection)
+        "mix" in title && shelf.collections.isNotEmpty() && shelf.tracks.isEmpty() ->
+            LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                itemsIndexed(shelf.collections, key = { i, item -> "mix_${index}_${i}_${item.browseId}" }) { i, item ->
+                    YouTubeMixTile(item, MixColors[i % MixColors.size]) { onOpenCollection(item) }
+                }
+            }
+        else -> HomeCoverShelf(shelf, onPlayTracks, onOpenCollection)
+    }
+}
+
+/** Four full-width song rows per page. A swipe settles on the next whole group. */
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun QuickPicks(tracks: List<BrowseTrack>, onPlay: (List<BrowseTrack>, Int) -> Unit) {
+    if (tracks.isEmpty()) return
+    val pages = remember(tracks) { tracks.withIndex().chunked(4) }
+    val pager = rememberPagerState(pageCount = { pages.size })
+    Column {
+    HorizontalPager(state = pager, modifier = Modifier.fillMaxWidth(),
+        contentPadding = PaddingValues(horizontal = 16.dp), pageSpacing = 14.dp,
+        verticalAlignment = Alignment.Top,
+        flingBehavior = PagerDefaults.flingBehavior(pager, pagerSnapDistance = PagerSnapDistance.atMost(1))) { page ->
+        Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(20.dp))
+            .background(LibraryFieldColor).border(1.dp, ink.copy(alpha = 0.06f), RoundedCornerShape(20.dp))
+            .padding(horizontal = 12.dp, vertical = 4.dp).heightIn(min = 256.dp)) {
+            pages[page].forEachIndexed { row, (i, track) ->
+                Row(Modifier.fillMaxWidth().heightIn(min = 62.dp)
+                    .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) { onPlay(tracks, i) },
+                    verticalAlignment = Alignment.CenterVertically) {
+                    coil.compose.AsyncImage(model = track.thumbnailUrl, contentDescription = null,
+                        contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                        modifier = Modifier.size(46.dp).clip(RoundedCornerShape(9.dp)).background(LibraryFieldColor))
+                    Column(Modifier.weight(1f).padding(start = 12.dp)) {
+                        Text(track.title, color = ink, fontSize = 15.sp, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text(track.artist, color = ink.copy(alpha = 0.55f), fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
+                    Icon(Icons.Rounded.PlayArrow, contentDescription = null, tint = ink.copy(alpha = 0.45f),
+                        modifier = Modifier.padding(start = 8.dp).size(20.dp))
+                }
+                if (row < pages[page].lastIndex) Box(Modifier.fillMaxWidth().padding(start = 58.dp)
+                    .height(1.dp).background(ink.copy(alpha = 0.07f)))
+            }
+        }
+    }
+    FeedPageIndicator(pager.pageCount, pager.currentPage)
+    }
+}
+
+@Composable
+private fun FeedPageIndicator(count: Int, current: Int) {
+    if (count <= 1) return
+    Row(Modifier.fillMaxWidth().padding(top = 12.dp, bottom = 2.dp),
+        horizontalArrangement = Arrangement.spacedBy(5.dp, Alignment.CenterHorizontally),
+        verticalAlignment = Alignment.CenterVertically) {
+        val start = (current - 3).coerceIn(0, (count - 7).coerceAtLeast(0))
+        for (page in start until minOf(count, start + 7)) {
+            Box(Modifier.size(if (page == current) 6.dp else 4.dp)
+                .clip(RoundedCornerShape(50)).background(if (page == current) AppAccent else ink.copy(alpha = 0.22f)))
+        }
+    }
+}
+
+/** Responsive cover pages. Each page keeps its rows together, including a partly filled last page. */
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun CoverPages(count: Int, rows: Int, minimumCoverWidth: Dp, extraHeight: Dp = 0.dp,
+    content: @Composable (index: Int, coverWidth: Dp) -> Unit) {
+    if (count == 0) return
+    BoxWithConstraints(Modifier.fillMaxWidth()) {
+        val gap = 10.dp
+        val usable = (maxWidth - 32.dp).coerceAtLeast(1.dp)
+        val columns = ((usable + gap) / (minimumCoverWidth + gap)).toInt().coerceAtLeast(1)
+        val coverWidth = (usable - gap * (columns - 1)) / columns
+        val perPage = columns * rows
+        val pager = rememberPagerState(pageCount = { (count + perPage - 1) / perPage })
+        Column {
+        HorizontalPager(state = pager, modifier = Modifier.fillMaxWidth(),
+            contentPadding = PaddingValues(horizontal = 16.dp), pageSpacing = 16.dp,
+            verticalAlignment = Alignment.Top,
+            flingBehavior = PagerDefaults.flingBehavior(pager, pagerSnapDistance = PagerSnapDistance.atMost(1))) { page ->
+            Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                repeat(rows) { row ->
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(gap)) {
+                        repeat(columns) { column ->
+                            val index = page * perPage + column * rows + row
+                            Box(Modifier.width(coverWidth).heightIn(min = coverWidth + extraHeight)) {
+                                if (index < count) content(index, coverWidth)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        FeedPageIndicator(pager.pageCount, pager.currentPage)
+        }
+    }
+}
+
+/** "Listen again": covers in two rows, swiped sideways together. Songs play, the rest open. */
+@Composable
+private fun ListenAgainGrid(
+    shelf: com.abn3li.telemusic.data.browse.HomeShelf,
+    onPlay: (List<BrowseTrack>, Int) -> Unit,
+    onOpen: (BrowseCollection) -> Unit,
+    rows: Int = 2
+) {
+    val entries = remember(shelf) {
+        shelf.tracks.mapIndexed { i, t -> Triple(t.thumbnailUrl, t.title, { onPlay(shelf.tracks, i) }) } +
+            shelf.collections.map { c -> Triple(c.thumbnailUrl, c.title, { onOpen(c) }) }
+    }
+    val captionHeight = with(LocalDensity.current) { 17.sp.toDp() } + 6.dp
+    CoverPages(entries.size, rows = rows, minimumCoverWidth = 96.dp, extraHeight = captionHeight) { index, coverWidth ->
+        val (url, title, open) = entries[index]
+        Column(Modifier.width(coverWidth).clickable(onClick = open)) {
+        coil.compose.AsyncImage(model = url, contentDescription = null,
+            contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+            modifier = Modifier.size(coverWidth).clip(RoundedCornerShape(12.dp)).background(LibraryFieldColor))
+        Text(title, color = ink.copy(alpha = 0.9f), fontSize = 12.sp, lineHeight = 17.sp,
+            maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 6.dp))
+        }
+    }
+}
+
+/** A YouTube mix (Supermix, My Mix, Discover): its own cover above a band of colour with its
+ * name, like Made for You's tiles. */
+@Composable
+private fun YouTubeMixTile(item: BrowseCollection, color: Color, onClick: () -> Unit) {
+    Box(
+        Modifier
+            .size(156.dp, 196.dp)
+            .clip(RoundedCornerShape(14.dp))
+            .background(color)
+            .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onClick)
+    ) {
+        coil.compose.AsyncImage(
+            model = item.thumbnailUrl,
+            contentDescription = null,
+            contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+            modifier = Modifier.size(156.dp)
+        )
+        Column(
+            Modifier
+                .align(Alignment.BottomStart)
+                .fillMaxWidth()
+                .height(66.dp)
+                .background(Brush.verticalGradient(0f to Color.Transparent, 0.4f to color))
+                .padding(horizontal = 11.dp, vertical = 9.dp),
+            verticalArrangement = Arrangement.Bottom
+        ) {
+            Text(item.title, color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.ExtraBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            item.subtitle?.let {
+                Text(it, color = Color.White.copy(alpha = 0.8f), fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+        }
+    }
+}
+
+private data class HomeCoverEntry(val artwork: String?, val title: String, val subtitle: String?, val open: () -> Unit)
+
+/** A mixed YouTube shelf remains one row; songs play and collections open in place. */
+@Composable
+private fun HomeCoverShelf(
+    shelf: com.abn3li.telemusic.data.browse.HomeShelf,
+    onPlay: (List<BrowseTrack>, Int) -> Unit,
+    onOpen: (BrowseCollection) -> Unit
+) {
+    val entries = remember(shelf, onPlay, onOpen) {
+        shelf.tracks.mapIndexed { index, track ->
+            HomeCoverEntry(track.thumbnailUrl, track.title, track.artist) { onPlay(shelf.tracks, index) }
+        } + shelf.collections.map { collection ->
+            HomeCoverEntry(collection.thumbnailUrl, collection.title, collection.subtitle) { onOpen(collection) }
+        }
+    }
+    val textHeight = with(LocalDensity.current) { 17.sp.toDp() + 16.sp.toDp() } + 5.dp
+    CoverPages(entries.size, rows = 1, minimumCoverWidth = 104.dp, extraHeight = textHeight) { index, coverWidth ->
+        val entry = entries[index]
+        Column(Modifier.width(coverWidth).clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = entry.open)) {
+            coil.compose.AsyncImage(model = entry.artwork, contentDescription = null,
+                contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                modifier = Modifier.size(coverWidth).clip(RoundedCornerShape(12.dp)).background(LibraryFieldColor))
+            Spacer(Modifier.height(5.dp))
+            Text(entry.title, color = ink.copy(alpha = 0.9f), fontSize = 13.sp, lineHeight = 17.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(entry.subtitle.orEmpty(), color = ink.copy(alpha = 0.55f), fontSize = 12.sp, lineHeight = 16.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
     }
 }

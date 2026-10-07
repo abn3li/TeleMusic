@@ -19,9 +19,9 @@ import java.util.concurrent.ConcurrentHashMap
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 
-/** A Telegram call made while Telegram isn't set up (before the Sync tab's setup, or after
+/** A Telegram call made while Telegram isn't set up (before the Telegram settings' setup, or after
  * Log Out). Its message is what the user sees. */
-class TelegramNotSetUpException : IllegalStateException("Telegram isn't set up - set it up in the Sync tab")
+class TelegramNotSetUpException : IllegalStateException("Telegram isn't set up - set it up in Settings > Telegram")
 
 /**
  * Coroutine wrapper around TDLib. Credentials come in at start() time (never baked into the

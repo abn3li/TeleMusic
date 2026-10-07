@@ -9,6 +9,7 @@ import android.widget.Toast
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -66,6 +67,11 @@ class SpotifyAccount(context: Context, private val scope: CoroutineScope) {
         .readTimeout(20, TimeUnit.SECONDS)
         .build()
     private val tokenLock = Mutex()
+    // Synchronous account changes and asynchronous responses share this monitor.
+    private var accountGeneration = 0L
+    private fun checkSession(expected: Long) {
+        if (accountGeneration != expected) throw CancellationException("Spotify account changed")
+    }
 
     /** Display name while signed in, else null. */
     private val _accountName by lazy { MutableStateFlow(if (prefs.contains(KEY_REFRESH)) prefs.getString(KEY_NAME, "Spotify") else null) }
@@ -83,11 +89,13 @@ class SpotifyAccount(context: Context, private val scope: CoroutineScope) {
     // ---- Sign-in ----
 
     /** Opens Spotify's login page in the browser. False when there's no Client ID yet. */
-    fun startSignIn(context: Context): Boolean {
+    @Synchronized fun startSignIn(context: Context): Boolean {
         val id = clientId
         if (id.isBlank()) return false
         val verifier = randomUrlSafe(64)
         val state = randomUrlSafe(16)
+        accountGeneration++
+        _library.value = SpotifyLibrary()
         prefs.edit().putString(KEY_VERIFIER, verifier).putString(KEY_STATE, state).apply()
         val challenge = base64Url(MessageDigest.getInstance("SHA-256").digest(verifier.toByteArray(Charsets.US_ASCII)))
         val uri = Uri.parse("https://accounts.spotify.com/authorize").buildUpon()
@@ -105,13 +113,19 @@ class SpotifyAccount(context: Context, private val scope: CoroutineScope) {
 
     /** Spotify sent the browser back to telemusic://spotify: finish signing in, then say so. */
     fun completeSignIn(redirect: Uri) {
+        val generation = synchronized(this) { accountGeneration }
         scope.launch {
             val message = try {
                 val error = redirect.getQueryParameter("error")
                 if (error != null) throw SpotifyException(if (error == "access_denied") "Spotify sign-in was cancelled" else "Spotify said: $error")
                 val code = redirect.getQueryParameter("code") ?: throw SpotifyException("Spotify didn't return a sign-in code")
-                if (redirect.getQueryParameter("state") != prefs.getString(KEY_STATE, null)) throw SpotifyException("Sign-in expired - try again")
-                val verifier = prefs.getString(KEY_VERIFIER, null) ?: throw SpotifyException("Sign-in expired - try again")
+                val verifier = synchronized(this@SpotifyAccount) {
+                    checkSession(generation)
+                    val expectedState = prefs.getString(KEY_STATE, null)
+                        ?: throw SpotifyException("Sign-in expired - try again")
+                    if (redirect.getQueryParameter("state") != expectedState) throw SpotifyException("Sign-in expired - try again")
+                    prefs.getString(KEY_VERIFIER, null) ?: throw SpotifyException("Sign-in expired - try again")
+                }
                 val tokens = postToken(
                     FormBody.Builder()
                         .add("grant_type", "authorization_code")
@@ -121,13 +135,27 @@ class SpotifyAccount(context: Context, private val scope: CoroutineScope) {
                         .add("code_verifier", verifier)
                         .build()
                 )
-                saveTokens(tokens)
-                prefs.edit().remove(KEY_VERIFIER).remove(KEY_STATE).apply()
-                val me = getJson("https://api.spotify.com/v1/me")
+                val signedInGeneration = synchronized(this@SpotifyAccount) {
+                    checkSession(generation)
+                    accountGeneration++
+                    // A new authorization must never inherit another account's refresh token.
+                    prefs.edit().remove(KEY_REFRESH).putString(KEY_NAME, "Spotify").apply()
+                    saveTokens(tokens, accountGeneration)
+                    prefs.edit().remove(KEY_VERIFIER).remove(KEY_STATE).apply()
+                    _library.value = SpotifyLibrary()
+                    _accountName.value = "Spotify"
+                    accountGeneration
+                }
+                val me = getJson("https://api.spotify.com/v1/me", signedInGeneration)
                 val name = me.optString("display_name").ifBlank { me.optString("id").ifBlank { "Spotify" } }
-                prefs.edit().putString(KEY_NAME, name).apply()
-                _accountName.value = name
+                synchronized(this@SpotifyAccount) {
+                    checkSession(signedInGeneration)
+                    prefs.edit().putString(KEY_NAME, name).apply()
+                    _accountName.value = name
+                }
                 "Connected to Spotify as $name"
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 Log.w(TAG, "Spotify sign-in failed", e)
                 e.message ?: "Spotify sign-in failed"
@@ -136,8 +164,10 @@ class SpotifyAccount(context: Context, private val scope: CoroutineScope) {
         }
     }
 
-    fun signOut() {
-        prefs.edit().remove(KEY_ACCESS).remove(KEY_EXPIRES).remove(KEY_REFRESH).remove(KEY_NAME).apply()
+    @Synchronized fun signOut() {
+        accountGeneration++
+        prefs.edit().remove(KEY_ACCESS).remove(KEY_EXPIRES).remove(KEY_REFRESH).remove(KEY_NAME)
+            .remove(KEY_VERIFIER).remove(KEY_STATE).apply()
         _accountName.value = null
         _library.value = SpotifyLibrary()
     }
@@ -145,17 +175,18 @@ class SpotifyAccount(context: Context, private val scope: CoroutineScope) {
     // ---- Library ----
 
     /** Loads Liked Songs' count and your playlists - once per app run unless [force]. */
-    fun loadLibrary(force: Boolean = false) {
+    @Synchronized fun loadLibrary(force: Boolean = false) {
         val current = _library.value
         if (!isConnected || current.loading || (current.loaded && !force)) return
         _library.update { it.copy(loading = true, error = null) }
+        val generation = accountGeneration
         scope.launch {
             try {
-                val liked = getJson("https://api.spotify.com/v1/me/tracks?limit=1").optInt("total")
+                val liked = getJson("https://api.spotify.com/v1/me/tracks?limit=1", generation).optInt("total")
                 val playlists = mutableListOf<SpotifyPlaylist>()
                 var url: String? = "https://api.spotify.com/v1/me/playlists?limit=50"
                 while (url != null) {
-                    val page = getJson(url)
+                    val page = getJson(url, generation)
                     val items = page.optJSONArray("items")
                     for (i in 0 until (items?.length() ?: 0)) {
                         val p = items!!.optJSONObject(i) ?: continue
@@ -172,10 +203,18 @@ class SpotifyAccount(context: Context, private val scope: CoroutineScope) {
                     }
                     url = page.optString("next").takeIf { it.isNotBlank() && it != "null" }
                 }
-                _library.value = SpotifyLibrary(loaded = true, likedTotal = liked, playlists = playlists)
+                synchronized(this@SpotifyAccount) {
+                    checkSession(generation)
+                    _library.value = SpotifyLibrary(loaded = true, likedTotal = liked, playlists = playlists)
+                }
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 Log.w(TAG, "Loading Spotify library failed", e)
-                _library.value = SpotifyLibrary(loaded = false, error = e.message ?: "Couldn't reach Spotify")
+                synchronized(this@SpotifyAccount) {
+                    if (generation == accountGeneration)
+                        _library.value = SpotifyLibrary(loaded = false, error = e.message ?: "Couldn't reach Spotify")
+                }
             }
         }
     }
@@ -205,10 +244,11 @@ class SpotifyAccount(context: Context, private val scope: CoroutineScope) {
     }
 
     private suspend fun pagedTracks(firstUrl: String): List<SpotifyTrack> {
+        val generation = synchronized(this) { accountGeneration }
         val tracks = mutableListOf<SpotifyTrack>()
         var url: String? = firstUrl
         while (url != null) {
-            val page = getJson(url)
+            val page = getJson(url, generation)
             val items = page.optJSONArray("items")
             for (i in 0 until (items?.length() ?: 0)) {
                 // "track" in the old reply format, "item" in the new one.
@@ -230,20 +270,21 @@ class SpotifyAccount(context: Context, private val scope: CoroutineScope) {
 
     // ---- HTTP ----
 
-    private suspend fun getJson(url: String): JSONObject {
+    private suspend fun getJson(url: String, generation: Long = synchronized(this) { accountGeneration }): JSONObject {
         var refreshed = false
         var waits = 0
         while (true) {
-            val token = accessToken(forceRefresh = false)
+            val token = accessToken(forceRefresh = false, generation)
             val (code, body, retryAfter) = withContext(Dispatchers.IO) {
                 val request = Request.Builder().url(url).header("Authorization", "Bearer $token").build()
                 http.newCall(request).execute().use { r ->
                     Triple(r.code, r.body?.string().orEmpty(), r.header("Retry-After")?.toLongOrNull())
                 }
             }
+            synchronized(this) { checkSession(generation) }
             when {
                 code in 200..299 -> return JSONObject(body.ifBlank { "{}" })
-                code == 401 && !refreshed -> { refreshed = true; accessToken(forceRefresh = true) }
+                code == 401 && !refreshed -> { refreshed = true; accessToken(forceRefresh = true, generation) }
                 // Rate limited: wait what Spotify asks (a few seconds), a few times at most.
                 code == 429 && waits < 3 -> { waits++; delay(((retryAfter ?: 2L).coerceIn(1L, 30L)) * 1000L) }
                 else -> throw SpotifyException(errorMessage(code, body), code)
@@ -261,7 +302,8 @@ class SpotifyAccount(context: Context, private val scope: CoroutineScope) {
         }
     }
 
-    private suspend fun accessToken(forceRefresh: Boolean): String = tokenLock.withLock {
+    private suspend fun accessToken(forceRefresh: Boolean, generation: Long): String = tokenLock.withLock {
+        synchronized(this) { checkSession(generation) }
         val token = prefs.getString(KEY_ACCESS, null)
         val expiresAt = prefs.getLong(KEY_EXPIRES, 0L)
         if (!forceRefresh && token != null && System.currentTimeMillis() < expiresAt - 60_000L) return token
@@ -277,10 +319,12 @@ class SpotifyAccount(context: Context, private val scope: CoroutineScope) {
         } catch (e: SpotifyException) {
             // A refresh token Spotify no longer accepts (revoked, or the app changed): sign out
             // so the app asks to connect again instead of failing every time.
-            if (e.code == 400 || e.code == 401) signOut()
+            if (e.code == 400 || e.code == 401) synchronized(this) {
+                if (generation == accountGeneration) signOut()
+            }
             throw e
         }
-        saveTokens(tokens)
+        saveTokens(tokens, generation)
         tokens.getString("access_token")
     }
 
@@ -296,7 +340,8 @@ class SpotifyAccount(context: Context, private val scope: CoroutineScope) {
         }
     }
 
-    private fun saveTokens(tokens: JSONObject) {
+    @Synchronized private fun saveTokens(tokens: JSONObject, generation: Long) {
+        checkSession(generation)
         val edit = prefs.edit()
             .putString(KEY_ACCESS, tokens.getString("access_token"))
             .putLong(KEY_EXPIRES, System.currentTimeMillis() + tokens.optLong("expires_in", 3600L) * 1000L)

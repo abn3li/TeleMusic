@@ -24,6 +24,7 @@ import androidx.media3.common.Player
  * resolved to THOSE inherited methods instead of invoking this class's own lambda, which is not
  * an error Kotlin surfaces as anything louder than a deprecation warning on the call sites below.
  */
+@androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
 class QueueAwareForwardingPlayer(
     player: Player,
     private val queueHasNext: () -> Boolean,

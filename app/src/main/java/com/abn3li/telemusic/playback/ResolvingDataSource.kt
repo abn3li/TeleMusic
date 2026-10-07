@@ -22,6 +22,7 @@ import com.abn3li.telemusic.data.telegram.TdlibManager
  * exists - so the stream failed on open() every time and the player just sat there retrying
  * (see PlaybackController's onPlayerError auto-retry) instead of ever actually playing.
  */
+@androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
 class ResolvingDataSource(
     private val tdlibDataSource: TdlibDataSource,
     httpDataSourceFactory: DataSource.Factory

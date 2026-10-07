@@ -19,6 +19,8 @@ private const val MAX_ERROR_RETRIES = 3
 
 /** A stream's YouTube video id, kept on its media item - see PlaybackController.playUri. */
 const val EXTRA_YOUTUBE_VIDEO_ID = "telemusic.youtubeVideoId"
+/** New for each requested play; retained when its stream URL or quality is replaced. */
+internal const val EXTRA_PLAYBACK_INSTANCE = "telemusic.playbackInstance"
 
 class PlaybackController(context: Context) {
     private var controller: MediaController? = null
@@ -108,7 +110,10 @@ class PlaybackController(context: Context) {
             MediaMetadata.Builder()
                 .setTitle(title).setArtist(artist)
                 .setArtworkUri(artworkUriOf(artworkUrl))
-                .apply { if (youtubeVideoId != null) setExtras(Bundle().apply { putString(EXTRA_YOUTUBE_VIDEO_ID, youtubeVideoId) }) }
+                .setExtras(Bundle().apply {
+                    putString(EXTRA_PLAYBACK_INSTANCE, java.util.UUID.randomUUID().toString())
+                    if (youtubeVideoId != null) putString(EXTRA_YOUTUBE_VIDEO_ID, youtubeVideoId)
+                })
                 .build()
         ).build()
         controller?.setMediaItem(item, true)

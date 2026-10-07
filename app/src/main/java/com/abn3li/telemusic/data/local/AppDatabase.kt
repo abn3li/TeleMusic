@@ -127,7 +127,6 @@ abstract class AppDatabase : RoomDatabase() {
             INSTANCE ?: synchronized(this) {
                 INSTANCE ?: Room.databaseBuilder(context.applicationContext, AppDatabase::class.java, "tgmusic.db")
                     .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11)
-                    .fallbackToDestructiveMigration() // fine during active development, for any version this migration chain doesn't cover
                     .build().also { INSTANCE = it }
             }
     }

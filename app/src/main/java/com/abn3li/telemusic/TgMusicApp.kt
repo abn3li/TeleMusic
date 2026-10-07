@@ -40,6 +40,13 @@ class TgMusicApp : Application(), ImageLoaderFactory {
     lateinit var ytDlpRepository: YtDlpRepository; private set
     lateinit var discoveryRepository: com.abn3li.telemusic.repository.DiscoveryRepository; private set
 
+    val youtubeAccount by lazy {
+        com.abn3li.telemusic.data.youtube.YouTubeAccount(this) {
+            // Invalidate before the new account state reaches any screen.
+            if (::discoveryRepository.isInitialized) discoveryRepository.forgetAccountContent()
+        }
+    }
+
     private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
     /** For work a screen starts that must finish even if the screen closes - a YouTube download
@@ -57,7 +64,11 @@ class TgMusicApp : Application(), ImageLoaderFactory {
         playbackController = PlaybackController(this)
         playbackController.connect(onReady = {})
         ytDlpRepository = YtDlpRepository(this)
-        discoveryRepository = com.abn3li.telemusic.repository.DiscoveryRepository(db.importedPlaylistDao(), java.io.File(filesDir, "search_categories.json"))
+        discoveryRepository = com.abn3li.telemusic.repository.DiscoveryRepository(
+            db.importedPlaylistDao(), java.io.File(filesDir, "search_categories.json"),
+            com.abn3li.telemusic.data.browse.InnertubeBrowseClient(auth = { youtubeAccount.authHeaders() })
+        )
+        appScope.launch(Dispatchers.IO) { youtubeAccount.load() }
 
         musicRepository = MusicRepository(
             songDao = db.songDao(), playlistDao = db.playlistDao(), tdlibManager = tdlibManager,

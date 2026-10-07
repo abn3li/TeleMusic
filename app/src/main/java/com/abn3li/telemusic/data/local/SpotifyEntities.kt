@@ -47,9 +47,6 @@ interface SpotifyDao {
     @Query("SELECT * FROM spotify_links WHERE sourceKey = :key")
     suspend fun getLink(key: String): SpotifyLinkEntity?
 
-    @Query("SELECT * FROM spotify_links")
-    fun observeLinks(): Flow<List<SpotifyLinkEntity>>
-
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsertLink(link: SpotifyLinkEntity)
 

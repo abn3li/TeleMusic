@@ -10,8 +10,9 @@ import java.util.concurrent.TimeUnit
 /**
  * Browse-only client for YouTube Music's public Innertube API (music.youtube.com/youtubei/v1) -
  * fetches the home feed and lets a browse card's own browseId be opened further (a playlist's
- * track list, an artist's page, a chart). Deliberately does NOT touch the /player endpoint or
- * do any signature/cipher deciphering. Playback and downloads use the downloader's extraction
+ * track list, an artist's page, a chart). The /player endpoint is used only to obtain a history
+ * tracking URL; no stream extraction or signature/cipher deciphering happens here.
+ * Playback and downloads use the downloader's extraction
  * path instead of maintaining a second implementation. A real download still
  * only ever happens through yt-dlp (data/download) once the user picks a track here - this
  * client only ever returns metadata (titles, thumbnails, ids), never a stream URL.
@@ -19,7 +20,11 @@ import java.util.concurrent.TimeUnit
  * [FALLBACK_API_KEY] is WEB_REMIX's own public Innertube key - shipped to every anonymous
  * visitor of music.youtube.com, not a secret.
  */
-class InnertubeBrowseClient {
+class InnertubeBrowseClient(
+    // The signed-in YouTube Music account's headers (see YouTubeAccount.authHeaders), or null:
+    // with them every request - Home, Search, a playlist - is answered as that account.
+    private val auth: () -> Map<String, String>? = { null }
+) {
     private val client = OkHttpClient.Builder()
         .connectTimeout(15, TimeUnit.SECONDS)
         .readTimeout(15, TimeUnit.SECONDS)
@@ -52,6 +57,30 @@ class InnertubeBrowseClient {
             put("query", query)
             put("params", filter.params)
         })
+
+    /** The signed-in account's name and picture (YouTube Music's own account menu). */
+    fun accountMenu(): JSONObject = post("account/account_menu", JSONObject())
+
+    /** Metadata for history registration only; stream URLs still come from yt-dlp. */
+    fun historyTrackingUrl(videoId: String, headers: Map<String, String>): String? {
+        val response = post("player", JSONObject().apply {
+            put("videoId", videoId)
+            put("contentCheckOk", true)
+            put("racyCheckOk", true)
+        }, headers)
+        val url = response.optJSONObject("playbackTracking")
+            ?.optJSONObject("videostatsPlaybackUrl")?.optString("baseUrl")?.takeIf { it.isNotBlank() }
+        if (url == null) {
+            // YouTube's own refusal ("LOGIN_REQUIRED", "Sign in to confirm you're not a bot"...):
+            // safe to log - no cookies or links in it.
+            val playability = response.optJSONObject("playabilityStatus")
+            runCatching {
+                android.util.Log.w("YouTubeHistory", "No history tracking URL; playability=" +
+                    playability?.optString("status") + "; reason=" + playability?.optString("reason"))
+            }
+        }
+        return url
+    }
 
     fun browseContinuation(continuation: String): JSONObject =
         post("browse", JSONObject().apply { put("continuation", continuation) })
@@ -86,7 +115,7 @@ class InnertubeBrowseClient {
         return minted
     }
 
-    private fun post(endpoint: String, extra: JSONObject): JSONObject {
+    private fun post(endpoint: String, extra: JSONObject, headers: Map<String, String>? = auth()): JSONObject {
         val visitor = visitorId()
         val body = JSONObject().apply {
             put("context", JSONObject().apply {
@@ -109,6 +138,7 @@ class InnertubeBrowseClient {
             .addHeader("User-Agent", WEB_USER_AGENT)
             .addHeader("Origin", "https://music.youtube.com")
             .apply { if (visitor != null) addHeader("X-Goog-Visitor-Id", visitor) }
+            .apply { headers?.forEach { (name, value) -> header(name, value) } }
             .post(body.toString().toRequestBody("application/json".toMediaType()))
             .build()
 

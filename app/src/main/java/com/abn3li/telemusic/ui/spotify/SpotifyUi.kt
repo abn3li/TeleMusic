@@ -56,6 +56,7 @@ import com.abn3li.telemusic.repository.SpotifyImporter
 import com.abn3li.telemusic.ui.library.AlertAction
 import com.abn3li.telemusic.ui.library.AppAccent
 import com.abn3li.telemusic.ui.library.AppAlert
+import com.abn3li.telemusic.ui.library.AlertTextField
 import com.abn3li.telemusic.ui.library.CoverTile
 import com.abn3li.telemusic.ui.library.DestructiveRed
 import com.abn3li.telemusic.ui.library.GroupActionRow
@@ -92,47 +93,36 @@ private sealed interface SpotifyItem {
  * Settings → Spotify. Signed in: your account and a "Playlists" row that opens
  * [SpotifyLibraryScreen]. Not signed in: Client ID, Connect and how to get a Client ID.
  */
+/** Spotify's row in Settings' Accounts card: signed in, it opens your Spotify library; signed
+ * out, a short dialog takes the Client ID and connects. */
 @Composable
-fun SpotifySettingsGroup(onOpenPlaylists: () -> Unit, onHelp: () -> Unit) {
+fun SpotifyAccountRow(onOpenPlaylists: () -> Unit, onHelp: () -> Unit) {
     val context = LocalContext.current
-    val app = context.applicationContext as TgMusicApp
-    val account = app.spotifyAccount
+    val account = (context.applicationContext as TgMusicApp).spotifyAccount
     val accountName by account.accountName.collectAsState()
-    val library by account.library.collectAsState()
+    var connecting by remember { mutableStateOf(false) }
     var clientId by remember { mutableStateOf(account.clientId) }
 
-    if (accountName != null) {
-        GroupCard {
-            GroupRow(
-                title = "Account",
-                icon = { SpotifyLogo(29.dp) },
-                trailing = { GroupValue(accountName, showChevron = false) }
-            )
-            GroupDivider(start = 57.dp)
-            GroupRow(
-                title = "Playlists",
-                icon = { GroupIcon(Icons.AutoMirrored.Rounded.QueueMusic, AppAccent) },
-                onClick = onOpenPlaylists,
-                trailing = { GroupValue(if (library.loaded) (library.playlists.size + 1).toString() else null) }
-            )
-        }
-    } else {
-        GroupCard {
-            GroupTextField(
-                value = clientId,
-                onValueChange = { clientId = it.trim(); account.clientId = it },
-                placeholder = "Paste your Client ID",
-                label = "Client ID"
-            )
-            GroupDivider()
-            GroupActionRow("Connect Spotify", enabled = clientId.isNotBlank()) {
+    GroupRow(
+        title = "Spotify",
+        icon = { SpotifyLogo(29.dp) },
+        onClick = { if (accountName != null) onOpenPlaylists() else connecting = true },
+        trailing = { GroupValue(accountName ?: "Connect") }
+    )
+    if (connecting) AppAlert(
+        title = "Connect Spotify",
+        message = "Create a free app at developer.spotify.com (Dashboard → Create app). Set its Redirect URI to telemusic://spotify, tick Web API, and add your Spotify email under User Management. Then paste its Client ID here. TeleMusic can only read your Liked Songs and playlists.",
+        onDismiss = { connecting = false },
+        actions = listOf(
+            AlertAction("How to Get One") { onHelp() },
+            AlertAction("Connect", bold = true, enabled = clientId.isNotBlank()) {
                 account.clientId = clientId
+                connecting = false
                 account.startSignIn(context)
             }
-            GroupDivider()
-            GroupRow(title = "How to get a Client ID", onClick = onHelp, trailing = { GroupValue(null) })
-        }
-        GroupFooter("Create a free app at developer.spotify.com (Dashboard → Create app). Set its Redirect URI to telemusic://spotify, tick Web API, and add your Spotify email under User Management. Then paste its Client ID here. TeleMusic can only read your Liked Songs and playlists.")
+        )
+    ) {
+        AlertTextField(clientId, { clientId = it.trim() }, "Client ID")
     }
 }
 

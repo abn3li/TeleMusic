@@ -24,6 +24,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.PlayCircle
 import androidx.compose.material.icons.automirrored.rounded.OpenInNew
 import androidx.compose.material.icons.automirrored.rounded.Send
 import androidx.compose.material.icons.rounded.BlurOn
@@ -93,7 +94,7 @@ private val TileGrey = Color(0xFF636366)
 private val TileIndigo = Color(0xFF5E5CE6)
 
 @Composable
-fun SettingsScreen(onBack: () -> Unit, onOpenSpotify: () -> Unit, onLoggedOut: () -> Unit) {
+fun SettingsScreen(onBack: () -> Unit, onOpenSpotify: () -> Unit, onLoggedOut: () -> Unit, onOpenTelegram: () -> Unit, onYouTubeSignIn: () -> Unit) {
     val context = LocalContext.current
     val app = context.applicationContext as TgMusicApp
     val scope = rememberCoroutineScope()
@@ -101,13 +102,13 @@ fun SettingsScreen(onBack: () -> Unit, onOpenSpotify: () -> Unit, onLoggedOut: (
 
     var enrichEnabled by remember { mutableStateOf(app.settingsStore.enrichMetadataOnSync) }
     val playerEffects by app.settingsStore.playerEffects.collectAsState()
+    val homeFeeds by app.settingsStore.homeFeeds.collectAsState()
     val themeMode by app.settingsStore.themeMode.collectAsState()
     var cacheLimit by remember { mutableStateOf(app.settingsStore.maxCacheSizeBytes) }
     var cacheOptionsOpen by remember { mutableStateOf(false) }
     var licensesOpen by remember { mutableStateOf(false) }
 
-    // DNS and proxy save as they're changed - no Save buttons. Before Telegram is set up (Sync
-    // tab) there's nothing to connect or restart.
+    // DNS and proxy save as they're changed - no Save buttons. Before Telegram is set up in Settings there's nothing to connect or restart.
     val network = rememberTelegramNetworkForm(app.settingsStore)
     val telegramRunning = app.tdlibManager.isStarted
     var proxyStatusMessage by remember { mutableStateOf<String?>(null) }
@@ -221,13 +222,56 @@ fun SettingsScreen(onBack: () -> Unit, onOpenSpotify: () -> Unit, onLoggedOut: (
     }
     var downloadOptionsOpen by remember { mutableStateOf(false) }
 
+    val youtube by app.youtubeAccount.state.collectAsState()
+    var showYouTubeAccount by remember { mutableStateOf(false) }
+    if (showYouTubeAccount) AppAlert(
+        title = "YouTube Music",
+        message = youtube.name ?: "Connected to YouTube Music",
+        onDismiss = { showYouTubeAccount = false },
+        actions = listOf(
+            AlertAction("Cancel") { showYouTubeAccount = false },
+            AlertAction("Change Account") { showYouTubeAccount = false; onYouTubeSignIn() },
+            AlertAction("Sign Out", destructive = true) {
+                showYouTubeAccount = false
+                scope.launch { withContext(Dispatchers.IO) { app.youtubeAccount.signOut() } }
+            }
+        )
+    )
+
     LargeTitleList(title = "Settings", onBack = onBack, grouped = true) {
-        item("spotify") {
-            GroupHeader("Spotify")
-            com.abn3li.telemusic.ui.spotify.SpotifySettingsGroup(
-                onOpenPlaylists = onOpenSpotify,
-                onHelp = { uriHandler.openUri("https://developer.spotify.com/dashboard") }
-            )
+        // Every service you sign in to, in one card.
+        item("accounts") {
+            GroupHeader("Accounts")
+            GroupCard {
+                GroupRow(title = "YouTube Music", icon = { GroupIcon(Icons.Rounded.PlayCircle, TilePink) },
+                    onClick = { if (youtube.signedIn) showYouTubeAccount = true else onYouTubeSignIn() },
+                    trailing = { GroupValue(if (youtube.signedIn) youtube.name ?: "Connected" else "Sign In") })
+                GroupDivider(start = 57.dp)
+                GroupRow(title = "Telegram", desc = "Sign in and sync a chat or channel",
+                    icon = { GroupIcon(Icons.AutoMirrored.Rounded.Send, TileBlue) }, onClick = onOpenTelegram)
+                GroupDivider(start = 57.dp)
+                com.abn3li.telemusic.ui.spotify.SpotifyAccountRow(
+                    onOpenPlaylists = onOpenSpotify,
+                    onHelp = { uriHandler.openUri("https://developer.spotify.com/dashboard") }
+                )
+            }
+        }
+
+        item("home_feeds") {
+            GroupHeader("Home Feeds")
+            GroupCard {
+                GroupRow(title = "Telegram Feed", desc = "Library mixes, history, pinned playlists and artists",
+                    icon = { GroupIcon(Icons.AutoMirrored.Rounded.Send, TileBlue) },
+                    trailing = { GroupSwitch(homeFeeds.telegram, { enabled ->
+                        app.settingsStore.updateHomeFeeds { it.copy(telegram = enabled) }
+                    }) })
+                GroupDivider(start = 57.dp)
+                GroupRow(title = "YouTube Feed", desc = "Recommendations, mixes, community playlists and new releases",
+                    icon = { GroupIcon(Icons.Rounded.PlayCircle, TilePink) },
+                    trailing = { GroupSwitch(homeFeeds.youtube, { enabled ->
+                        app.settingsStore.updateHomeFeeds { it.copy(youtube = enabled) }
+                    }) })
+            }
         }
 
         item("appearance") {
@@ -385,7 +429,7 @@ fun SettingsScreen(onBack: () -> Unit, onOpenSpotify: () -> Unit, onLoggedOut: (
             }
         }
 
-        // Nothing to log out of until Telegram is set up in the Sync tab.
+        // Nothing to log out of until Telegram is set up in Settings > Telegram.
         if (app.credentialsStore.hasCredentials()) {
             item("account") {
                 GroupHeader("Telegram Account")

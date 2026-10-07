@@ -2,4 +2,7 @@
 <full-backup-content>
     <!-- Keystore keys cannot be restored alongside encrypted account preferences. -->
     <exclude domain="sharedpref" path="quality_account.xml" />
+    <exclude domain="sharedpref" path="youtube_account.xml" />
+    <exclude domain="sharedpref" path="spotify_account.xml" />
+    <exclude domain="sharedpref" path="telegram_credentials.xml" />
 </full-backup-content>

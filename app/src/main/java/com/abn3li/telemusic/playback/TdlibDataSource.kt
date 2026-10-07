@@ -23,6 +23,7 @@ private const val READ_WAIT_MAX_MS = 20_000L   // 20s max wait for new bytes whi
 /**
  * Plays audio files from local disk or streams Telegram files via TDLib as they download.
  */
+@OptIn(UnstableApi::class)
 class TdlibDataSource(private val tdlibManager: TdlibManager) : BaseDataSource(true) {
 
     private var fileId: Int = -1

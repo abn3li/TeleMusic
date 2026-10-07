@@ -33,6 +33,56 @@ class DiscoveryRepository(
     @Volatile private var cachedNewReleases: HomeSection? = null
     @Volatile private var cachedGenres: List<BrowseCollection>? = null
     @Volatile private var cachedCommunity: HomeSection? = null
+    private val accountGeneration = java.util.concurrent.atomic.AtomicLong()
+    private val accountCacheLock = Any()
+    private val personalCache = HomeFeedCache<List<com.abn3li.telemusic.data.browse.HomeShelf>>(android.os.SystemClock::elapsedRealtime)
+    private val cachedPersonal get() = personalCache.value
+
+    fun personalHomeIsStale(): Boolean = personalCache.isStale()
+    fun personalHomeIfLoaded(): List<com.abn3li.telemusic.data.browse.HomeShelf>? = cachedPersonal
+
+    /** The signed-in account's own Home feed - Quick picks, your mixes, Listen again, albums and
+     * playlists recommended for you - as YouTube Music lays it out: its first page and up to
+     * [PERSONAL_FEED_PAGES] - 1 more. Refreshes on demand or after 30 minutes when visited;
+     * failed refreshes keep the last successful feed and its original age. */
+    suspend fun personalHome(force: Boolean = false): List<com.abn3li.telemusic.data.browse.HomeShelf>? =
+        personalCache.getOrLoad(force) {
+        withContext(Dispatchers.IO) {
+            runCatching {
+                val shelves = LinkedHashMap<String, com.abn3li.telemusic.data.browse.HomeShelf>()
+                var page = client.browse(InnertubeBrowseClient.HOME_BROWSE_ID)
+                var pages = 1
+                while (true) {
+                    BrowseParser.parseHomeShelves(page).forEach { shelves.putIfAbsent(it.title, it) }
+                    if (pages >= PERSONAL_FEED_PAGES) break
+                    val token = BrowseParser.findContinuationToken(page) ?: break
+                    page = client.browseContinuation(token)
+                    pages++
+                }
+                shelves.values.toList()
+            }.onFailure { e -> android.util.Log.e("DiscoveryRepo", "personalHome(): fetch/parse failed", e) }
+                .getOrNull()
+                ?.takeIf { it.isNotEmpty() }
+        }
+    }
+
+    /** After signing in or out: what was read as the old account (or anonymously) goes. */
+    fun forgetAccountContent() {
+        synchronized(accountCacheLock) {
+            accountGeneration.incrementAndGet()
+            personalCache.clear()
+            cachedNewReleases = null
+            cachedCommunity = null
+            relatedCache.clear()
+        }
+    }
+
+    /** The signed-in account's name and picture, or nulls when they couldn't be read. */
+    suspend fun accountProfile(): Pair<String?, String?> = withContext(Dispatchers.IO) {
+        runCatching { BrowseParser.parseAccountProfile(client.accountMenu()) }
+            .onFailure { e -> android.util.Log.w("DiscoveryRepo", "account profile not read: ${e.message}") }
+            .getOrDefault(null to null)
+    }
 
     private val relatedMutex = kotlinx.coroutines.sync.Mutex()
     private val relatedCache = LinkedHashMap<String, List<BrowseTrack>>()
@@ -41,15 +91,21 @@ class DiscoveryRepository(
     suspend fun relatedSongs(videoId: String, force: Boolean = false): List<BrowseTrack> {
         relatedMutex.lock()
         try {
-            if (!force) relatedCache[videoId]?.let { return it }
+            val generation = synchronized(accountCacheLock) {
+                if (!force) relatedCache[videoId]?.let { return it }
+                accountGeneration.get()
+            }
             val tracks = withContext(Dispatchers.IO) {
                 val browseId = BrowseParser.relatedBrowseId(client.next(videoId))
                     ?: return@withContext emptyList<BrowseTrack>()
                 BrowseParser.parseRelatedSongs(client.browse(browseId)).filter { it.videoId != videoId }
             }
-            relatedCache[videoId] = tracks
-            if (relatedCache.size > 20) relatedCache.remove(relatedCache.keys.first())
-            return tracks
+            return synchronized(accountCacheLock) {
+                if (generation != accountGeneration.get()) return@synchronized emptyList()
+                relatedCache[videoId] = tracks
+                if (relatedCache.size > 20) relatedCache.remove(relatedCache.keys.first())
+                tracks
+            }
         } finally {
             relatedMutex.unlock()
         }
@@ -57,8 +113,11 @@ class DiscoveryRepository(
 
     /** YouTube Music's new releases, for Home. Of the anonymous home feed itself only the
      * community playlists are used (see [communityPlaylists]); its other shelves aren't shown. */
-    suspend fun newReleases(): HomeSection? {
-        cachedNewReleases?.let { return it }
+    suspend fun newReleases(force: Boolean = false): HomeSection? {
+        val generation = synchronized(accountCacheLock) {
+            if (!force) cachedNewReleases?.let { return it }
+            accountGeneration.get()
+        }
         return withContext(Dispatchers.IO) {
             runCatching {
                 BrowseParser.parseGridAsSection(
@@ -67,7 +126,10 @@ class DiscoveryRepository(
                 )
             }.onFailure { e -> android.util.Log.e("DiscoveryRepo", "newReleases(): fetch/parse failed", e) }
                 .getOrNull()
-                ?.also { if (it.items.isNotEmpty()) cachedNewReleases = it }
+                ?.let { section -> synchronized(accountCacheLock) {
+                    if (generation != accountGeneration.get()) null
+                    else section.also { if (it.items.isNotEmpty()) cachedNewReleases = it }
+                } }
         }
     }
 
@@ -76,8 +138,11 @@ class DiscoveryRepository(
      * [COMMUNITY_FEED_PAGES] pages, once; the result (even an empty one, where a region has no
      * such shelf) is kept for the rest of the run. Null only when the feed couldn't be read, so
      * the next visit to Home tries again. */
-    suspend fun communityPlaylists(): HomeSection? {
-        cachedCommunity?.let { return it }
+    suspend fun communityPlaylists(force: Boolean = false): HomeSection? {
+        val generation = synchronized(accountCacheLock) {
+            if (!force) cachedCommunity?.let { return it }
+            accountGeneration.get()
+        }
         return withContext(Dispatchers.IO) {
             runCatching {
                 val found = LinkedHashMap<String, BrowseCollection>()
@@ -93,7 +158,10 @@ class DiscoveryRepository(
                 HomeSection(COMMUNITY_TITLE, found.values.toList())
             }.onFailure { e -> android.util.Log.e("DiscoveryRepo", "communityPlaylists(): fetch/parse failed", e) }
                 .getOrNull()
-                ?.also { cachedCommunity = it }
+                ?.let { section -> synchronized(accountCacheLock) {
+                    if (generation != accountGeneration.get()) null
+                    else section.also { cachedCommunity = it }
+                } }
         }
     }
 
@@ -172,6 +240,11 @@ class DiscoveryRepository(
         if (browseId == COMMUNITY_BROWSE_ID) {
             return@withContext BrowseContent(collections = communityPlaylists()?.items.orEmpty())
         }
+        // A signed-in Home shelf that has no page of its own: everything the shelf holds.
+        if (browseId.startsWith(SHELF_BROWSE_PREFIX)) {
+            val shelf = cachedPersonal?.firstOrNull { it.title == browseId.removePrefix(SHELF_BROWSE_PREFIX) }
+            return@withContext BrowseContent(tracks = shelf?.tracks.orEmpty(), collections = shelf?.collections.orEmpty())
+        }
         runCatching {
             val raw = client.browse(browseId, params)
             // An artist's page is its own shape: top songs plus shelves, no track list to page.
@@ -241,6 +314,9 @@ class DiscoveryRepository(
         const val COMMUNITY_TITLE = "Community Playlists"
         /** Not a YouTube id: opens the community playlists already loaded for Home (see [browse]). */
         const val COMMUNITY_BROWSE_ID = "telemusic_community_playlists"
+        /** Not a YouTube id either: "Show all" of a signed-in Home shelf with no page of its own. */
+        const val SHELF_BROWSE_PREFIX = "telemusic_shelf:"
         private const val COMMUNITY_FEED_PAGES = 4
+        private const val PERSONAL_FEED_PAGES = 3
     }
 }

@@ -48,6 +48,7 @@ private const val MAX_REMEMBERED_SONG_LISTS = 4
  * case. Playlist/album/artist folder ids carry a Base64-encoded name/id after their prefix since
  * names can contain characters that don't belong in an id string.
  */
+@androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
 class AutoLibraryCallback(
     private val repository: MusicRepository,
     private val playbackQueue: PlaybackQueue,
@@ -71,8 +72,8 @@ class AutoLibraryCallback(
         browser: MediaSession.ControllerInfo,
         mediaId: String
     ): ListenableFuture<LibraryResult<MediaItem>> = future {
-        val songId = mediaId.toLongOrNull() ?: return@future LibraryResult.ofError(LibraryResult.RESULT_ERROR_BAD_VALUE)
-        val song = repository.getSongById(songId) ?: return@future LibraryResult.ofError(LibraryResult.RESULT_ERROR_BAD_VALUE)
+        val songId = mediaId.toLongOrNull() ?: return@future LibraryResult.ofError(androidx.media3.session.SessionError.ERROR_BAD_VALUE)
+        val song = repository.getSongById(songId) ?: return@future LibraryResult.ofError(androidx.media3.session.SessionError.ERROR_BAD_VALUE)
         LibraryResult.ofItem(song.toMediaItem(), null)
     }
 
@@ -214,6 +215,9 @@ class AutoLibraryCallback(
                     .setTitle(song.title)
                     .setArtist(song.artist)
                     .setArtworkUri(song.displayArtworkUri)
+                    .setExtras(android.os.Bundle().apply {
+                        putString(EXTRA_PLAYBACK_INSTANCE, java.util.UUID.randomUUID().toString())
+                    })
                     .setIsPlayable(true)
                     .setIsBrowsable(false)
                     .setMediaType(MediaMetadata.MEDIA_TYPE_MUSIC)
@@ -266,7 +270,7 @@ class AutoLibraryCallback(
                 block()
             } catch (e: Exception) {
                 Log.w("AutoLibraryCallback", "Car browse request failed", e)
-                LibraryResult.ofError(LibraryResult.RESULT_ERROR_UNKNOWN)
+                LibraryResult.ofError(androidx.media3.session.SessionError.ERROR_UNKNOWN)
             }
             result.set(value)
         }
