@@ -61,14 +61,17 @@ class MainActivity : ComponentActivity() {
             val view = LocalView.current
             // Read here, not inside the effect, so opening or closing the player re-runs it.
             // The open player and the welcome pages are always dark, so the bars around them are too.
+            val heroPage = SystemBarsState.heroPages > 0
             val lightBars = light && !SystemBarsState.playerOpen && !SystemBarsState.onboardingOpen
+            // An artist's photo under the status bar keeps its icons light, in either theme.
+            val lightStatusIcons = lightBars && !(heroPage && SystemBarsState.heroesOverPhoto.isNotEmpty())
             val groupedPage = SystemBarsState.groupedPages > 0
             // Read here too (not only inside the effect), so opening the player re-runs it in
             // the dark theme as well.
             val playerBars = SystemBarsState.playerOpen
             SideEffect {
                 WindowCompat.getInsetsController(window, view).apply {
-                    isAppearanceLightStatusBars = lightBars
+                    isAppearanceLightStatusBars = lightStatusIcons
                     isAppearanceLightNavigationBars = lightBars
                 }
                 val bar = if (lightBars) android.graphics.Color.WHITE else android.graphics.Color.BLACK
@@ -76,7 +79,7 @@ class MainActivity : ComponentActivity() {
                 // The open player shows through both bars: its cover at the top, its colours below.
                 @Suppress("DEPRECATION")
                 window.statusBarColor = when {
-                    playerBars -> android.graphics.Color.TRANSPARENT
+                    playerBars || heroPage -> android.graphics.Color.TRANSPARENT
                     lightBars && groupedPage -> LightPalette.groupedBackground.toArgb()
                     else -> bar
                 }

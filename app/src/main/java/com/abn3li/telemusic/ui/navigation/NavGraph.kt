@@ -1,5 +1,7 @@
 package com.abn3li.telemusic.ui.navigation
 
+import androidx.compose.foundation.layout.only
+import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.union
 import androidx.compose.foundation.layout.displayCutout
@@ -232,7 +234,11 @@ fun TgMusicNavGraph(navController: NavHostController = rememberNavController()) 
     // behind them.
     val navBarInset = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
     Box(Modifier.fillMaxSize()) {
-      Box(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.systemBars.union(WindowInsets.displayCutout))) {
+      // The status bar's gap is kept on the pages themselves (below), not here: the Scaffold clips
+      // to its own bounds, and an artist / album / playlist page draws its artwork up behind
+      // the status bar.
+      val barsInsets = WindowInsets.systemBars.union(WindowInsets.displayCutout)
+      Box(Modifier.fillMaxSize().windowInsetsPadding(barsInsets.only(WindowInsetsSides.Horizontal + WindowInsetsSides.Bottom))) {
         Scaffold(contentWindowInsets = WindowInsets(0)) { innerPadding ->
             CompositionLocalProvider(
                 LocalMiniPlayerInset provides miniPlayerInset,
@@ -242,7 +248,7 @@ fun TgMusicNavGraph(navController: NavHostController = rememberNavController()) 
             NavHost(
                 navController = navController,
                 startDestination = startDestination,
-                modifier = Modifier.padding(innerPadding).then(rememberVerticalBounce(currentRoute)),
+                modifier = Modifier.padding(innerPadding).windowInsetsPadding(barsInsets.only(WindowInsetsSides.Top)).then(rememberVerticalBounce(currentRoute)),
                 enterTransition = { EnterTransition.None },
                 exitTransition = { ExitTransition.None },
                 popEnterTransition = { EnterTransition.None },

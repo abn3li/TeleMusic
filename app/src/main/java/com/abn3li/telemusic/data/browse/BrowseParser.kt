@@ -179,6 +179,12 @@ object BrowseParser {
         trackRenderers.forEach { renderer ->
             parseTrackRow(renderer)?.let { tracks[it.videoId] = it }
         }
+        // A listener's playlist made of music videos (most "PL" playlists on an artist page) has
+        // only widescreen rows: rather than an empty page, its songs are kept - they play as audio
+        // like any other. A list of real songs still leaves out the odd video among them.
+        if (tracks.isEmpty()) trackRenderers.forEach { renderer ->
+            parseTrackRow(renderer, allowWidescreen = true)?.let { tracks[it.videoId] = it }
+        }
         if (tracks.isNotEmpty()) return BrowseContent(tracks = tracks.values.toList(), header = parseCollectionHeader(response))
 
         if (trackRenderers.isNotEmpty()) {
@@ -195,6 +201,15 @@ object BrowseParser {
         val collections = LinkedHashMap<String, BrowseCollection>()
         collectRenderers(response, "musicTwoRowItemRenderer").forEach { renderer ->
             parseTwoRowCollection(renderer)?.let { collections.putIfAbsent(it.browseId, it) }
+        }
+        // A page of moods and genres (a "Show all" can open one): buttons that each open a page
+        // of playlists, like the Search tab's categories.
+        collectRenderers(response, "musicNavigationButtonRenderer").forEach { renderer ->
+            val title = renderer.opt("buttonText").obj()?.runs().orEmpty().ifBlank { return@forEach }
+            val endpoint = renderer.opt("clickCommand").obj()?.opt("browseEndpoint").obj() ?: return@forEach
+            val browseId = endpoint.optString("browseId").takeIf { it.isNotBlank() } ?: return@forEach
+            val params = endpoint.optString("params").takeIf { it.isNotBlank() }
+            collections.putIfAbsent(browseId + params.orEmpty(), BrowseCollection(browseId, params, title, null, null, BrowseKind.OTHER))
         }
         return BrowseContent(collections = collections.values.toList(), header = parseCollectionHeader(response))
     }
@@ -359,7 +374,7 @@ object BrowseParser {
 
     /** One playable row - null for a video-shaped one (see this file's own top-level doc: this
      * app only ever surfaces real audio tracks, never a music video standing in for one). */
-    private fun parseTrackRow(renderer: JSONObject): BrowseTrack? {
+    private fun parseTrackRow(renderer: JSONObject, allowWidescreen: Boolean = false): BrowseTrack? {
         val overlayEndpoint = renderer.opt("overlay").obj()?.opt("musicItemThumbnailOverlayRenderer").obj()
             ?.opt("content").obj()?.opt("musicPlayButtonRenderer").obj()?.opt("playNavigationEndpoint").obj()
             ?.opt("watchEndpoint").obj()
@@ -385,7 +400,7 @@ object BrowseParser {
 
         val thumbnails = renderer.opt("thumbnail").obj()?.opt("musicThumbnailRenderer").obj()
             ?.opt("thumbnail").obj()?.opt("thumbnails").arr()
-        if (thumbnails.isWidescreen()) return null
+        if (!allowWidescreen && thumbnails.isWidescreen()) return null
 
         var durationSecs = 0
         val fixedColumns = renderer.opt("fixedColumns").arr()

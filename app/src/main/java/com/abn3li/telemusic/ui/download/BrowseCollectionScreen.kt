@@ -30,6 +30,8 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.QueueMusic
 import androidx.compose.material.icons.rounded.Album
+import androidx.compose.material.icons.rounded.Check
+import androidx.compose.material.icons.rounded.LibraryAdd
 import androidx.compose.material.icons.rounded.Person
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Search
@@ -59,19 +61,13 @@ import com.abn3li.telemusic.data.browse.FULL_ARTWORK_SIZE
 import com.abn3li.telemusic.data.browse.googleArtworkAtSize
 import com.abn3li.telemusic.data.local.SongEntity
 import com.abn3li.telemusic.ui.library.CoverTile
-import com.abn3li.telemusic.ui.library.DetailPageScaffold
-import com.abn3li.telemusic.ui.library.GroupActionRow
-import com.abn3li.telemusic.ui.library.GroupCard
-import com.abn3li.telemusic.ui.library.HeroButton
-import com.abn3li.telemusic.ui.library.HeroButtonRow
-import com.abn3li.telemusic.ui.library.HeroImage
 import com.abn3li.telemusic.ui.library.LargeTitleGrid
 import com.abn3li.telemusic.ui.library.LibraryDivider
 import com.abn3li.telemusic.ui.library.SectionHeader
 
 /**
  * One YouTube page - an album, playlist, chart or artist opened from Discovery or search, laid
- * out like the library's own album / playlist / artist pages (see DetailPageScaffold). The
+ * out like an artist's page (see ArtistHeroLayout): the cover, title and buttons up top. The
  * tracks come from a real browse call; Play streams, Download feeds the same yt-dlp flow as
  * search, and Import to Library makes the page a library playlist.
  */
@@ -105,7 +101,15 @@ fun BrowseCollectionScreen(
     state.downloadConflict?.let { conflict -> DownloadAnywayPrompt(conflict, viewModel::dismissDownloadConflict) }
 
     state.artist?.let { artist ->
-        ArtistPageContent(artist, state, onBack, onOpenCollection, onPlayTracks, onPlayNext, onDownload)
+        ArtistHeroPage(artist, browseId, state, onBack, onOpenCollection, onPlayTracks, onPlayNext, onDownload)
+        return
+    }
+    // An artist (a channel id) still loading: the artist page's own frame, not the album one.
+    if (state.isLoading && browseId.startsWith("UC")) {
+        ArtistHeroLayout(
+            name = title, photoUrl = null, loaded = false, canPlay = false,
+            onShuffle = {}, onPlay = {}, onAllSongs = null, onBack = onBack
+        ) { _, _ -> item("loading") { CenteredSpinner() } }
         return
     }
 
@@ -134,121 +138,85 @@ fun BrowseCollectionScreen(
     val artistName = header?.artist
     val artistId = header?.artistBrowseId
 
-    DetailPageScaffold(
-        title = header?.title ?: state.title,
+    val pageTitle = header?.title ?: state.title
+    var chooseImport by remember { mutableStateOf(false) }
+    val progress = state.importProgress
+    val imported = state.importedPlaylistId != null || state.importedAsAlbum
+    ArtistHeroLayout(
+        name = pageTitle,
+        photoUrl = cover,
+        loaded = !state.isLoading,
+        placeholder = if (isAlbum) Icons.Rounded.Album else Icons.AutoMirrored.Rounded.QueueMusic,
         subtitle = artistName,
         onSubtitleClick = if (artistName != null && artistId != null) {
             { onOpenCollection(BrowseCollection(artistId, null, artistName, null, null, BrowseKind.ARTIST)) }
         } else null,
-        detailLine = listOfNotNull(header?.subtitle, header?.detail).joinToString(" · ")
+        detail = listOfNotNull(header?.subtitle, header?.detail).joinToString(" · ")
             .ifBlank { if (state.isLoading) "" else "${tracks.size} ${if (tracks.size == 1) "Song" else "Songs"}" },
-        hero = { HeroImage(cover, if (isAlbum) Icons.Rounded.Album else Icons.AutoMirrored.Rounded.QueueMusic) },
-        items = tracks,
-        loaded = !state.isLoading,
+        canPlay = tracks.isNotEmpty(),
+        onShuffle = { onPlayTracks(tracks, tracks.indices.random(), true) },
+        onPlay = { onPlayTracks(tracks, 0, false) },
+        onAllSongs = null,
         onBack = onBack,
-        matches = { track, query -> track.title.contains(query, true) || track.artist.contains(query, true) },
-        emptyText = state.errorMessage ?: "Nothing here",
-        heroActions = { shown, openSearch ->
-            PlayShuffleSearch(shown, onPlayTracks, openSearch)
-        }
-    ) { shown, searching ->
-        if (state.isLoading) item("loading") { CenteredSpinner() }
-        if (!searching && tracks.isNotEmpty()) {
-            item("import") {
-                GroupCard {
-                    val progress = state.importProgress
-                    var chooseImport by remember { mutableStateOf(false) }
-                    when {
-                        state.importedPlaylistId != null -> GroupActionRow("Imported to Library", enabled = false) {}
-                        state.importedAsAlbum -> GroupActionRow("Imported to Library Albums", enabled = false) {}
-                        progress != null -> GroupActionRow("Importing ${progress.first}/${progress.second}…", loading = true) {}
-                        // An album can go in as an album (Library > Albums) or as a playlist.
-                        isAlbum -> GroupActionRow("Import to Library") { chooseImport = true }
-                        else -> GroupActionRow("Import to Library") { viewModel.importToLibrary() }
-                    }
-                    if (chooseImport) AppAlert(
-                        title = "Import to Library",
-                        message = "Save \"${header?.title ?: state.title}\" as an album, or as a playlist.",
-                        onDismiss = { chooseImport = false },
-                        actions = listOf(
-                            AlertAction("As Album", bold = true) { chooseImport = false; viewModel.importToLibrary(asAlbum = true) },
-                            AlertAction("As Playlist") { chooseImport = false; viewModel.importToLibrary(asAlbum = false) },
-                            AlertAction("Cancel") { chooseImport = false }
-                        )
-                    )
-                }
-                Spacer(Modifier.height(8.dp))
+        pillPlay = true,
+        // Import to Library: a tick once it's in, a spinner while the songs go in. An album can go
+        // in as an album (Library > Albums) or as a playlist.
+        trailing = {
+            RoundGlassButton(
+                if (imported) Icons.Rounded.Check else Icons.Rounded.LibraryAdd,
+                if (imported) "Imported to Library" else "Import to Library",
+                enabled = tracks.isNotEmpty(),
+                loading = progress != null,
+                done = imported
+            ) {
+                if (isAlbum) chooseImport = true else viewModel.importToLibrary()
             }
+        },
+        searchHint = "Search in $pageTitle"
+    ) { searching, query ->
+        if (searching) {
+            val found = if (query.isBlank()) tracks else tracks.filter { it.title.contains(query, true) || it.artist.contains(query, true) }
+            if (found.isEmpty() && query.isNotBlank()) item("no_results") { NoResults() }
+            trackRows(found, state, onPlayTracks, onPlayNext, onDownload)
+            return@ArtistHeroLayout
         }
-        trackRows(shown, state, onPlayTracks, onPlayNext, onDownload)
-    }
-}
-
-/**
- * An artist's page: their picture and name, then Top songs (the arrow opens the full list),
- * then each shelf YouTube has for them - Albums, Singles & EPs, Playlists, similar artists.
- */
-@Composable
-private fun ArtistPageContent(
-    artist: ArtistPage,
-    state: BrowseCollectionUiState,
-    onBack: () -> Unit,
-    onOpenCollection: (BrowseCollection) -> Unit,
-    onPlay: (List<BrowseTrack>, Int, Boolean) -> Unit,
-    onPlayNext: (BrowseTrack) -> Unit,
-    onDownload: (BrowseTrack) -> Unit
-) {
-    DetailPageScaffold(
-        title = artist.name,
-        subtitle = null,
-        onSubtitleClick = null,
-        detailLine = artist.subtitle.orEmpty(),
-        hero = { HeroImage(artist.thumbnailUrl, Icons.Rounded.Person) },
-        items = artist.topSongs,
-        loaded = true,
-        // Some artists have no song shelf, only albums: no "nothing here" above those.
-        showEmptyText = artist.shelves.isEmpty(),
-        onBack = onBack,
-        matches = { track, query -> track.title.contains(query, true) || track.artist.contains(query, true) },
-        emptyText = "Nothing here",
-        heroActions = { shown, openSearch -> PlayShuffleSearch(shown, onPlay, openSearch) }
-    ) { shown, searching ->
-        if (!searching && shown.isNotEmpty()) {
-            item("songs_header") {
-                val allSongs = artist.allSongsBrowseId
-                SectionHeader(
-                    "Top songs",
-                    allSongs?.let { id -> { onOpenCollection(BrowseCollection(id, artist.allSongsParams, "${artist.name}: Songs", null, null, BrowseKind.PLAYLIST)) } }
+        if (state.isLoading) item("loading") { CenteredSpinner() }
+        if (!state.isLoading && tracks.isEmpty()) {
+            item("empty") {
+                Text(
+                    state.errorMessage ?: "Nothing here",
+                    color = ink.copy(alpha = 0.55f),
+                    fontSize = 15.sp,
+                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 18.dp)
                 )
             }
         }
-        trackRows(if (searching) shown else shown.take(5), state, onPlay, onPlayNext, onDownload)
-        if (!searching) {
-            artist.shelves.forEachIndexed { index, shelf ->
-                item("shelf_title_$index") { SectionHeader(shelf.title, null) }
-                item("shelf_$index") {
-                    LazyRow(horizontalArrangement = Arrangement.spacedBy(14.dp), contentPadding = PaddingValues(horizontal = 18.dp)) {
-                        items(shelf.items, key = { it.browseId }) { card -> CollectionCard(card) { onOpenCollection(card) } }
-                    }
-                }
+        if (progress != null) {
+            item("import_progress") {
+                Text(
+                    "Importing ${progress.first}/${progress.second}…",
+                    color = ink.copy(alpha = 0.6f),
+                    fontSize = 13.5.sp,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)
+                )
             }
         }
+        trackRows(tracks, state, onPlayTracks, onPlayNext, onDownload)
     }
+    if (chooseImport) AppAlert(
+        title = "Import to Library",
+        message = "Save \"$pageTitle\" as an album, or as a playlist.",
+        onDismiss = { chooseImport = false },
+        actions = listOf(
+            AlertAction("As Album", bold = true) { chooseImport = false; viewModel.importToLibrary(asAlbum = true) },
+            AlertAction("As Playlist") { chooseImport = false; viewModel.importToLibrary(asAlbum = false) },
+            AlertAction("Cancel") { chooseImport = false }
+        )
+    )
 }
 
-/** Shuffle / Play / Search under a YouTube page's title: the page's songs become the queue, in
- * order from the top, or shuffled. */
-@Composable
-private fun PlayShuffleSearch(shown: List<BrowseTrack>, onPlay: (List<BrowseTrack>, Int, Boolean) -> Unit, openSearch: () -> Unit) {
-    HeroButtonRow {
-        HeroButton(Icons.Rounded.Shuffle, "Shuffle", enabled = shown.isNotEmpty()) { onPlay(shown, shown.indices.random(), true) }
-        HeroButton(Icons.Rounded.PlayArrow, "Play", enabled = shown.isNotEmpty()) { onPlay(shown, 0, false) }
-        HeroButton(Icons.Rounded.Search, "Search", enabled = shown.isNotEmpty(), onClick = openSearch)
-    }
-    Spacer(Modifier.height(30.dp))
-}
-
-private fun LazyListScope.trackRows(
+internal fun LazyListScope.trackRows(
     tracks: List<BrowseTrack>,
     state: BrowseCollectionUiState,
     onPlay: (List<BrowseTrack>, Int, Boolean) -> Unit,

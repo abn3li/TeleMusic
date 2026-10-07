@@ -1,5 +1,13 @@
 package com.abn3li.telemusic.ui.library
 
+import com.abn3li.telemusic.ui.download.NoResults
+import com.abn3li.telemusic.ui.download.heroTopInset
+import com.abn3li.telemusic.ui.theme.SystemBarsState
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.layout.layout
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.runtime.DisposableEffect
+import com.abn3li.telemusic.ui.download.ArtistHeroLayout
 import com.abn3li.telemusic.ui.theme.LocalPalette
 import com.abn3li.telemusic.ui.theme.paper
 import com.abn3li.telemusic.ui.theme.ink
@@ -191,26 +199,34 @@ fun ArtistDetailScreen(artist: String, viewModel: LibraryViewModel, callbacks: L
     val artistAlbums = remember(albums, artist) { albums.filter { it.artist == artist } }
     val actions = rememberLibrarySongActions(viewModel, callbacks.onPlayNext, callbacks.onOpenArtist, callbacks.onOpenAlbum)
 
-    CollectionDetailPage(
-        title = artist,
-        subtitle = null,
-        onSubtitleClick = null,
-        detailLine = "${list.size} ${if (list.size == 1) "Song" else "Songs"}",
-        hero = { HeroImage(list.firstNotNullOfOrNull { it.displayArtwork }, Icons.Rounded.Album) },
-        songs = list,
+    val ids = remember(list) { list.map { it.telegramMessageId } }
+    ArtistHeroLayout(
+        name = artist,
+        photoUrl = list.firstNotNullOfOrNull { it.displayArtwork },
+        canPlay = list.isNotEmpty(),
+        onShuffle = { callbacks.onPlayCollection(ids, true) },
+        onPlay = { callbacks.onPlayCollection(ids, false) },
+        onAllSongs = { callbacks.onOpenArtistSongs(artist) },
+        onBack = callbacks.onBack,
         loaded = songs != null,
-        callbacks = callbacks,
+        searchHint = "Search in $artist",
         menu = { close ->
             LibraryMenuItem("Play Next", Icons.Rounded.QueuePlayNext) { list.forEach { callbacks.onPlayNext(it.telegramMessageId) }; close() }
         }
-    ) { shown, searching ->
-        val ids = shown.map { it.telegramMessageId }
-        if (!searching) {
+    ) { searching, query ->
+        val shown = when {
+            !searching -> list
+            query.isBlank() -> list
+            else -> list.filter { it.title.contains(query, true) || it.artist.contains(query, true) || it.album.orEmpty().contains(query, true) }
+        }
+        if (searching && shown.isEmpty() && query.isNotBlank()) item("no_results") { NoResults() }
+        if (!searching && list.isNotEmpty()) {
             item("songs_header") { SectionHeader("Songs") { callbacks.onOpenArtistSongs(artist) } }
         }
+        val shownIds = shown.map { it.telegramMessageId }
         val visible = if (searching) shown else shown.take(5)
         itemsIndexed(visible, key = { _, s -> s.telegramMessageId }, contentType = { _, _ -> "song" }) { index, song ->
-            LibrarySongRow(song = song, actions = actions, onClick = { callbacks.onPlay(ids, index) })
+            LibrarySongRow(song = song, actions = actions, onClick = { callbacks.onPlay(shownIds, index) })
             if (index < visible.lastIndex) LibraryDivider(start = 88.dp)
         }
         if (!searching && artistAlbums.isNotEmpty()) {
@@ -532,7 +548,8 @@ private fun CollectionDetailPage(
             HeroButton(
                 if (playingNow) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
                 if (playingNow) "Pause" else "Play",
-                enabled = songs.isNotEmpty()
+                enabled = songs.isNotEmpty(),
+                primary = true
             ) {
                 if (isThisPlaying) callbacks.onTogglePlayPause() else callbacks.onPlayCollection(ids, false)
             }
@@ -551,7 +568,7 @@ private fun CollectionDetailPage(
 internal fun HeroButtonRow(content: @Composable RowScope.() -> Unit) {
     Row(
         Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(14.dp, Alignment.CenterHorizontally),
+        horizontalArrangement = Arrangement.spacedBy(18.dp, Alignment.CenterHorizontally),
         verticalAlignment = Alignment.CenterVertically,
         content = content
     )
@@ -588,7 +605,8 @@ internal fun <T> DetailPageScaffold(
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
     val configuration = LocalConfiguration.current
-    val heroHeight = (configuration.screenHeightDp.dp * 0.52f).coerceIn(320.dp, 468.dp)
+    val statusBar = heroTopInset()
+    val heroHeight = (configuration.screenHeightDp.dp * 0.6f).coerceIn(380.dp, 560.dp) + statusBar
     val heroHeightPx = with(LocalDensity.current) { heroHeight.toPx() }
     var searching by rememberSaveable { mutableStateOf(false) }
     var searchText by rememberSaveable { mutableStateOf("") }
@@ -604,7 +622,7 @@ internal fun <T> DetailPageScaffold(
             when {
                 searching -> 1f
                 listState.firstVisibleItemIndex > 0 -> 1f
-                else -> (listState.firstVisibleItemScrollOffset / (heroHeightPx * 0.62f)).coerceIn(0f, 1f)
+                else -> ((listState.firstVisibleItemScrollOffset - heroHeightPx * 0.55f) / (heroHeightPx * 0.2f)).coerceIn(0f, 1f)
             }
         }
     }
@@ -631,43 +649,81 @@ internal fun <T> DetailPageScaffold(
         }
     }
     val showStrip by remember { derivedStateOf { collapse >= 1f } }
+    // The status bar goes see-through over the cover: light icons over it, the theme's own once
+    // the bar has filled in (flips only then - not every scrolled frame).
+    val heroToken = remember { Any() }
+    DisposableEffect(Unit) {
+        SystemBarsState.heroPages++
+        onDispose {
+            SystemBarsState.heroPages--
+            SystemBarsState.heroesOverPhoto.remove(heroToken)
+        }
+    }
+    LaunchedEffect(searching) { snapshotFlow { collapse < 1f }.collect { over ->
+        if (!over) SystemBarsState.heroesOverPhoto.remove(heroToken)
+        else if (heroToken !in SystemBarsState.heroesOverPhoto) SystemBarsState.heroesOverPhoto.add(heroToken)
+    } }
 
-    Box(Modifier.fillMaxSize().background(paper)) {
+    // Reaches up under the status bar: the pages sit below it, this one draws behind it.
+    Box(
+        Modifier
+            .fillMaxSize()
+            .layout { measurable, constraints ->
+                val extra = statusBar.roundToPx()
+                val placeable = measurable.measure(
+                    constraints.copy(minHeight = constraints.minHeight + extra, maxHeight = constraints.maxHeight + extra)
+                )
+                layout(placeable.width, constraints.maxHeight) { placeable.place(0, -extra) }
+            }
+            .background(paper)
+    ) {
         LazyColumn(state = listState, modifier = Modifier.fillMaxSize()) {
             if (!searching) {
                 item("hero") {
-                    Box(Modifier.fillMaxWidth().height(heroHeight)) {
-                        hero()
+                    Box(Modifier.fillMaxWidth().height(heroHeight).clipToBounds()) {
+                        Box(
+                            Modifier.matchParentSize().graphicsLayer {
+                                // Slower than the page: the cover lags behind as it scrolls away.
+                                translationY = if (listState.firstVisibleItemIndex == 0) listState.firstVisibleItemScrollOffset * 0.45f else 0f
+                            }
+                        ) { hero() }
                         Box(
                             Modifier.matchParentSize().background(
                                 Brush.verticalGradient(
-                                    listOf(
-                                        paper.copy(alpha = 0.22f),
-                                        paper.copy(alpha = 0.46f),
-                                        paper.copy(alpha = 0.92f),
-                                        paper
-                                    )
+                                    0f to Color.Black.copy(alpha = 0.32f),
+                                    0.18f to Color.Transparent,
+                                    0.45f to Color.Transparent,
+                                    0.8f to paper.copy(alpha = 0.75f),
+                                    1f to paper
                                 )
                             )
                         )
                         Column(
-                            Modifier.fillMaxSize().padding(horizontal = 20.dp, vertical = 24.dp),
+                            Modifier.fillMaxSize().padding(horizontal = 18.dp).padding(bottom = 4.dp),
                             horizontalAlignment = Alignment.CenterHorizontally
                         ) {
                             Spacer(Modifier.height(88.dp))
                             Spacer(Modifier.weight(1f))
+                            val titleSize = when {
+                                title.length <= 6 -> 64
+                                title.length <= 10 -> 54
+                                title.length <= 15 -> 44
+                                title.length <= 28 -> 36
+                                else -> 30
+                            }
                             Text(
                                 title,
                                 color = ink,
-                                fontSize = 31.sp,
-                                lineHeight = 36.sp,
-                                fontWeight = FontWeight.Bold,
+                                fontSize = titleSize.sp,
+                                lineHeight = (titleSize * 1.02f).sp,
+                                letterSpacing = (-1.2).sp,
+                                fontWeight = FontWeight.Black,
                                 textAlign = TextAlign.Center,
                                 maxLines = 2,
                                 overflow = TextOverflow.Ellipsis
                             )
                             if (subtitle != null) {
-                                Spacer(Modifier.height(10.dp))
+                                Spacer(Modifier.height(6.dp))
                                 Text(
                                     subtitle,
                                     color = ink,
@@ -679,16 +735,16 @@ internal fun <T> DetailPageScaffold(
                                     modifier = if (onSubtitleClick != null) Modifier.clickable(onClick = onSubtitleClick) else Modifier
                                 )
                             }
-                            Spacer(Modifier.height(8.dp))
+                            Spacer(Modifier.height(4.dp))
                             Text(
                                 detailLine,
-                                color = ink.copy(alpha = 0.72f),
-                                fontSize = 14.5.sp,
+                                color = ink.copy(alpha = 0.6f),
+                                fontSize = 14.sp,
                                 lineHeight = 20.sp,
                                 textAlign = TextAlign.Center,
                                 maxLines = 2
                             )
-                            Spacer(Modifier.height(28.dp))
+                            Spacer(Modifier.height(22.dp))
                             heroActions(shown) {
                                 searching = true
                                 scope.launch { listState.scrollToItem(0) }
@@ -698,7 +754,7 @@ internal fun <T> DetailPageScaffold(
                 }
             } else {
                 item("search") {
-                    Box(Modifier.fillMaxWidth().padding(top = 64.dp)) {
+                    Box(Modifier.fillMaxWidth().padding(top = 64.dp + statusBar)) {
                         LibrarySearchField(searchText, "Search in $title", { searchText = it })
                     }
                 }
@@ -748,24 +804,37 @@ internal fun <T> DetailPageScaffold(
             favorite = favorite,
             onFavorite = onFavorite,
             menu = menu,
+            statusBar = statusBar,
             modifier = Modifier.onSizeChanged { barHeightPx = it.height }
         )
     }
 }
 
 @Composable
-internal fun HeroButton(icon: ImageVector, description: String, enabled: Boolean, active: Boolean = false, onClick: () -> Unit) {
+internal fun HeroButton(
+    icon: ImageVector,
+    description: String,
+    enabled: Boolean,
+    active: Boolean = false,
+    // The wide Play in the middle: filled with the ink, its icon and word in the page colour.
+    primary: Boolean = false,
+    onClick: () -> Unit
+) {
     val haptics = LocalHapticFeedback.current
     // [active] (Shuffle while it's on): filled with the accent, so the state reads at a glance.
     val fill by animateColorAsState(
-        if (active) AppAccent else Color.Transparent,
+        when {
+            primary -> ink
+            active -> AppAccent
+            else -> ink.copy(alpha = 0.1f)
+        },
         tween(200),
         label = "heroButtonFill"
     )
     Box(
         Modifier
             .alpha(if (enabled) 1f else 0.42f)
-            .size(56.dp)
+            .then(if (primary) Modifier.width(168.dp).height(56.dp) else Modifier.size(54.dp))
             .clip(CircleShape)
             .background(fill)
             .clickable(
@@ -778,7 +847,15 @@ internal fun HeroButton(icon: ImageVector, description: String, enabled: Boolean
             },
         contentAlignment = Alignment.Center
     ) {
-        Icon(icon, description, tint = ink, modifier = Modifier.size(if (active) 30.dp else 36.dp))
+        if (primary) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(icon, null, tint = paper, modifier = Modifier.size(32.dp))
+                Spacer(Modifier.width(6.dp))
+                Text(description, color = paper, fontSize = 19.sp, fontWeight = FontWeight.Bold)
+            }
+        } else {
+            Icon(icon, description, tint = if (active) Color.White else ink, modifier = Modifier.size(26.dp))
+        }
     }
 }
 
@@ -806,6 +883,7 @@ private fun DetailTopBar(
     favorite: Boolean?,
     onFavorite: () -> Unit,
     menu: (@Composable ColumnScope.(close: () -> Unit) -> Unit)?,
+    statusBar: Dp,
     modifier: Modifier = Modifier
 ) {
     val progress = collapse()
@@ -818,6 +896,7 @@ private fun DetailTopBar(
         modifier
             .fillMaxWidth()
             .background(paper.copy(alpha = progress * 0.96f))
+            .padding(top = statusBar)
             .padding(horizontal = 16.dp, vertical = 10.dp)
     ) {
         Text(

@@ -1,5 +1,8 @@
 package com.abn3li.telemusic.ui.navigation
 
+import com.abn3li.telemusic.ui.download.heroTopInset
+import androidx.compose.ui.graphics.drawscope.clipRect
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.animation.core.animate
 import androidx.compose.animation.core.spring
 import androidx.compose.runtime.Composable
@@ -8,7 +11,6 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
@@ -94,7 +96,12 @@ internal fun rememberVerticalBounce(route: String?): Modifier {
     }
     // Reading the offset in the layer avoids recomposing or laying out the page per frame.
     // The clip stays fixed while the page moves; the navbar and player are outside this layer.
-    return Modifier.clipToBounds().nestedScroll(connection).graphicsLayer {
+    // It reaches up under the status bar, so a page's artwork can show through it (an artist,
+    // album or playlist page); other pages' opaque status bar still covers that strip.
+    val statusBarPx = with(LocalDensity.current) { heroTopInset().toPx() }
+    return Modifier.drawWithContent {
+        clipRect(top = -statusBarPx, bottom = size.height) { this@drawWithContent.drawContent() }
+    }.nestedScroll(connection).graphicsLayer {
         translationY = offset.floatValue
     }
 }

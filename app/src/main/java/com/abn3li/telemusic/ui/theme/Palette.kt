@@ -1,5 +1,6 @@
 package com.abn3li.telemusic.ui.theme
 
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -87,4 +88,9 @@ object SystemBarsState {
     var onboardingOpen by mutableStateOf(false)
     // Settings-style pages on screen (a page fading out and the next fading in can overlap).
     var groupedPages by mutableIntStateOf(0)
+    // Pages whose picture runs up behind a see-through status bar (an artist's page).
+    var heroPages by mutableIntStateOf(0)
+    // Such pages whose photo is still under the status bar (its icons stay light). Each page
+    // adds and removes only its own entry, so one leaving can't undo the next one's.
+    val heroesOverPhoto = mutableStateListOf<Any>()
 }
