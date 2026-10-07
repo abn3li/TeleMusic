@@ -40,11 +40,18 @@ class TgMusicApp : Application(), ImageLoaderFactory {
     lateinit var ytDlpRepository: YtDlpRepository; private set
     lateinit var discoveryRepository: com.abn3li.telemusic.repository.DiscoveryRepository; private set
 
-    val youtubeAccount by lazy {
+    val youtubeAccount: com.abn3li.telemusic.data.youtube.YouTubeAccount by lazy {
         com.abn3li.telemusic.data.youtube.YouTubeAccount(this) {
             // Invalidate before the new account state reaches any screen.
+            youtubeWebSession.forget()
             if (::discoveryRepository.isInitialized) discoveryRepository.forgetAccountContent()
         }
+    }
+
+    /** What music.youtube.com says about the signed-in session - read once, on the first listen
+     * reported (see YouTubeWebSession). */
+    internal val youtubeWebSession: com.abn3li.telemusic.data.youtube.YouTubeWebSession by lazy {
+        com.abn3li.telemusic.data.youtube.YouTubeWebSession({ session -> youtubeAccount.authHeadersForSession(session) })
     }
 
     private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
@@ -66,7 +73,10 @@ class TgMusicApp : Application(), ImageLoaderFactory {
         ytDlpRepository = YtDlpRepository(this)
         discoveryRepository = com.abn3li.telemusic.repository.DiscoveryRepository(
             db.importedPlaylistDao(), java.io.File(filesDir, "search_categories.json"),
-            com.abn3li.telemusic.data.browse.InnertubeBrowseClient(auth = { youtubeAccount.authHeaders() })
+            com.abn3li.telemusic.data.browse.InnertubeBrowseClient(
+                auth = { youtubeAccount.authHeaders() },
+                webScope = { youtubeWebSession.cached(youtubeAccount.state.value.sessionId) }
+            )
         )
         appScope.launch(Dispatchers.IO) { youtubeAccount.load() }
 

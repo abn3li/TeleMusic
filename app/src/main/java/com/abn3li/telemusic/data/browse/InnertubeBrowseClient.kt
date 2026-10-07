@@ -1,5 +1,7 @@
 package com.abn3li.telemusic.data.browse
 
+import com.abn3li.telemusic.data.youtube.PlaybackTracking
+import com.abn3li.telemusic.data.youtube.YouTubeWebScope
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -23,7 +25,10 @@ import java.util.concurrent.TimeUnit
 class InnertubeBrowseClient(
     // The signed-in YouTube Music account's headers (see YouTubeAccount.authHeaders), or null:
     // with them every request - Home, Search, a playlist - is answered as that account.
-    private val auth: () -> Map<String, String>? = { null }
+    private val auth: () -> Map<String, String>? = { null },
+    // What music.youtube.com said about that session (live version, its own visitor id, a brand
+    // account's id), once read - see YouTubeWebSession. Null until then: the defaults below.
+    private val webScope: () -> YouTubeWebScope? = { null }
 ) {
     private val client = OkHttpClient.Builder()
         .connectTimeout(15, TimeUnit.SECONDS)
@@ -62,13 +67,31 @@ class InnertubeBrowseClient(
     fun accountMenu(): JSONObject = post("account/account_menu", JSONObject())
 
     /**
-     * Where to report a listen (history registration only; stream URLs still come from yt-dlp).
-     * YouTube now answers the website's own player request with "Video unavailable" for apps
-     * like this one, so it's asked as the iPhone app - anonymously: the address it returns is
-     * the same stats endpoint, and the report itself carries the account (YouTubeHistoryClient).
+     * Where to report a listen (history registration only; stream URLs still come from yt-dlp):
+     * the website's own player request, signed in, quoting the current web player's timestamp
+     * ([scope]) - without it YouTube says "Video unavailable" and leaves the report URLs out.
+     * The answer is issued to this session's own visitor, which is who the reports are credited
+     * to. If it still has none, the iPhone app's anonymous answer gives at least the addresses.
      */
-    @Suppress("UNUSED_PARAMETER")
-    fun historyTrackingUrl(videoId: String, headers: Map<String, String>): String? {
+    fun playbackTracking(videoId: String, headers: Map<String, String>, scope: YouTubeWebScope?): PlaybackTracking? {
+        val web = runCatching {
+            post("player", JSONObject().apply {
+                put("videoId", videoId)
+                put("contentCheckOk", true)
+                put("racyCheckOk", true)
+                put("playbackContext", JSONObject().put("contentPlaybackContext", JSONObject().apply {
+                    put("html5Preference", "HTML5_PREF_WANTS")
+                    put("referer", "https://music.youtube.com/watch?v=$videoId")
+                    scope?.signatureTimestamp?.let { put("signatureTimestamp", it) }
+                }))
+            }, headers, scope)
+        }.getOrNull()
+        web?.let(::trackingOf)?.let { return it }
+        logRefusal("website", web)
+        return iosTracking(videoId)
+    }
+
+    private fun iosTracking(videoId: String): PlaybackTracking? {
         val body = JSONObject().apply {
             put("context", JSONObject().apply {
                 put("client", JSONObject().apply {
@@ -98,18 +121,28 @@ class InnertubeBrowseClient(
             check(r.isSuccessful) { "Innertube player failed: HTTP ${r.code}" }
             JSONObject(r.body?.string().orEmpty())
         }
-        val url = response.optJSONObject("playbackTracking")
-            ?.optJSONObject("videostatsPlaybackUrl")?.optString("baseUrl")?.takeIf { it.isNotBlank() }
-        if (url == null) {
-            // YouTube's own refusal ("LOGIN_REQUIRED", "Sign in to confirm you're not a bot"...):
-            // safe to log - no cookies or links in it.
-            val playability = response.optJSONObject("playabilityStatus")
-            runCatching {
-                android.util.Log.w("YouTubeHistory", "No history tracking URL; playability=" +
-                    playability?.optString("status") + "; reason=" + playability?.optString("reason"))
-            }
+        return trackingOf(response) ?: run { logRefusal("iPhone", response); null }
+    }
+
+    private fun trackingOf(response: JSONObject): PlaybackTracking? {
+        val tracking = response.optJSONObject("playbackTracking") ?: return null
+        fun url(key: String) = tracking.optJSONObject(key)?.optString("baseUrl")?.takeIf { it.isNotBlank() }
+        return PlaybackTracking(
+            playbackUrl = url("videostatsPlaybackUrl") ?: return null,
+            watchtimeUrl = url("videostatsWatchtimeUrl"),
+            atrUrl = url("atrUrl"),
+            flushSeconds = tracking.optLong("videostatsDefaultFlushIntervalSeconds", 40L)
+        )
+    }
+
+    // YouTube's own refusal ("LOGIN_REQUIRED", "Video unavailable"...): safe to log - no
+    // cookies or links in it.
+    private fun logRefusal(client: String, response: JSONObject?) {
+        val playability = response?.optJSONObject("playabilityStatus")
+        runCatching {
+            android.util.Log.w("YouTubeHistory", "No tracking from the $client player; playability=" +
+                playability?.optString("status") + "; reason=" + playability?.optString("reason"))
         }
-        return url
     }
 
     fun browseContinuation(continuation: String): JSONObject =
@@ -145,13 +178,19 @@ class InnertubeBrowseClient(
         return minted
     }
 
-    private fun post(endpoint: String, extra: JSONObject, headers: Map<String, String>? = auth()): JSONObject {
-        val visitor = visitorId()
+    private fun post(
+        endpoint: String,
+        extra: JSONObject,
+        headers: Map<String, String>? = auth(),
+        scope: YouTubeWebScope? = if (headers != null) webScope() else null
+    ): JSONObject {
+        val visitor = scope?.visitorData ?: visitorId()
+        val version = scope?.clientVersion ?: CLIENT_VERSION
         val body = JSONObject().apply {
             put("context", JSONObject().apply {
                 put("client", JSONObject().apply {
                     put("clientName", "WEB_REMIX")
-                    put("clientVersion", CLIENT_VERSION)
+                    put("clientVersion", version)
                     put("hl", "en")
                     put("gl", "US")
                     if (visitor != null) put("visitorData", visitor)
@@ -164,9 +203,10 @@ class InnertubeBrowseClient(
             .url("https://music.youtube.com/youtubei/v1/$endpoint?key=$FALLBACK_API_KEY&prettyPrint=false")
             .addHeader("Content-Type", "application/json")
             .addHeader("X-YouTube-Client-Name", "67")
-            .addHeader("X-YouTube-Client-Version", CLIENT_VERSION)
+            .addHeader("X-YouTube-Client-Version", version)
             .addHeader("User-Agent", WEB_USER_AGENT)
             .addHeader("Origin", "https://music.youtube.com")
+            .apply { scope?.pageId?.let { addHeader("X-Goog-PageId", it) } }
             .apply { if (visitor != null) addHeader("X-Goog-Visitor-Id", visitor) }
             .apply { headers?.forEach { (name, value) -> header(name, value) } }
             .post(body.toString().toRequestBody("application/json".toMediaType()))
@@ -176,7 +216,7 @@ class InnertubeBrowseClient(
             val responseBody = response.body?.string().orEmpty()
             check(response.isSuccessful) { "Innertube $endpoint failed: HTTP ${response.code}" }
             return JSONObject(responseBody).also { json ->
-                if (visitorData == null) {
+                if (visitorData == null && scope == null) {
                     json.optJSONObject("responseContext")?.optString("visitorData")?.takeIf { it.isNotBlank() }?.let { visitorData = it }
                 }
             }
@@ -193,11 +233,11 @@ class InnertubeBrowseClient(
         // own browseId+params (FEmusic_moods_and_genres_category) opens a real page of playlists
         // for that genre, same as any other browse card (see BrowseParser.parseGenreChips).
         const val GENRES_BROWSE_ID = "FEmusic_moods_and_genres"
-        private const val CLIENT_VERSION = "1.20250101.01.00"
+        private const val CLIENT_VERSION = "1.20261006.10.00"
         private const val IOS_CLIENT_VERSION = "20.10.4"
         private const val IOS_USER_AGENT = "com.google.ios.youtube/20.10.4 (iPhone16,2; U; CPU iOS 18_3_2 like Mac OS X;)"
         private const val WEB_USER_AGENT =
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36"
         private val VISITOR_DATA = Regex(""""(Cg[A-Za-z0-9_%-]{40,})"""")
         private const val FALLBACK_API_KEY = "AIzaSyC9XL3ZjWddXya6X74dJoCTL-WEYFDNX30"
     }

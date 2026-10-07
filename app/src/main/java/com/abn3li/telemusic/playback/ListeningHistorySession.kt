@@ -11,6 +11,9 @@ internal class ListeningHistorySession {
         playingSince = if (playing) now else null
     }
 
+    /** Everything heard so far in this play. */
+    fun listenedMs(now: Long): Long = accumulated + (playingSince?.let { (now - it).coerceAtLeast(0) } ?: 0)
+
     fun remainingMs(now: Long): Long = (MIN_LISTEN_MS - accumulated -
         (playingSince?.let { (now - it).coerceAtLeast(0) } ?: 0)).coerceAtLeast(0)
 
