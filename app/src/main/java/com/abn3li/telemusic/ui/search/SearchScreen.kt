@@ -1,11 +1,12 @@
 package com.abn3li.telemusic.ui.search
+import com.abn3li.telemusic.ui.download.youtubeTrackActions
+import com.abn3li.telemusic.ui.download.youtubeCollectionActions
 
 import com.abn3li.telemusic.ui.download.DownloadAnywayPrompt
 import com.abn3li.telemusic.ui.theme.LocalPalette
 import com.abn3li.telemusic.ui.theme.paper
 import com.abn3li.telemusic.ui.theme.ink
 import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.foundation.combinedClickable
 import com.abn3li.telemusic.data.browse.BrowseTrack
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
@@ -112,12 +113,7 @@ import com.abn3li.telemusic.ui.library.LargeTitleList
 import com.abn3li.telemusic.ui.library.LibraryCallbacks
 import com.abn3li.telemusic.ui.library.LibraryDivider
 import com.abn3li.telemusic.ui.library.LibraryFieldColor
-import com.abn3li.telemusic.ui.library.LibraryFloatingMenu
-import com.abn3li.telemusic.ui.library.LibraryMenuDivider
-import com.abn3li.telemusic.ui.library.LibraryMenuItem
 import android.widget.Toast
-import androidx.compose.ui.platform.LocalHapticFeedback
-import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.material.icons.rounded.QueuePlayNext
 import com.abn3li.telemusic.ui.library.SwipeToPlayNext
 import com.abn3li.telemusic.ui.library.LibrarySearchField
@@ -268,7 +264,7 @@ private fun LazyListScope.browseContent(genres: List<BrowseCollection>, open: (B
             key = { index, pair -> "genre_row_${index}_${pair.joinToString("|") { it.title }}" }
         ) { _, pair ->
             Row(Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 5.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                pair.forEach { genre -> GenreTile(genre.title, GenreColors[genres.indexOf(genre) % GenreColors.size], Modifier.weight(1f)) { open(genre) } }
+                pair.forEach { genre -> GenreTile(genre, GenreColors[genres.indexOf(genre) % GenreColors.size], Modifier.weight(1f)) { open(genre) } }
                 if (pair.size == 1) Spacer(Modifier.weight(1f))
             }
         }
@@ -504,12 +500,10 @@ private fun <T> LazyListScope.libraryShelf(title: String, section: ResultSection
 private fun YoutubeSongRow(result: YtDlpSearchResult, state: YouTubeDownloadUiState, showDownload: Boolean,
     prefix: String, play: (YtDlpSearchResult) -> Unit, playNext: (YtDlpSearchResult) -> Unit, download: (YtDlpSearchResult) -> Unit) {
     val downloading = result.videoId in state.downloadingIds; val downloaded = result.videoId in state.downloadedIds
-    var menu by remember(result.videoId) { mutableStateOf(false) }
-    val haptics = LocalHapticFeedback.current
     // Tap plays, swipe right queues it next, hold opens the menu - like a library song row.
     SwipeToPlayNext({ playNext(result) }) { swipeModifier ->
-    Row(swipeModifier.fillMaxWidth().heightIn(min = 60.dp).combinedClickable(onClick = { play(result) }, onLongClick = {
-        haptics.performHapticFeedback(HapticFeedbackType.LongPress); menu = true }).padding(start = 18.dp, end = 8.dp, top = 5.dp, bottom = 5.dp), verticalAlignment = Alignment.CenterVertically) {
+    Row(swipeModifier.fillMaxWidth().heightIn(min = 60.dp).youtubeTrackActions(BrowseTrack(result.videoId, result.title,
+        result.artist, result.thumbnailUrl, result.durationSeconds), { play(result) }, { download(result) }).padding(start = 18.dp, end = 8.dp, top = 5.dp, bottom = 5.dp), verticalAlignment = Alignment.CenterVertically) {
         Thumbnail(result.thumbnailUrl, Modifier.size(50.dp), 5, 150)
         Column(Modifier.weight(1f).padding(start = 12.dp, end = 6.dp)) {
             Text(result.title, color = ink, fontSize = 16.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -520,16 +514,7 @@ private fun YoutubeSongRow(result: YtDlpSearchResult, state: YouTubeDownloadUiSt
                 downloaded -> Icon(Icons.Rounded.Check, "Downloaded", tint = AppAccent, modifier = Modifier.size(22.dp))
                 else -> Icon(Icons.Rounded.Download, "Download", tint = AppAccent, modifier = Modifier.size(23.dp).clickable { download(result) }) }
         }
-        // Anchors the hold menu at the row's end.
-        Box(Modifier.width(10.dp).height(44.dp), contentAlignment = Alignment.Center) {
-            LibraryFloatingMenu(menu, { menu = false }) {
-                LibraryMenuItem("Play", Icons.Rounded.PlayArrow) { menu = false; play(result) }; LibraryMenuDivider()
-                LibraryMenuItem("Play Next", Icons.Rounded.QueuePlayNext) { menu = false; playNext(result) }; LibraryMenuDivider()
-                LibraryMenuItem(if (downloaded) "Downloaded" else "Download", if (downloaded) Icons.Rounded.Check else Icons.Rounded.Download) {
-                    menu = false; if (!downloaded) download(result)
-                }
-            }
-        }
+
     }
     }
 }
@@ -545,12 +530,14 @@ private fun YoutubeSongRow(result: YtDlpSearchResult, state: YouTubeDownloadUiSt
         ownKind != null && ownKind.lowercase() in KIND_WORDS -> subtitle
         else -> "$label · $subtitle"
     }
-    CollectionRow(value.title, line, value.kind == BrowseKind.ARTIST, value.thumbnailUrl) { open(value) }
+    CollectionRow(value.title, line, value.kind == BrowseKind.ARTIST, value.thumbnailUrl,
+        remote = value) { open(value) }
 }
 
 @Composable
-private fun CollectionRow(title: String, subtitle: String, round: Boolean, art: String?, onClick: () -> Unit) {
-    Row(Modifier.fillMaxWidth().heightIn(min = 60.dp).clickable(onClick = onClick).padding(start = 18.dp, end = 16.dp, top = 5.dp, bottom = 5.dp), verticalAlignment = Alignment.CenterVertically) {
+private fun CollectionRow(title: String, subtitle: String, round: Boolean, art: String?, remote: BrowseCollection? = null, onClick: () -> Unit) {
+    val actions = if (remote != null) Modifier.youtubeCollectionActions(remote, onClick) else Modifier.clickable(onClick = onClick)
+    Row(Modifier.fillMaxWidth().heightIn(min = 60.dp).then(actions).padding(start = 18.dp, end = 16.dp, top = 5.dp, bottom = 5.dp), verticalAlignment = Alignment.CenterVertically) {
         if (round) ArtistAvatar(art, 50) else CoverTile(art, Modifier.size(50.dp), 5, Icons.AutoMirrored.Rounded.QueueMusic)
         Column(Modifier.weight(1f).padding(start = 12.dp, end = 8.dp)) {
             Text(title, color = ink, fontSize = 16.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -571,7 +558,8 @@ private fun MediaCard(title: String, subtitle: String, round: Boolean, art: Stri
 
 @Composable
 private fun ImportedCard(p: ImportedPlaylistEntity, open: () -> Unit, remove: () -> Unit) {
-    Column(Modifier.width(142.dp).clickable(onClick = open)) {
+    val collection = remember(p) { BrowseCollection(p.browseId, null, p.title, p.subtitle, p.thumbnailUrl, BrowseKind.PLAYLIST) }
+    Column(Modifier.width(142.dp).youtubeCollectionActions(collection, open)) {
         Box { Thumbnail(p.thumbnailUrl, Modifier.fillMaxWidth().aspectRatio(1f), 8, 300)
             Box(Modifier.align(Alignment.TopEnd).padding(6.dp).size(24.dp).clip(CircleShape).background(Color.Black.copy(.62f)).clickable(onClick = remove), contentAlignment = Alignment.Center) {
                 Icon(Icons.Rounded.Close, "Remove", tint = Color.White, modifier = Modifier.size(15.dp))
@@ -581,9 +569,9 @@ private fun ImportedCard(p: ImportedPlaylistEntity, open: () -> Unit, remove: ()
     }
 }
 
-@Composable private fun GenreTile(title: String, color: Color, modifier: Modifier, click: () -> Unit) =
-    Box(modifier.height(96.dp).clip(RoundedCornerShape(10.dp)).background(color).clickable(onClick = click).padding(12.dp), contentAlignment = Alignment.BottomStart) {
-        Text(title, color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.Bold, maxLines = 2, overflow = TextOverflow.Ellipsis)
+@Composable private fun GenreTile(collection: BrowseCollection, color: Color, modifier: Modifier, click: () -> Unit) =
+    Box(modifier.height(96.dp).clip(RoundedCornerShape(10.dp)).background(color).youtubeCollectionActions(collection, click).padding(12.dp), contentAlignment = Alignment.BottomStart) {
+        Text(collection.title, color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.Bold, maxLines = 2, overflow = TextOverflow.Ellipsis)
     }
 
 @Composable

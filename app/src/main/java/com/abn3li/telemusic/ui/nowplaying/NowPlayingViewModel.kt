@@ -198,9 +198,15 @@ class NowPlayingViewModel(
     }
 
     fun playNext(songId: Long) {
-        if (queue.playNext(songId)) {
-            loadCurrentQueuePosition(songIdOverride = songId)
+        playNext(listOf(songId))
+    }
+
+    fun playNext(songIds: List<Long>) {
+        if (songIds.isEmpty()) return
+        if (queue.playNext(songIds)) {
+            loadCurrentQueuePosition(songIdOverride = songIds.first())
         }
+        // Album/playlist menus should refresh the widget and resolve the queue only once.
         refreshQueue()
     }
 

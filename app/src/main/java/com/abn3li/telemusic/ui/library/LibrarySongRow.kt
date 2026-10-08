@@ -322,11 +322,25 @@ private val LARGE_TILE = 96.dp
 /** The long-press card: song header, then actions. Pops in at the pressed row. */
 @Composable
 private fun SongContextMenu(song: SongEntity, actions: LibrarySongActions, anchorTopPx: Float, onDismiss: () -> Unit) {
+    val context = LocalContext.current
+    var showArtworkDialog by remember { mutableStateOf(false) }
+    LibraryContextMenu(anchorTopPx, onDismiss) { maxHeight, onAction ->
+        SongContextCard(song, actions, maxHeight, onAction,
+            onFindArtwork = { showArtworkDialog = true },
+            onToast = { Toast.makeText(context, it, Toast.LENGTH_SHORT).show() })
+        if (showArtworkDialog) FindArtworkDialog(song,
+            onFind = { title, artist -> actions.onFindArtwork(song, title, artist) },
+            onDismiss = { showArtworkDialog = false; onAction {} })
+    }
+}
+
+/** Shared anchor and animation so remote items use the same card as library songs. */
+@Composable
+internal fun LibraryContextMenu(anchorTopPx: Float, onDismiss: () -> Unit,
+    content: @Composable (maxHeight: Dp, onAction: (() -> Unit) -> Unit) -> Unit) {
     var show by remember { mutableStateOf(false) }
     var closing by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
-    val context = LocalContext.current
-    var showArtworkDialog by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) { delay(16); show = true }
     fun close(after: () -> Unit = {}) {
@@ -362,25 +376,11 @@ private fun SongContextMenu(song: SongEntity, actions: LibrarySongActions, ancho
                     .padding(top = top)
                     .fillMaxWidth(0.72f)
             ) {
-                SongContextCard(
-                    song = song,
-                    actions = actions,
-                    maxHeight = (maxHeight - top - 16.dp).coerceAtLeast(120.dp),
-                    onAction = { action -> close(action) },
-                    onFindArtwork = { showArtworkDialog = true },
-                    onToast = { Toast.makeText(context, it, Toast.LENGTH_SHORT).show() }
-                )
+                content((maxHeight - top - 16.dp).coerceAtLeast(120.dp)) { action -> close(action) }
             }
         }
     }
 
-    if (showArtworkDialog) {
-        FindArtworkDialog(
-            song = song,
-            onFind = { title, artist -> actions.onFindArtwork(song, title, artist) },
-            onDismiss = { showArtworkDialog = false; close() }
-        )
-    }
 }
 
 @Composable
@@ -478,7 +478,7 @@ private fun SongContextCard(
 }
 
 @Composable
-private fun CardItem(
+internal fun CardItem(
     label: String,
     icon: ImageVector,
     destructive: Boolean = false,
@@ -518,12 +518,12 @@ private fun CardItem(
 }
 
 @Composable
-private fun CardDivider() {
+internal fun CardDivider() {
     Spacer(Modifier.fillMaxWidth().height(0.5.dp).background(ink.copy(alpha = 0.08f)))
 }
 
 @Composable
-private fun PlaylistPicker(playlists: List<PlaylistEntity>, onPick: (PlaylistEntity) -> Unit, onCreate: (String) -> Unit) {
+internal fun PlaylistPicker(playlists: List<PlaylistEntity>, onPick: (PlaylistEntity) -> Unit, onCreate: (String) -> Unit) {
     var creating by remember { mutableStateOf(false) }
     var name by remember { mutableStateOf("") }
     Column(Modifier.fillMaxWidth().background(ink.copy(alpha = 0.04f))) {

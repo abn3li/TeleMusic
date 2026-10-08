@@ -117,7 +117,7 @@ fun BrowseCollectionScreen(
     if (state.collections.isNotEmpty() && state.tracks.isEmpty()) {
         LargeTitleGrid(title = state.title, onBack = onBack) {
             items(state.collections, key = { it.browseId }) { collection ->
-                Column(Modifier.fillMaxWidth().clickable { onOpenCollection(collection) }) {
+                Column(Modifier.fillMaxWidth().youtubeCollectionActions(collection) { onOpenCollection(collection) }) {
                     Thumbnail(collection.thumbnailUrl, Modifier.fillMaxWidth().aspectRatio(1f), corner = 7, requestPx = 300)
                     Spacer(Modifier.height(5.dp))
                     Text(collection.title, color = ink.copy(alpha = 0.9f), fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -225,6 +225,7 @@ internal fun LazyListScope.trackRows(
 ) {
     itemsIndexed(tracks, key = { _, t -> t.videoId }, contentType = { _, _ -> "track" }) { index, track ->
         TrackResultRow(
+            track = track,
             title = track.title,
             artist = track.artist,
             thumbnailUrl = track.thumbnailUrl,
@@ -245,7 +246,7 @@ internal fun LazyListScope.trackRows(
 internal fun CollectionCard(item: BrowseCollection, onClick: () -> Unit) {
     val round = item.kind == BrowseKind.ARTIST
     Column(
-        Modifier.width(142.dp).clickable(onClick = onClick),
+        Modifier.width(142.dp).youtubeCollectionActions(item, onClick),
         horizontalAlignment = if (round) Alignment.CenterHorizontally else Alignment.Start
     ) {
         Box(Modifier.fillMaxWidth().aspectRatio(1f).then(if (round) Modifier.clip(CircleShape) else Modifier)) {

@@ -88,6 +88,18 @@ class PlaybackQueue {
         return false
     }
 
+    /** A collection is one queue change, with the same order as individually added songs. */
+    fun playNext(ids: List<Long>): Boolean {
+        if (ids.isEmpty()) return false
+        if (currentSongId() == null) {
+            setQueue(listOf(ids.first()), 0)
+            nextInQueue.addAll(ids.drop(1))
+            return true
+        }
+        nextInQueue.addAll(ids)
+        return false
+    }
+
     fun clearNextInQueue() = nextInQueue.clear()
 
     fun removeNextInQueue(offset: Int) {

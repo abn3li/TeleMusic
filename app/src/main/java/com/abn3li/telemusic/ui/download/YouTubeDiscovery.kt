@@ -90,6 +90,7 @@ internal fun Thumbnail(url: String?, modifier: Modifier, corner: Int, requestPx:
 /** A browse track: artwork, title, artist, Play and Download. */
 @Composable
 internal fun TrackResultRow(
+    track: com.abn3li.telemusic.data.browse.BrowseTrack,
     title: String,
     artist: String,
     thumbnailUrl: String?,
@@ -105,7 +106,7 @@ internal fun TrackResultRow(
         swipeModifier
             .fillMaxWidth()
             .heightIn(min = 64.dp)
-            .clickable(onClick = onPlayClick)
+            .youtubeTrackActions(track, onPlayClick, onDownloadClick)
             .padding(start = 22.dp, end = 10.dp, top = 6.dp, bottom = 6.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {

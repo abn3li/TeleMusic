@@ -1,5 +1,8 @@
 package com.abn3li.telemusic.ui.library
 
+import com.abn3li.telemusic.ui.download.youtubeTrackActions
+import com.abn3li.telemusic.ui.download.youtubeCollectionActions
+
 import coil.imageLoader
 import androidx.compose.foundation.gestures.stopScroll
 import kotlinx.coroutines.launch
@@ -313,6 +316,15 @@ private const val COMMUNITY_SHELF_SIZE = 5
 // How bright (average, 0-1) a dark cover's blurred card is lifted to - see BlurredArtwork.
 private const val CARD_MIN_BRIGHTNESS = 0.2f
 
+/** Cached YouTube songs keep their queue on tap and expose the same remote actions on hold. */
+@Composable
+private fun homeSongActions(song: SongEntity, onClick: () -> Unit): Modifier {
+    val videoId = song.youtubeVideoId?.takeIf { !song.isLocalImport }
+    return if (videoId != null) Modifier.youtubeTrackActions(
+        BrowseTrack(videoId, song.title, song.artist, song.displayArtwork, song.durationSeconds), onClick)
+    else Modifier.clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onClick)
+}
+
 @Composable
 private fun HomeSectionHeader(
     title: String,
@@ -382,6 +394,7 @@ private fun ShortcutButton(label: String, icon: ImageVector, modifier: Modifier,
  * Resume (or Pause, while it plays) button. The whole card is the button. */
 @Composable
 private fun ContinueListeningCard(song: SongEntity, playing: Boolean, onClick: () -> Unit) {
+    val actions = homeSongActions(song, onClick)
     Box(
         Modifier
             .padding(horizontal = 16.dp)
@@ -393,7 +406,7 @@ private fun ContinueListeningCard(song: SongEntity, playing: Boolean, onClick: (
             .clip(RoundedCornerShape(18.dp))
             // A faint edge, so the card's shape shows on a black OLED page whatever the cover.
             .border(1.dp, ink.copy(alpha = 0.1f), RoundedCornerShape(18.dp))
-            .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onClick)
+            .then(actions)
     ) {
         BlurredArtwork(song.displayArtwork, Modifier.matchParentSize(), minBrightness = CARD_MIN_BRIGHTNESS)
         // Just enough shade for the white text over a bright cover.
@@ -440,7 +453,7 @@ private fun SongShelf(songs: List<SongEntity>, callbacks: LibraryCallbacks) {
     }
     LazyRow(state = rowState, contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
         itemsIndexed(songs, key = { _, s -> s.telegramMessageId }) { index, song ->
-            Column(Modifier.width(128.dp).clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) { callbacks.onPlay(ids, index) }) {
+            Column(Modifier.width(128.dp).then(homeSongActions(song) { callbacks.onPlay(ids, index) })) {
                 SongArtwork(song, 128.dp, 6.dp)
                 Spacer(Modifier.height(5.dp))
                 Text(song.title, color = ink.copy(alpha = 0.9f), fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -600,7 +613,7 @@ private fun QuickPicks(tracks: List<BrowseTrack>, onPlay: (List<BrowseTrack>, In
                 .padding(horizontal = 12.dp, vertical = 4.dp).heightIn(min = 256.dp)) {
                 columns[column].forEachIndexed { rowIndex, (i, track) ->
                     Row(Modifier.fillMaxWidth().heightIn(min = 62.dp)
-                        .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) { play(tracks, i) },
+                        .youtubeTrackActions(track, onClick = { play(tracks, i) }),
                         verticalAlignment = Alignment.CenterVertically) {
                         coil.compose.AsyncImage(model = track.thumbnailUrl, contentDescription = null,
                             contentScale = androidx.compose.ui.layout.ContentScale.Crop,
@@ -732,7 +745,10 @@ private fun ListenAgainGrid(
     val coverWidth = 112.dp
     CoverRow(entries.size, rows = rows, coverWidth = coverWidth) { index ->
         val (url, title, onClick) = entries[index]
-        Column(Modifier.width(coverWidth).clickable(onClick = onClick)) {
+        val actions = if (index < shelf.tracks.size)
+            Modifier.youtubeTrackActions(shelf.tracks[index], onClick)
+        else Modifier.youtubeCollectionActions(shelf.collections[index - shelf.tracks.size], onClick)
+        Column(Modifier.width(coverWidth).then(actions)) {
             coil.compose.AsyncImage(model = url, contentDescription = null,
                 contentScale = androidx.compose.ui.layout.ContentScale.Crop,
                 modifier = Modifier.size(coverWidth).clip(RoundedCornerShape(12.dp)).background(LibraryFieldColor))
@@ -751,7 +767,7 @@ private fun YouTubeMixTile(item: BrowseCollection, color: Color, onClick: () -> 
             .size(156.dp, 196.dp)
             .clip(RoundedCornerShape(14.dp))
             .background(color)
-            .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onClick)
+            .youtubeCollectionActions(item, onClick)
     ) {
         coil.compose.AsyncImage(
             model = item.thumbnailUrl,
@@ -797,7 +813,10 @@ private fun HomeCoverShelf(
     val coverWidth = 140.dp
     CoverRow(entries.size, rows = 1, coverWidth = coverWidth) { index ->
         val entry = entries[index]
-        Column(Modifier.width(coverWidth).clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = entry.open)) {
+        val actions = if (index < shelf.tracks.size)
+            Modifier.youtubeTrackActions(shelf.tracks[index], entry.open)
+        else Modifier.youtubeCollectionActions(shelf.collections[index - shelf.tracks.size], entry.open)
+        Column(Modifier.width(coverWidth).then(actions)) {
             coil.compose.AsyncImage(model = entry.artwork, contentDescription = null,
                 contentScale = androidx.compose.ui.layout.ContentScale.Crop,
                 modifier = Modifier.size(coverWidth).clip(RoundedCornerShape(12.dp)).background(LibraryFieldColor))

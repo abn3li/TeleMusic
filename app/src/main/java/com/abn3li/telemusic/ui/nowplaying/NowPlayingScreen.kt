@@ -459,7 +459,7 @@ private fun NowPlayingContent(
         }
 
         if (showRelated && isExpanded && !state.song?.youtubeVideoId.isNullOrBlank()) {
-            RelatedSongsSheet(state, viewModel, onDismiss = { showRelated = false })
+            RelatedSongsSheet(state, viewModel, onOpenPage = onCollapse, onDismiss = { showRelated = false })
         }
         state.song?.takeIf { showQuality && isExpanded }?.let { song ->
             QualityUpgradeSheet(song, onDismiss = { showQuality = false; onInteraction() })

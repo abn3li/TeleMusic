@@ -234,6 +234,10 @@ fun TgMusicNavGraph(navController: NavHostController = rememberNavController()) 
     // The pages and the tab bar stay clear of the system bars; only the player (below) draws
     // behind them.
     val navBarInset = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+    com.abn3li.telemusic.ui.download.YouTubeContextProvider(
+        onOpen = { c -> navController.navigate(Routes.youtubeBrowse(c.browseId, c.title, c.params)) },
+        onPlay = playStreams, onPlayNext = { ids -> playerViewModel.playNext(ids) }
+    ) {
     Box(Modifier.fillMaxSize()) {
       // The status bar's gap is kept on the pages themselves (below), not here: the Scaffold clips
       // to its own bounds, and an artist / album / playlist page draws its artwork up behind
@@ -435,6 +439,7 @@ fun TgMusicNavGraph(navController: NavHostController = rememberNavController()) 
             onOpenAlbum = { album -> navController.navigate(Routes.album(album)) },
             modifier = Modifier.fillMaxSize()
         )
+    }
     }
 }
 

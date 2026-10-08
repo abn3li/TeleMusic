@@ -417,7 +417,7 @@ private fun LatestReleaseCard(item: BrowseCollection, onClick: () -> Unit) {
             .fillMaxWidth()
             .clip(RoundedCornerShape(20.dp))
             .background(LocalPalette.current.field)
-            .clickable(onClick = onClick)
+            .youtubeCollectionActions(item, onClick)
             .padding(12.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
