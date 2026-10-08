@@ -182,7 +182,7 @@ class BrowseCollectionViewModel(
                 val destDir = File(context.filesDir, "youtube_downloads")
                 val songId = ytDlpStableSongId(track.videoId)
                 val downloaded = ytDlpRepository.download(track.videoId, destDir, songId.toString(), DownloadQuality.BEST.formatSelector).getOrThrow()
-                musicRepository.importDownloadedSong(downloaded, songId, track.videoId)
+                musicRepository.importDownloadedSong(downloaded, songId, track.videoId, track)
                 _uiState.update { it.copy(downloadedIds = it.downloadedIds + track.videoId) }
                 musicRepository.backfillThumbnails()
             } catch (e: kotlinx.coroutines.CancellationException) {

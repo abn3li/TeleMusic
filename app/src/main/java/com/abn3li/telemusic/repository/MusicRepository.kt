@@ -77,14 +77,6 @@ private const val LYRICS_NOT_FOUND_RETRY_MS = 7L * 24 * 60 * 60 * 1000
 // Songs read per step when copying existing lyrics into the cache - see backfillLyricsCache.
 private const val LYRICS_BACKFILL_PAGE = 200
 
-// Mirrors ytdlp_bridge.py's _ARTIST_SPLIT regex exactly - same separators, same "first segment
-// wins" rule, so a collab credit collapses to the same primary artist regardless of which path
-// (a fresh download vs this cleanup pass) it went through.
-private val ARTIST_SPLIT = Regex("""\s*(?:,|&|/| feat\.?| ft\.?| x )\s*""", RegexOption.IGNORE_CASE)
-
-private fun primaryArtistOf(rawArtist: String): String =
-    ARTIST_SPLIT.split(rawArtist, limit = 2).firstOrNull()?.trim()?.takeIf { it.isNotEmpty() } ?: rawArtist
-
 class MusicRepository(
     private val songDao: SongDao,
     private val playlistDao: PlaylistDao,
@@ -254,7 +246,78 @@ class MusicRepository(
      * something to attach to. A no-op for songs already in the library. */
     private suspend fun saveIfStreamOnly(songId: Long) {
         if (songDao.getById(songId) != null) return
-        streamOnlySongs[songId]?.let { songDao.upsert(it) }
+        streamOnlySongs[songId]?.let { songDao.upsert(it.copy(artist = libraryArtist(it.artist))); assignAlbumLater(songId) }
+    }
+
+    // One song at a time: a playlist import saving 100 songs asks YouTube Music in turn, not at once.
+    private val albumLock = kotlinx.coroutines.sync.Mutex()
+    private val albumClient by lazy { com.abn3li.telemusic.data.browse.InnertubeBrowseClient() }
+
+    /** A YouTube song just saved to the library gets its album in the background (see [albumFor]). */
+    private fun assignAlbumLater(songId: Long) {
+        upgradeScope.launch {
+            runCatching { assignAlbum(songId) }
+                .onFailure { Log.w("MusicRepository", "album not found for $songId: ${it.message}") }
+        }
+    }
+
+    private suspend fun assignAlbum(songId: Long) = albumLock.withLock {
+        val song = songDao.getById(songId) ?: return@withLock
+        if (!song.album.isNullOrBlank() || song.isLocalImport || song.telegramFileId != 0) return@withLock
+        val videoId = song.youtubeVideoId ?: return@withLock
+        albumFor(videoId, song.title, song.artist)?.let { songDao.setAlbumIfMissing(songId, it) }
+    }
+
+    /**
+     * The album for a YouTube song: the one already in the library when it's there (in the
+     * library's own spelling, so the song joins it - see [LibraryAlbumMatcher]), else YouTube
+     * Music's own album name. A single's album on YouTube Music is the single itself, so for one
+     * the same lookup Telegram songs get their album from is asked too, which names the album.
+     */
+    private suspend fun albumFor(videoId: String, title: String, artist: String): String? {
+        val youTube = withContext(Dispatchers.IO) {
+            com.abn3li.telemusic.data.browse.BrowseParser.parseAlbumOfVideo(albumClient.next(videoId), videoId)
+        }
+        val isSingle = youTube == null || LibraryAlbumMatcher.albumKey(youTube) == LibraryAlbumMatcher.albumKey(title)
+        val lookup = if (isSingle) {
+            runCatching { metadataRepository.enrich("$title $artist".trim()) }.getOrNull()
+                ?.takeIf { LibraryAlbumMatcher.sameArtist(it.artist.orEmpty(), artist) }?.album
+        } else null
+        val candidates = listOfNotNull(youTube, lookup)
+        LibraryAlbumMatcher.match(candidates, artist, songDao.getLibraryAlbums())?.let { return it }
+        // Not in the library yet: a single goes under the album it's from ("30", not "Easy On Me"),
+        // so the album's other songs saved later join it. A real single keeps its own name.
+        val lookupIsAlbum = lookup != null && LibraryAlbumMatcher.albumKey(lookup) != LibraryAlbumMatcher.albumKey(title)
+        return if (isSingle && lookupIsAlbum) lookup else youTube ?: lookup
+    }
+
+    /** [artist] in the library's own spelling (see [LibraryAlbumMatcher.canonicalArtist]). */
+    private suspend fun libraryArtist(artist: String): String =
+        LibraryAlbumMatcher.canonicalArtist(artist, songDao.getDistinctArtists())
+
+    /** [album] (by [artist]) in the library's own spelling when it's there, else as it is. */
+    private suspend fun libraryAlbum(album: String?, artist: String): String? =
+        album?.takeIf { it.isNotBlank() }?.let { LibraryAlbumMatcher.match(listOf(it), artist, songDao.getLibraryAlbums()) ?: it }
+
+    /**
+     * The one-time catch-up for YouTube songs Liked, downloaded or added to a playlist before
+     * they got albums. Stops (to try again next launch) at the first network failure.
+     */
+    suspend fun assignMissingYouTubeAlbums() {
+        if (settingsStore.youTubeAlbumsAssigned) return
+        for (song in songDao.getYouTubeSongsWithoutAlbum()) {
+            try {
+                assignAlbum(song.telegramMessageId)
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: java.io.IOException) {
+                Log.w("MusicRepository", "album catch-up paused: ${e.javaClass.simpleName}")
+                return
+            } catch (e: Exception) {
+                Log.w("MusicRepository", "album not found for ${song.telegramMessageId}: ${e.message}")
+            }
+        }
+        settingsStore.youTubeAlbumsAssigned = true
     }
 
     /** Sets [songId]'s album only if it has none yet (Spotify imports - see SpotifyImporter). */
@@ -318,8 +381,8 @@ class MusicRepository(
                     telegramMessageId = songId,
                     telegramFileId = 0,
                     title = file.title,
-                    artist = file.artist,
-                    album = file.album,
+                    artist = libraryArtist(file.artist),
+                    album = libraryAlbum(file.album, file.artist),
                     durationSeconds = file.durationSeconds,
                     localFilePath = localPath,
                     isLocalImport = true,
@@ -359,10 +422,14 @@ class MusicRepository(
      * of this flow is the user asked for this exact file - see SongEntity.isExplicitDownload's
      * own doc. Left unenriched=false: title/artist already came from yt-dlp's own real metadata,
      * only artwork still needs the usual backfillThumbnails pass to turn albumArtUrl into a
-     * cached thumbnailPath. */
-    suspend fun importDownloadedSong(result: com.abn3li.telemusic.data.download.YtDlpDownloadResult, songId: Long, videoId: String? = null) {
+     * cached thumbnailPath. A new row takes [listed]'s title, artist and artwork - how the song
+     * was shown where it was downloaded (search, a page, a menu) - over the downloaded file's
+     * own, which is the video's (its title and wide thumbnail). */
+    suspend fun importDownloadedSong(result: com.abn3li.telemusic.data.download.YtDlpDownloadResult, songId: Long, videoId: String? = null,
+        listed: com.abn3li.telemusic.data.browse.BrowseTrack? = null) {
         val existing = songDao.getById(songId)
-        val artwork = com.abn3li.telemusic.data.browse.googleArtworkAtSize(result.thumbnailUrl, com.abn3li.telemusic.data.browse.SAVED_ARTWORK_SIZE)
+        val artwork = com.abn3li.telemusic.data.browse.googleArtworkAtSize(
+            listed?.thumbnailUrl?.takeIf { it.isNotBlank() } ?: result.thumbnailUrl, com.abn3li.telemusic.data.browse.SAVED_ARTWORK_SIZE)
         // A song already in the library (a streamable YouTube row) keeps everything it has -
         // title, lyrics, play history, album, Like, artwork; only its file and download state
         // change. Rebuilding the row from scratch wiped all of that.
@@ -376,8 +443,8 @@ class MusicRepository(
         ) ?: SongEntity(
             telegramMessageId = songId,
             telegramFileId = 0,
-            title = result.title,
-            artist = result.artist,
+            title = listed?.title?.takeIf { it.isNotBlank() } ?: result.title,
+            artist = libraryArtist(listed?.artist?.takeIf { it.isNotBlank() } ?: result.artist),
             durationSeconds = result.durationSeconds,
             albumArtUrl = artwork,
             localFilePath = result.filePath,
@@ -388,9 +455,10 @@ class MusicRepository(
             youtubeVideoId = videoId
         )
         songDao.upsert(song)
+        if (song.album.isNullOrBlank()) assignAlbumLater(songId)
         keepArtworkForOffline(song.albumArtUrl)
         val extension = File(result.filePath).extension.ifBlank { "m4a" }
-        val exportedUri = exportToDownloadFolderIfConfigured(File(result.filePath), sanitizedFileName(result.title, result.artist, extension))
+        val exportedUri = exportToDownloadFolderIfConfigured(File(result.filePath), sanitizedFileName(song.title, song.artist, extension))
         if (exportedUri != null) {
             // One copy only: the song now lives in (and plays from) the user's folder.
             songDao.getById(songId)?.let { songDao.update(it.copy(localFilePath = exportedUri.toString(), exportedFileUri = exportedUri.toString())) }
@@ -448,8 +516,10 @@ class MusicRepository(
      * YouTube video instead of a Telegram message. Idempotent: re-importing a playlist that
      * shares a track with one already in the library returns the existing row untouched instead
      * of overwriting it (which would have wiped a real download back down to a bare stream). */
-    suspend fun importPlaylistTrackAsStreamable(track: BrowseTrack, album: String? = null): SongEntity {
+    suspend fun importPlaylistTrackAsStreamable(track: BrowseTrack, importedAlbum: String? = null): SongEntity {
         val songId = ytDlpStableSongId(track.videoId)
+        // An imported album joins the library's album of the same name (its spelling) if there is one.
+        val album = libraryAlbum(importedAlbum, track.artist)
         songDao.getById(songId)?.let { existing ->
             if (!album.isNullOrBlank() && existing.album.isNullOrBlank()) {
                 songDao.setAlbumIfMissing(songId, album)
@@ -461,7 +531,7 @@ class MusicRepository(
             telegramMessageId = songId,
             telegramFileId = 0,
             title = track.title,
-            artist = track.artist,
+            artist = libraryArtist(track.artist),
             album = album?.takeIf { it.isNotBlank() },
             durationSeconds = track.durationSeconds,
             albumArtUrl = com.abn3li.telemusic.data.browse.googleArtworkAtSize(track.thumbnailUrl, com.abn3li.telemusic.data.browse.SAVED_ARTWORK_SIZE),
@@ -469,6 +539,7 @@ class MusicRepository(
             metadataEnriched = true
         )
         songDao.upsert(song)
+        if (song.album == null) assignAlbumLater(songId)
         return song
     }
 
@@ -556,10 +627,16 @@ class MusicRepository(
      * added). Idempotent and cheap when there's nothing to fix - only touches rows whose artist
      * string actually contains a separator. Run once at startup, same as backfillThumbnails(). */
     suspend fun normalizeArtistCredits() {
-        for (rawArtist in songDao.getDistinctArtists()) {
-            val primary = primaryArtistOf(rawArtist)
+        // A band's own "&" or "/" ("AC/DC") is kept - see LibraryAlbumMatcher.collapseCredit.
+        val artists = songDao.getDistinctArtists()
+        for (rawArtist in artists) {
+            if (rawArtist == "Unknown artist") continue
+            val primary = LibraryAlbumMatcher.collapseCredit(rawArtist, artists)
             if (primary != rawArtist) songDao.renameArtist(rawArtist, primary)
         }
+        // One artist written several ways ("ADELE" / "Adele", "Beyoncé" / "Beyonce") becomes one.
+        val counts = songDao.observeArtists().firstOrNull().orEmpty().map { it.artist to it.songCount }
+        for ((from, to) in LibraryAlbumMatcher.artistMerges(counts)) songDao.renameArtist(from, to)
     }
 
     // ---- Albums / Artists - grouped straight from real metadata ----
@@ -873,7 +950,8 @@ class MusicRepository(
             telegramMessageId = msg.messageId,
             telegramFileId = msg.fileId,
             title = title,
-            artist = artist,
+            // The library's spelling, so it joins that artist (and its YouTube songs).
+            artist = libraryArtist(artist),
             durationSeconds = msg.durationSeconds,
             resolvedChatId = chatId,
             sourceSizeBytes = msg.sizeBytes,
@@ -986,7 +1064,10 @@ class MusicRepository(
             // ever fetched on-demand, via fetchLyricsForSong() below, when the user taps the
             // Lyrics button for a specific song.
             val finalArtUrl = song.albumArtUrl ?: enriched?.artworkUrl
-            songDao.setSongInfo(song.telegramMessageId, finalTitle, finalArtist, song.album ?: enriched?.album, finalArtUrl)
+            // Library spellings, so the song joins the album / artist it belongs to (YouTube ones too).
+            val libraryArtistName = libraryArtist(finalArtist)
+            songDao.setSongInfo(song.telegramMessageId, finalTitle, libraryArtistName,
+                libraryAlbum(song.album ?: enriched?.album, libraryArtistName), finalArtUrl)
             if (finalArtUrl != null) ensureThumbnail(song.telegramMessageId, finalArtUrl)
         }
     }
@@ -1221,7 +1302,8 @@ class MusicRepository(
             val destDir = File(appContext.filesDir, "youtube_downloads")
             val outcome = ytDlpRepository.download(song.youtubeVideoId, destDir, song.telegramMessageId.toString(), DownloadQuality.BEST.formatSelector)
             val downloaded = outcome.getOrThrow()
-            importDownloadedSong(downloaded, song.telegramMessageId, song.youtubeVideoId)
+            importDownloadedSong(downloaded, song.telegramMessageId, song.youtubeVideoId,
+                com.abn3li.telemusic.data.browse.BrowseTrack(song.youtubeVideoId, song.title, song.artist, song.albumArtUrl, song.durationSeconds))
             return downloaded.filePath
         }
         val freshFileId = getFreshFileIdForSong(song)

@@ -34,6 +34,22 @@ object BrowseParser {
         return show
     }
 
+    /** The album [videoId] is on, from the song's own byline in YouTube Music's "up next"
+     * ("Adele • 25 • 2015"). Null when the byline links no album. */
+    fun parseAlbumOfVideo(response: JSONObject, videoId: String): String? {
+        val panel = collectRenderers(response, "playlistPanelVideoRenderer")
+            .firstOrNull { it.optString("videoId") == videoId } ?: return null
+        val links = panel.opt("longBylineText").obj()?.runsArr() ?: return null
+        for (i in 0 until links.length()) {
+            val run = links.optJSONObject(i) ?: continue
+            val pageType = run.opt("navigationEndpoint").obj()?.opt("browseEndpoint").obj()
+                ?.opt("browseEndpointContextSupportedConfigs").obj()
+                ?.opt("browseEndpointContextMusicConfig").obj()?.optString("pageType").orEmpty()
+            if ("ALBUM" in pageType) return run.optString("text").trim().takeIf { it.isNotBlank() }
+        }
+        return null
+    }
+
     fun relatedBrowseId(response: JSONObject): String? =
         collectRenderers(response, "browseEndpoint").firstOrNull { endpoint ->
             endpoint.optJSONObject("browseEndpointContextSupportedConfigs")

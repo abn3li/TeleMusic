@@ -154,6 +154,11 @@ class AppSettingsStore(context: Context) {
         get() = prefs.getBoolean(KEY_YT_ARTWORK_UPGRADED, false)
         set(value) = prefs.edit().putBoolean(KEY_YT_ARTWORK_UPGRADED, value).apply()
 
+    /** YouTube songs saved before albums were filled in got theirs (a one-time step). */
+    var youTubeAlbumsAssigned: Boolean
+        get() = prefs.getBoolean("youtube_albums_assigned", false)
+        set(value) = prefs.edit().putBoolean("youtube_albums_assigned", value).apply()
+
     /** Songs left behind by playlists deleted before deleting a playlist removed them were
      * cleared (a one-time step). */
     var deletedPlaylistSongsCleared: Boolean

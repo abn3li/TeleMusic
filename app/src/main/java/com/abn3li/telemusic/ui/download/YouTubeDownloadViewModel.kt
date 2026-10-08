@@ -157,7 +157,8 @@ class YouTubeDownloadViewModel(
                 val destDir = File(context.filesDir, "youtube_downloads")
                 val songId = ytDlpStableSongId(result.videoId)
                 val downloaded = ytDlpRepository.download(result.videoId, destDir, songId.toString(), DownloadQuality.BEST.formatSelector).getOrThrow()
-                musicRepository.importDownloadedSong(downloaded, songId, result.videoId)
+                musicRepository.importDownloadedSong(downloaded, songId, result.videoId,
+                    com.abn3li.telemusic.data.browse.BrowseTrack(result.videoId, result.title, result.artist, result.thumbnailUrl, result.durationSeconds))
                 _uiState.update { it.copy(downloadedIds = it.downloadedIds + result.videoId) }
                 // Turns the real YouTube thumbnail URL already on the row into a cached
                 // thumbnailPath - the row is stored pre-enriched (see importDownloadedSong's own

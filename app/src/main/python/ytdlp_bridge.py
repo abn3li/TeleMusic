@@ -12,7 +12,13 @@ from concurrent.futures import ThreadPoolExecutor
 from urllib.parse import quote
 import yt_dlp
 
-_ARTIST_SPLIT = re.compile(r"\s*(?:,|&|/| feat\.?| ft\.?| x )\s*", re.IGNORECASE)
+# What a download saves: YouTube's audio-only Opus stream (48 kHz), else another audio-only
+# stream - never a file with video in it (no "/best"), whatever the caller's selector allows.
+_DOWNLOAD_AUDIO = "bestaudio[acodec=opus]/bestaudio[vcodec=none]"
+
+# Separators that always mean a collab credit. "&" and "/" are left to the app, which splits on
+# them only for an artist already in the library ("AC/DC" and "Simon & Garfunkel" are bands).
+_ARTIST_SPLIT = re.compile(r"\s*(?:,| feat\.?| ft\.?| x )\s*", re.IGNORECASE)
 
 
 def _primary_artist(info):
@@ -183,12 +189,14 @@ def download(video_id, dest_dir, dest_filename_stem, format_selector="bestaudio/
     involved), so the file on disk is whatever container YouTube actually served (m4a/webm/opus),
     all of which Media3 plays natively. Returns the real metadata plus the file's actual path.
 
-    The link is found the way Play finds one (a tested, working link, audio-only first), and
-    the file is fetched here in ranges: yt-dlp's own downloader was answered "HTTP 403:
-    Forbidden" for links the player streams without trouble.
+    Always audio only (see _DOWNLOAD_AUDIO): a client that answers with only a video file is
+    skipped, and if none gives audio the download fails rather than saving a video. The file
+    is fetched here in ranges: yt-dlp's own downloader was answered "HTTP 403: Forbidden" for
+    links the player streams without trouble.
     """
     os.makedirs(dest_dir, exist_ok=True)
     t0 = time.monotonic()
+    format_selector = _DOWNLOAD_AUDIO
     info, mode = _resolve_info(video_id, format_selector, audio_first=True)
     ext = info.get("ext") or "m4a"
     filepath = os.path.join(dest_dir, f"{dest_filename_stem}.{ext}")
@@ -309,8 +317,8 @@ def _fetch_to_file(info, filepath, chunk=4 * 1024 * 1024, refresh=None):
 def _resolve_info(video_id, format_selector, audio_first=False):
     """[video_id]'s stream for [format_selector], from the first client that gives a link that
     works, and which client it was. Play tries the light android client first (fastest to
-    start); Download ([audio_first]) tries yt-dlp's default clients first, which give a real
-    audio-only stream rather than a video file."""
+    start) and accepts a video file (it plays as audio). Download ([audio_first]) tries
+    yt-dlp's default clients first and accepts only an audio-only stream."""
     opts = {
         "quiet": True,
         "no_warnings": True,
@@ -338,11 +346,17 @@ def _resolve_info(video_id, format_selector, audio_first=False):
             with yt_dlp.YoutubeDL(attempt) as ydl:
                 info = ydl.extract_info(url, download=False)
             if info and info.get("url"):
+                audio_only = info.get("vcodec") in (None, "none")
+                if audio_only:
+                    return info, mode
+                if audio_first:
+                    last_error = ValueError("only a video file offered")
                 # A video file's link from those clients is sometimes throttled to a few KB/s (the
                 # player then sat buffering at 0:00): its speed is tried once, briefly, first.
-                if info.get("vcodec") in (None, "none") or _link_is_fast(info):
+                elif _link_is_fast(info):
                     return info, mode
-                last_error = ValueError("video link too slow")
+                else:
+                    last_error = ValueError("video link too slow")
             else:
                 last_error = ValueError("no stream url")
         except Exception as e:

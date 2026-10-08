@@ -61,6 +61,14 @@ interface SongDao {
     @Query("UPDATE songs SET albumArtUrl = :path WHERE telegramMessageId = :id")
     suspend fun setAlbumArtUrl(id: Long, path: String)
 
+    /** Every album in the library with an artist who has songs in it. */
+    @Query("SELECT DISTINCT album, artist FROM songs WHERE album IS NOT NULL AND album != ''")
+    suspend fun getLibraryAlbums(): List<com.abn3li.telemusic.repository.LibraryAlbumMatcher.LibraryAlbum>
+
+    /** YouTube songs in the library with no album yet. */
+    @Query("SELECT * FROM songs WHERE youtubeVideoId IS NOT NULL AND isLocalImport = 0 AND telegramFileId = 0 AND (album IS NULL OR album = '')")
+    suspend fun getYouTubeSongsWithoutAlbum(): List<SongEntity>
+
     // Fills in an album only where none is known yet, so a tag or a rename is never overwritten.
     @Query("UPDATE songs SET album = :album WHERE telegramMessageId = :id AND (album IS NULL OR album = '')")
     suspend fun setAlbumIfMissing(id: Long, album: String)
