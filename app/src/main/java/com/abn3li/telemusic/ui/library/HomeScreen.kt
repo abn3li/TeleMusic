@@ -323,7 +323,9 @@ private fun HomeSectionHeader(
     seeAllLabel: String = "See All"
 ) {
     Row(
-        Modifier.fillMaxWidth().padding(start = 18.dp, end = 18.dp, top = 24.dp, bottom = 10.dp),
+        Modifier.fillMaxWidth().padding(start = 18.dp, end = 18.dp,
+            top = if (action != null) 24.dp else 32.dp,
+            bottom = if (action != null) 10.dp else 14.dp),
         verticalAlignment = Alignment.Bottom
     ) {
         Column(Modifier.weight(1f)) {
@@ -701,9 +703,9 @@ private fun CoverRow(count: Int, rows: Int, coverWidth: Dp, content: @Composable
     val shelfRow = LocalShelfRow.current!!
     val columns = (count + rows - 1) / rows
     LazyRow(state = shelfRow.state, modifier = Modifier.shelfDrag(shelfRow.state, shelfRow.fling, COVER_MAX_FLING), flingBehavior = shelfRow.fling, userScrollEnabled = false,
-        contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
         items(columns, key = { "col_$it" }, contentType = { "cover_column_$rows" }) { column ->
-            Column(Modifier.width(coverWidth), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Column(Modifier.width(coverWidth), verticalArrangement = Arrangement.spacedBy(16.dp)) {
                 repeat(rows) { r ->
                     val index = column * rows + r
                     if (index < count) content(index)
@@ -799,7 +801,7 @@ private fun HomeCoverShelf(
             coil.compose.AsyncImage(model = entry.artwork, contentDescription = null,
                 contentScale = androidx.compose.ui.layout.ContentScale.Crop,
                 modifier = Modifier.size(coverWidth).clip(RoundedCornerShape(12.dp)).background(LibraryFieldColor))
-            Spacer(Modifier.height(5.dp))
+            Spacer(Modifier.height(8.dp))
             Text(entry.title, color = ink.copy(alpha = 0.9f), fontSize = 13.sp, lineHeight = 17.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
             Text(entry.subtitle.orEmpty(), color = ink.copy(alpha = 0.55f), fontSize = 12.sp, lineHeight = 16.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
