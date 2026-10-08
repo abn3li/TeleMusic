@@ -113,6 +113,7 @@ class TgMusicApp : Application(), ImageLoaderFactory {
         appScope.launch { musicRepository.migrateDownloadsToSingleCopy() }
         appScope.launch { musicRepository.enforceCacheLimit() }
         appScope.launch { musicRepository.upgradeYouTubeArtwork() }
+        appScope.launch { musicRepository.clearDeletedPlaylistSongs() }
         appScope.launch { musicRepository.backfillLyricsCache() }
         // The Search tab's categories: ready from the saved copy before Search is opened, then
         // refreshed once in the background (nothing waits on it).

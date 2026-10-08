@@ -154,6 +154,12 @@ class AppSettingsStore(context: Context) {
         get() = prefs.getBoolean(KEY_YT_ARTWORK_UPGRADED, false)
         set(value) = prefs.edit().putBoolean(KEY_YT_ARTWORK_UPGRADED, value).apply()
 
+    /** Songs left behind by playlists deleted before deleting a playlist removed them were
+     * cleared (a one-time step). */
+    var deletedPlaylistSongsCleared: Boolean
+        get() = prefs.getBoolean("deleted_playlist_songs_cleared", false)
+        set(value) = prefs.edit().putBoolean("deleted_playlist_songs_cleared", value).apply()
+
     /** Versions before the hello screens showed Android's permission pop-ups on first launch
      * and set this - it's now only read to tell those existing users apart (see onboardingDone). */
     var permissionsRequested: Boolean

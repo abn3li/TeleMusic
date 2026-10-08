@@ -75,6 +75,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.foundation.border
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.TransformOrigin
@@ -354,11 +356,15 @@ internal fun LibraryContextMenu(anchorTopPx: Float, onDismiss: () -> Unit,
         }
     }
 
+    // The dim behind the card fades with it (it used to appear and vanish in one frame).
+    val scrim = animateFloatAsState(if (show) 0.18f else 0f,
+        androidx.compose.animation.core.tween(180), label = "menuScrim")
+    val scrimColor = paper
     Popup(popupPositionProvider = WindowOriginPosition, onDismissRequest = { close() }, properties = PopupProperties(focusable = true)) {
         BoxWithConstraints(
             Modifier
                 .fillMaxSize()
-                .background(paper.copy(alpha = 0.18f))
+                .drawBehind { drawRect(scrimColor.copy(alpha = scrim.value)) }
                 .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) { close() }
         ) {
             val density = LocalDensity.current
@@ -368,8 +374,10 @@ internal fun LibraryContextMenu(anchorTopPx: Float, onDismiss: () -> Unit,
             val spec = spring<Float>(dampingRatio = 0.72f, stiffness = 360f)
             AnimatedVisibility(
                 visible = show,
-                enter = fadeIn(spec) + scaleIn(spec, initialScale = 0.82f, transformOrigin = TransformOrigin(0.5f, 0f)),
-                exit = fadeOut(spring(dampingRatio = 0.86f, stiffness = 520f)) +
+                // Opacity eases (a bouncy spring overshoots and dips - a flicker); only the scale bounces.
+                enter = fadeIn(androidx.compose.animation.core.tween(140)) +
+                    scaleIn(spec, initialScale = 0.82f, transformOrigin = TransformOrigin(0.5f, 0f)),
+                exit = fadeOut(androidx.compose.animation.core.tween(160)) +
                     scaleOut(spring(dampingRatio = 0.86f, stiffness = 520f), targetScale = 0.88f, transformOrigin = TransformOrigin(0.5f, 0f)),
                 modifier = Modifier
                     .align(Alignment.TopCenter)
@@ -402,8 +410,11 @@ private fun SongContextCard(
         Modifier
             .fillMaxWidth()
             .heightIn(max = maxHeight)
-            .graphicsLayer { this.shape = shape; shadowElevation = 28f; clip = true }
+            // A hairline edge instead of an elevation shadow, which redrew every frame of the
+            // open animation and flashed.
+            .graphicsLayer { this.shape = shape; clip = true }
             .background(LibraryCardColor)
+            .border(0.5.dp, ink.copy(alpha = 0.12f), shape)
             .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = {})
     ) {
         Row(Modifier.fillMaxWidth().height(64.dp).padding(10.dp), verticalAlignment = Alignment.CenterVertically) {

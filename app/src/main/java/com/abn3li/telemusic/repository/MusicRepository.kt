@@ -567,6 +567,15 @@ class MusicRepository(
     fun observeSongsByAlbum(album: String, sortField: SortField, ascending: Boolean) =
         songDao.observeSongsByAlbum(album).map { it.sortedByField(sortField, ascending) }
 
+    /** Deletes [album]: its songs (YouTube and Telegram) leave the library, except Liked or
+     * downloaded ones, ones in a playlist, and files imported from the phone. */
+    suspend fun deleteAlbum(album: String) {
+        removeSongsOnlyFromPlaylists(
+            songDao.observeSongsByAlbum(album).firstOrNull().orEmpty().map { it.telegramMessageId },
+            includeTelegram = true
+        )
+    }
+
     fun observeArtists(): Flow<List<ArtistSummary>> = songDao.observeArtists()
     fun observeSongsByArtist(artist: String, sortField: SortField, ascending: Boolean) =
         songDao.observeSongsByArtist(artist).map { it.sortedByField(sortField, ascending) }
@@ -592,7 +601,38 @@ class MusicRepository(
     fun observePlaylistById(playlistId: Long): Flow<PlaylistEntity?> = playlistDao.observeById(playlistId)
     fun observeSongsInPlaylist(playlistId: Long): Flow<List<SongEntity>> = playlistDao.observeSongsInPlaylist(playlistId)
     suspend fun createPlaylist(name: String): Long = playlistDao.insert(PlaylistEntity(name = name))
-    suspend fun deletePlaylist(playlistId: Long) = playlistDao.delete(playlistId)
+    /** Deletes the playlist. With [removeSongs], also the YouTube songs that were in the library
+     * only because of it: a streamed song stays if it's Liked, downloaded or in another
+     * playlist. Telegram songs and local imports always stay. A removed song still playing in
+     * the queue keeps playing as a stream-only song. */
+    suspend fun deletePlaylist(playlistId: Long, removeSongs: Boolean) {
+        val songIds = playlistDao.songIdsInPlaylist(playlistId)
+        playlistDao.removeEntriesForPlaylist(playlistId)
+        playlistDao.delete(playlistId)
+        if (removeSongs) removeSongsOnlyFromPlaylists(songIds)
+    }
+
+    /** The one-time catch-up for playlists deleted before [deletePlaylist] removed their songs. */
+    suspend fun clearDeletedPlaylistSongs() {
+        if (settingsStore.deletedPlaylistSongsCleared) return
+        val songIds = playlistDao.songIdsInDeletedPlaylists()
+        playlistDao.removeEntriesForDeletedPlaylists()
+        removeSongsOnlyFromPlaylists(songIds)
+        settingsStore.deletedPlaylistSongsCleared = true
+    }
+
+    private suspend fun removeSongsOnlyFromPlaylists(songIds: List<Long>, includeTelegram: Boolean = false) {
+        for (id in songIds) {
+            val song = songDao.getById(id) ?: continue
+            if (song.isLocalImport) continue
+            if (!includeTelegram && (song.youtubeVideoId == null || song.telegramFileId != 0)) continue
+            if (song.isFavorite || song.isExplicitDownload) continue
+            if (playlistDao.getEntriesForSong(id).isNotEmpty()) continue
+            if (song.youtubeVideoId != null) streamOnlySongs[id] = song.copy(localFilePath = null)
+            clearSong(song)
+        }
+    }
+
     suspend fun addSongToPlaylist(playlistId: Long, song: SongEntity) {
         saveIfStreamOnly(song.telegramMessageId)
         playlistDao.addSong(PlaylistSongCrossRef(playlistId, song.telegramMessageId))

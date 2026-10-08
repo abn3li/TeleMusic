@@ -5,6 +5,7 @@ import android.widget.Toast
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -175,8 +176,9 @@ private fun YouTubeOptions(request: YouTubeMenuRequest, onDismiss: () -> Unit,
     }
     LibraryContextMenu(request.anchor, onDismiss) { maxHeight, onAction ->
         Column(Modifier.fillMaxWidth().heightIn(max = maxHeight)
-            .graphicsLayer { shape = RoundedCornerShape(18.dp); shadowElevation = 28f; clip = true }
+            .graphicsLayer { shape = RoundedCornerShape(18.dp); clip = true }
             .background(LibraryCardColor)
+            .border(0.5.dp, ink.copy(alpha = 0.12f), RoundedCornerShape(18.dp))
             .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = {})) {
             Row(Modifier.fillMaxWidth().height(64.dp).padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
                 Thumbnail(artwork, Modifier.size(44.dp), 6, 150)

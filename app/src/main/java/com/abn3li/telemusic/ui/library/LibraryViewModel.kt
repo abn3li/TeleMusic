@@ -171,9 +171,9 @@ class LibraryViewModel(private val repository: MusicRepository) : ViewModel() {
         val id = repository.createPlaylist(name); repository.addSongToPlaylist(id, song)
     }
     fun createPlaylist(name: String) = viewModelScope.launch { repository.createPlaylist(name) }
-    fun deletePlaylist(playlistId: Long) = viewModelScope.launch {
+    fun deletePlaylist(playlistId: Long, removeSongs: Boolean) = viewModelScope.launch {
         if (playlistPinKey(playlistId) in _pinnedKeys.value) togglePin(playlistPinKey(playlistId))
-        repository.deletePlaylist(playlistId)
+        repository.deletePlaylist(playlistId, removeSongs)
     }
 
     /** The real, explicit download button - only this sets isExplicitDownload = true. */
@@ -223,6 +223,8 @@ class LibraryViewModel(private val repository: MusicRepository) : ViewModel() {
 
     /** The row menu's "Delete song" item - only ever shown for a song that's actually downloaded. */
     fun removeDownload(song: SongEntity) = viewModelScope.launch { repository.removeDownload(song) }
+
+    fun deleteAlbum(album: String) = viewModelScope.launch { repository.deleteAlbum(album) }
 
     /** The row menu's "Clear song" item - removes the song from the library entirely. */
     fun clearSong(song: SongEntity) = viewModelScope.launch { repository.clearSong(song) }

@@ -150,6 +150,7 @@ fun AlbumDetailScreen(album: String, viewModel: LibraryViewModel, callbacks: Lib
     val actions = rememberLibrarySongActions(viewModel, callbacks.onPlayNext, callbacks.onOpenArtist, callbacks.onOpenAlbum)
     val albumArtist = list.firstOrNull()?.artist
     val allFavorite = list.isNotEmpty() && list.all { it.isFavorite }
+    var confirmDelete by remember { mutableStateOf(false) }
 
     CollectionDetailPage(
         title = album,
@@ -174,6 +175,8 @@ fun AlbumDetailScreen(album: String, viewModel: LibraryViewModel, callbacks: Lib
             LibraryMenuItem("Ascending", Icons.Rounded.ArrowUpward, selected = ascending) { ascending = true; close() }
             LibraryMenuDivider()
             LibraryMenuItem("Descending", Icons.Rounded.ArrowDownward, selected = !ascending) { ascending = false; close() }
+            LibraryMenuGroupGap()
+            LibraryMenuItem("Delete Album", Icons.Rounded.Delete, destructive = true) { confirmDelete = true; close() }
         }
     ) { shown, _ ->
         val ids = shown.map { it.telegramMessageId }
@@ -188,6 +191,22 @@ fun AlbumDetailScreen(album: String, viewModel: LibraryViewModel, callbacks: Lib
             )
             if (index < shown.lastIndex) LibraryDivider(start = 54.dp, end = 18.dp)
         }
+    }
+
+    if (confirmDelete) {
+        AppAlert(
+            title = "Delete \"$album\"?",
+            message = "This album and its songs will be deleted from your library. Your liked and downloaded songs stay.",
+            onDismiss = { confirmDelete = false },
+            actions = listOf(
+                AlertAction("Cancel", bold = true) { confirmDelete = false },
+                AlertAction("Delete", destructive = true) {
+                    confirmDelete = false
+                    viewModel.deleteAlbum(album)
+                    callbacks.onBack()
+                }
+            )
+        )
     }
 }
 
@@ -325,15 +344,20 @@ fun PlaylistDetailScreen(playlistId: Long, playlistName: String, viewModel: Libr
     if (confirmDelete) {
         AppAlert(
             title = "Delete \"$playlistName\"?",
-            message = "The songs stay in your library.",
+            message = "\"Playlist only\" keeps all the songs in your library. \"Playlist and songs\" deletes them too, but your liked and downloaded songs stay.",
             onDismiss = { confirmDelete = false },
             actions = listOf(
-                AlertAction("Cancel", bold = true) { confirmDelete = false },
-                AlertAction("Delete", destructive = true) {
+                AlertAction("Delete Playlist Only", destructive = true) {
                     confirmDelete = false
-                    viewModel.deletePlaylist(playlistId)
+                    viewModel.deletePlaylist(playlistId, removeSongs = false)
                     callbacks.onBack()
-                }
+                },
+                AlertAction("Delete Playlist and Songs", destructive = true) {
+                    confirmDelete = false
+                    viewModel.deletePlaylist(playlistId, removeSongs = true)
+                    callbacks.onBack()
+                },
+                AlertAction("Cancel", bold = true) { confirmDelete = false }
             )
         )
     }

@@ -54,6 +54,16 @@ interface PlaylistDao {
     @Query("DELETE FROM playlist_song_cross_ref WHERE songId = :songId")
     suspend fun removeEntriesForSong(songId: Long)
 
+    /** Songs whose playlist entry points at a playlist that no longer exists. */
+    @Query("SELECT DISTINCT songId FROM playlist_song_cross_ref WHERE playlistId NOT IN (SELECT id FROM playlists)")
+    suspend fun songIdsInDeletedPlaylists(): List<Long>
+
+    @Query("DELETE FROM playlist_song_cross_ref WHERE playlistId NOT IN (SELECT id FROM playlists)")
+    suspend fun removeEntriesForDeletedPlaylists()
+
+    @Query("DELETE FROM playlist_song_cross_ref WHERE playlistId = :playlistId")
+    suspend fun removeEntriesForPlaylist(playlistId: Long)
+
     @Query(
         """
         SELECT songs.* FROM songs
