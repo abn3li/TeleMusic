@@ -422,7 +422,16 @@ fun TgMusicNavGraph(navController: NavHostController = rememberNavController()) 
         PlayerSheetOverlay(
             viewModel = playerViewModel,
             bottomOffset = miniPlayerBottomMargin + navBarInset,
-            onOpenArtist = { artist -> navController.navigate(Routes.artist(artist)) },
+            // A YouTube song opens its artist's YouTube Music page (found from the song itself);
+            // a Telegram or imported song the library's artist page, where those songs are.
+            onOpenArtist = { artist ->
+                val song = playerState.song
+                val videoId = song?.youtubeVideoId?.takeIf { !song.isLocalImport }
+                if (videoId != null) {
+                    navController.navigate(Routes.youtubeBrowse(
+                        com.abn3li.telemusic.repository.DiscoveryRepository.ARTIST_OF_PREFIX + videoId, artist, artist))
+                } else navController.navigate(Routes.artist(artist))
+            },
             onOpenAlbum = { album -> navController.navigate(Routes.album(album)) },
             modifier = Modifier.fillMaxSize()
         )

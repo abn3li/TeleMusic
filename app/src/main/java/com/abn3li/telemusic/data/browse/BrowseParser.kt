@@ -11,6 +11,29 @@ import org.json.JSONObject
  */
 object BrowseParser {
 
+    /**
+     * The page of who made [videoId], from YouTube Music's own "up next" for it: the artist
+     * linked in the song's byline, or a podcast episode's show. Null when the byline links
+     * neither (a listener's own upload, say).
+     */
+    fun parseArtistOfVideo(response: JSONObject, videoId: String): BrowseCollection? {
+        val panel = collectRenderers(response, "playlistPanelVideoRenderer")
+            .firstOrNull { it.optString("videoId") == videoId } ?: return null
+        val links = panel.opt("longBylineText").obj()?.runsArr() ?: return null
+        var show: BrowseCollection? = null
+        for (i in 0 until links.length()) {
+            val run = links.optJSONObject(i) ?: continue
+            val endpoint = run.opt("navigationEndpoint").obj()?.opt("browseEndpoint").obj() ?: continue
+            val browseId = endpoint.optString("browseId").takeIf { it.isNotBlank() } ?: continue
+            val pageType = endpoint.opt("browseEndpointContextSupportedConfigs").obj()
+                ?.opt("browseEndpointContextMusicConfig").obj()?.optString("pageType").orEmpty()
+            val name = run.optString("text").trim()
+            if ("ARTIST" in pageType) return BrowseCollection(browseId, null, name, null, null, BrowseKind.ARTIST)
+            if ("PODCAST_SHOW" in pageType && show == null) show = BrowseCollection(browseId, null, name, null, null, BrowseKind.PLAYLIST)
+        }
+        return show
+    }
+
     fun relatedBrowseId(response: JSONObject): String? =
         collectRenderers(response, "browseEndpoint").firstOrNull { endpoint ->
             endpoint.optJSONObject("browseEndpointContextSupportedConfigs")

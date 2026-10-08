@@ -74,7 +74,9 @@ data class ArtistPage(
     val topSongs: List<BrowseTrack>,
     val allSongsBrowseId: String?,
     val allSongsParams: String?,
-    val shelves: List<HomeSection>
+    val shelves: List<HomeSection>,
+    // The artist's own page id, when it was opened some other way (from a playing song).
+    val channelId: String? = null
 )
 
 /** A YouTube search tab and YouTube Music's own filter for it ([params]). Songs only ever

@@ -247,10 +247,40 @@ class DiscoveryRepository(
             .also { android.util.Log.d("DiscoveryRepo", "search(\"$query\", $filter): ${it.size} results") }
     }
 
+    private val artistOfVideoCache = java.util.concurrent.ConcurrentHashMap<String, BrowseCollection>()
+
+    /**
+     * Who made [videoId], as a page to open: the artist in the song's own byline on YouTube Music
+     * (or a podcast episode's show). Failing that, the closest artist found by [name]. Remembered
+     * per song for the run.
+     */
+    suspend fun artistOfVideo(videoId: String, name: String): BrowseCollection? = withContext(Dispatchers.IO) {
+        artistOfVideoCache[videoId]?.let { return@withContext it }
+        val found = runCatching { BrowseParser.parseArtistOfVideo(client.next(videoId), videoId) }
+            .onFailure { e -> android.util.Log.w("DiscoveryRepo", "artist of $videoId not read: ${e.message}") }
+            .getOrNull()
+            ?: name.takeIf { it.isNotBlank() }?.let { query ->
+                runCatching {
+                    val artists = BrowseParser.parseSearchCollections(client.search(query, SearchFilter.ARTISTS))
+                        .filter { it.kind == BrowseKind.ARTIST }
+                    val first = query.split(",", "&", " x ", " feat", " ft.").first().trim()
+                    artists.firstOrNull { it.title.equals(first, ignoreCase = true) } ?: artists.firstOrNull()
+                }.getOrNull()
+            }
+        found?.also { artistOfVideoCache[videoId] = it }
+    }
+
     suspend fun browse(browseId: String, params: String?): BrowseContent = withContext(Dispatchers.IO) {
         // Home's "See All" for community playlists: the list already fetched, shown as a grid.
         if (browseId == COMMUNITY_BROWSE_ID) {
             return@withContext BrowseContent(collections = communityPlaylists()?.items.orEmpty())
+        }
+        // Now Playing's artist name: the page of who made the playing song, found first.
+        if (browseId.startsWith(ARTIST_OF_PREFIX)) {
+            val target = artistOfVideo(browseId.removePrefix(ARTIST_OF_PREFIX), params.orEmpty())
+                ?: return@withContext BrowseContent()
+            val content = browse(target.browseId, target.params)
+            return@withContext content.copy(artist = content.artist?.copy(channelId = target.browseId))
         }
         // A signed-in Home shelf that has no page of its own: everything the shelf holds.
         if (browseId.startsWith(SHELF_BROWSE_PREFIX)) {
@@ -326,6 +356,9 @@ class DiscoveryRepository(
         const val COMMUNITY_TITLE = "Community Playlists"
         /** Not a YouTube id: opens the community playlists already loaded for Home (see [browse]). */
         const val COMMUNITY_BROWSE_ID = "telemusic_community_playlists"
+        /** Not a YouTube id: "the artist of video <id>" (Now Playing's artist name), resolved
+         * by [artistOfVideo] when the page loads; its params are the artist's name. */
+        const val ARTIST_OF_PREFIX = "telemusic_artist_of:"
         /** Not a YouTube id either: "Show all" of a signed-in Home shelf with no page of its own. */
         const val SHELF_BROWSE_PREFIX = "telemusic_shelf:"
         private const val COMMUNITY_FEED_PAGES = 4

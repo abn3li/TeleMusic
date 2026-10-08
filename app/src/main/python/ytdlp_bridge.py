@@ -178,38 +178,64 @@ def fetch_playlist_metadata(url):
 
 
 def download(video_id, dest_dir, dest_filename_stem, format_selector="bestaudio/best"):
-    """Downloads [video_id]'s audio-only stream matching [format_selector] (yt-dlp's own
-    selector syntax - see DownloadQuality.kt for the presets this app actually offers) into
+    """Downloads [video_id]'s stream matching [format_selector] (see DownloadQuality.kt) into
     [dest_dir] as [dest_filename_stem].<real extension> - no transcoding/merging (no ffmpeg
     involved), so the file on disk is whatever container YouTube actually served (m4a/webm/opus),
     all of which Media3 plays natively. Returns the real metadata plus the file's actual path.
+
+    The link is found the way Play finds one (a tested, working link, audio-only first), and
+    the file is fetched here in ranges: yt-dlp's own downloader was answered "HTTP 403:
+    Forbidden" for links the player streams without trouble.
     """
     os.makedirs(dest_dir, exist_ok=True)
-    out_template = os.path.join(dest_dir, dest_filename_stem + ".%(ext)s")
-    opts = {
-        "quiet": True,
-        "no_warnings": True,
-        "format": format_selector,
-        "outtmpl": out_template,
-        "noplaylist": True,
-        "noprogress": True,
-    }
-    with yt_dlp.YoutubeDL(opts) as ydl:
-        info = ydl.extract_info(f"https://music.youtube.com/watch?v={video_id}", download=True)
-    filepath = ydl.prepare_filename(info)
+    t0 = time.monotonic()
+    info, mode = _resolve_info(video_id, format_selector, audio_first=True)
+    ext = info.get("ext") or "m4a"
+    filepath = os.path.join(dest_dir, f"{dest_filename_stem}.{ext}")
+    _fetch_to_file(info, filepath)
+    print(f"[timing] download({video_id}) [{mode}]: {time.monotonic() - t0:.2f}s")
     filepath = _fix_audio_only_extension(filepath)
     entry = _entry_from_info(info)
     entry["path"] = filepath
     return entry
 
 
-def resolve_stream_url(video_id, format_selector="bestaudio/best"):
-    """Resolves [video_id]'s direct, playable audio stream URL for [format_selector] WITHOUT
-    downloading anything to disk - backs the "Play" button (stream it, keep nothing) as opposed
-    to [download] above (saved permanently to [dest_dir]). Uses android/ios player clients
-    to obtain unthrottled streaming URLs (10+ MB/s) instead of web/tv clients which suffer from
-    YouTube CDN n-parameter throttling (30 KB/s).
-    """
+def _fetch_to_file(info, filepath, chunk=4 * 1024 * 1024):
+    """Saves [info]'s stream to [filepath] a few MB at a time (YouTube slows a single long
+    request down), into a temporary file first so a failed download leaves nothing behind."""
+    import urllib.request
+    headers = dict(info.get("http_headers") or {})
+    temp = filepath + ".part"
+    total = None
+    done = 0
+    try:
+        with open(temp, "wb") as out:
+            while total is None or done < total:
+                headers["Range"] = f"bytes={done}-{done + chunk - 1}"
+                request = urllib.request.Request(info["url"], headers=headers)
+                with urllib.request.urlopen(request, timeout=30) as response:
+                    if total is None:
+                        size = (response.headers.get("Content-Range") or "").rpartition("/")[2]
+                        total = int(size) if size.isdigit() else int(info.get("filesize") or 0) or None
+                    data = response.read()
+                if not data:
+                    break
+                out.write(data)
+                done += len(data)
+                if total is None:
+                    break
+        os.replace(temp, filepath)
+    except Exception:
+        if os.path.exists(temp):
+            os.remove(temp)
+        raise
+
+
+def _resolve_info(video_id, format_selector, audio_first=False):
+    """[video_id]'s stream for [format_selector], from the first client that gives a link that
+    works, and which client it was. Play tries the light android client first (fastest to
+    start); Download ([audio_first]) tries yt-dlp's default clients first, which give a real
+    audio-only stream rather than a video file."""
     opts = {
         "quiet": True,
         "no_warnings": True,
@@ -218,40 +244,69 @@ def resolve_stream_url(video_id, format_selector="bestaudio/best"):
         "skip_download": True,
         "extractor_args": {"youtube": {"player_client": ["android", "ios"]}},
     }
-    # Light first: one client, and no watch page / configs / player JS - the android client's
-    # URLs need no deciphering, so those are pure overhead, and parsing them in Python was most
-    # of the ~8 s of CPU each song start cost. Anything that fails light falls back to the full
-    # extraction above, so nothing that played before stops playing.
+    # Light: one client, and no watch page / configs / player JS - the android client's URLs
+    # need no deciphering, so those are pure overhead, and parsing them in Python was most of
+    # the ~8 s of CPU each song start cost.
     light = dict(opts)
     light["extractor_args"] = {"youtube": {"player_client": ["android"], "player_skip": ["webpage", "configs", "js"]}}
-    # When YouTube's bot check turns the light android client away ("Sign in to confirm you're
-    # not a bot"), the full extraction gets through (~4.5 s, measured); if even that fails, a
-    # last try with yt-dlp's own default client choice. (The visionos client was measured here
-    # too: refused by the same check, it only added ~2 s.) Each is tried only when the one
-    # before failed, so a normal song start costs exactly what it did.
+    # yt-dlp's own default client choice: real audio-only streams. YouTube now answers the
+    # android/ios clients with only a video file (format 18), so "full" (android + ios) comes
+    # last - it fails the same way "light" does.
     defaults = {k: v for k, v in opts.items() if k != "extractor_args"}
+    order = (("default", defaults), ("light", light), ("full", opts)) if audio_first \
+        else (("light", light), ("default", defaults), ("full", opts))
     url = f"https://music.youtube.com/watch?v={video_id}"
-    t0 = time.monotonic()
-    info, mode, last_error = None, None, None
+    last_error = None
     failures = []
-    for mode, attempt in (("light", light), ("full", opts), ("default", defaults)):
+    for mode, attempt in order:
         try:
             with yt_dlp.YoutubeDL(attempt) as ydl:
                 info = ydl.extract_info(url, download=False)
             if info and info.get("url"):
-                break
-            last_error = ValueError("no stream url")
+                # A video file's link from those clients is sometimes throttled to a few KB/s (the
+                # player then sat buffering at 0:00): its speed is tried once, briefly, first.
+                if info.get("vcodec") in (None, "none") or _link_is_fast(info):
+                    return info, mode
+                last_error = ValueError("video link too slow")
+            else:
+                last_error = ValueError("no stream url")
         except Exception as e:
             last_error = e
-        # Why this way failed, short, for the shareable log (yt-dlp's own message).
         failures.append(f"{mode}: {str(last_error).replace('ERROR: ', '').strip()[:220]}")
-        info = None
-    if info is None:
-        raise Exception(" | ".join(failures)) from last_error
+    raise Exception(" | ".join(failures)) from last_error
+
+
+def resolve_stream_url(video_id, format_selector="bestaudio/best"):
+    """Resolves [video_id]'s direct, playable audio stream URL for [format_selector] WITHOUT
+    downloading anything to disk - backs the "Play" button (stream it, keep nothing) as opposed
+    to [download] above (saved permanently to [dest_dir])."""
+    t0 = time.monotonic()
+    info, mode = _resolve_info(video_id, format_selector)
     print(f"[timing] resolve_stream_url({video_id}) [{mode}]: {time.monotonic() - t0:.2f}s")
     entry = _entry_from_info(info)
     entry["url"] = info.get("url")
     return entry
+
+
+def _link_is_fast(info, sample=256 * 1024, within=1.5):
+    """True when [info]'s stream link delivers its first [sample] bytes within [within] seconds.
+    Some of YouTube's video links (android/ios clients) are throttled to a few KB/s - far too
+    slow to ever start playing - while a good one does this in a few hundredths of a second."""
+    import urllib.request
+    headers = dict(info.get("http_headers") or {})
+    headers["Range"] = f"bytes=0-{sample - 1}"
+    start = time.monotonic()
+    received = 0
+    try:
+        with urllib.request.urlopen(urllib.request.Request(info["url"], headers=headers), timeout=within) as response:
+            while received < sample and time.monotonic() - start < within:
+                chunk = response.read(64 * 1024)
+                if not chunk:
+                    break
+                received += len(chunk)
+    except Exception:
+        return False
+    return received >= sample or (0 < received and time.monotonic() - start < within)
 
 
 def _fix_audio_only_extension(filepath):

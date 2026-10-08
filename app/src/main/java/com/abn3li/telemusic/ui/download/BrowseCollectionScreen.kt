@@ -105,7 +105,7 @@ fun BrowseCollectionScreen(
         return
     }
     // An artist (a channel id) still loading: the artist page's own frame, not the album one.
-    if (state.isLoading && browseId.startsWith("UC")) {
+    if (state.isLoading && (browseId.startsWith("UC") || browseId.startsWith(com.abn3li.telemusic.repository.DiscoveryRepository.ARTIST_OF_PREFIX))) {
         ArtistHeroLayout(
             name = title, photoUrl = null, loaded = false, canPlay = false,
             onShuffle = {}, onPlay = {}, onAllSongs = null, onBack = onBack

@@ -108,6 +108,11 @@ class MusicService : MediaLibraryService() {
             .setAudioAttributes(audioAttributes, true)
             .setHandleAudioBecomingNoisy(true)
             .build()
+        // Audio only: a YouTube stream can be a video file (YouTube now often answers with one),
+        // and its picture was decoded in the background for nothing - CPU, battery and heat.
+        player.trackSelectionParameters = player.trackSelectionParameters.buildUpon()
+            .setTrackTypeDisabled(androidx.media3.common.C.TRACK_TYPE_VIDEO, true)
+            .build()
         player.addListener(object : Player.Listener {
             override fun onPlayerError(error: PlaybackException) {
                 if (player.currentMediaItem?.localConfiguration?.uri?.scheme == "quality") {

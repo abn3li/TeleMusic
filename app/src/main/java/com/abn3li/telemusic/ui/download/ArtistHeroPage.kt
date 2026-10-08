@@ -129,7 +129,7 @@ internal fun ArtistHeroPage(
         onAllSongs = allSongs,
         onBack = onBack,
         onShare = {
-            val link = "https://music.youtube.com/channel/$browseId"
+            val link = "https://music.youtube.com/channel/${artist.channelId ?: browseId}"
             val send = Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, link)
             context.startActivity(Intent.createChooser(send, artist.name))
         },
