@@ -1,6 +1,6 @@
 """Thin bridge between Kotlin and real yt-dlp (Unlicense/public domain), run through Chaquopy's
-bundled Python interpreter. Kept deliberately small - every actual decision (format selection,
-throttling/cipher handling, retries) is yt-dlp's own, not reimplemented here. Every function
+bundled Python interpreter. yt-dlp owns extraction and format selection; ranged downloads
+verify their responses and retry interrupted requests here. Every function
 returns plain dicts/lists (str/int/float/None/dict/list only) since that's what crosses the
 Chaquopy Kotlin<->Python boundary cleanly - no custom Python objects.
 """
@@ -192,7 +192,11 @@ def download(video_id, dest_dir, dest_filename_stem, format_selector="bestaudio/
     info, mode = _resolve_info(video_id, format_selector, audio_first=True)
     ext = info.get("ext") or "m4a"
     filepath = os.path.join(dest_dir, f"{dest_filename_stem}.{ext}")
-    _fetch_to_file(info, filepath)
+    def refresh_link():
+        refreshed, _ = _resolve_info(video_id, format_selector, audio_first=True)
+        return refreshed
+
+    _fetch_to_file(info, filepath, refresh=refresh_link)
     print(f"[timing] download({video_id}) [{mode}]: {time.monotonic() - t0:.2f}s")
     filepath = _fix_audio_only_extension(filepath)
     entry = _entry_from_info(info)
@@ -200,30 +204,101 @@ def download(video_id, dest_dir, dest_filename_stem, format_selector="bestaudio/
     return entry
 
 
-def _fetch_to_file(info, filepath, chunk=4 * 1024 * 1024):
-    """Saves [info]'s stream to [filepath] a few MB at a time (YouTube slows a single long
-    request down), into a temporary file first so a failed download leaves nothing behind."""
+def _fetch_to_file(info, filepath, chunk=4 * 1024 * 1024, refresh=None):
+    """Verify each range and resume interrupted requests at the last committed offset.
+    Three requests per chunk, plus one if its last try refreshes the link. Refresh only once
+    per download; failed files are never published."""
+    import http.client
+    import urllib.error
     import urllib.request
-    headers = dict(info.get("http_headers") or {})
     temp = filepath + ".part"
-    total = None
+    total = int(info.get("filesize") or 0) or None
     done = 0
+    refreshed = False
+    identity = (info.get("format_id"), info.get("ext"))
+    validator = None
     try:
         with open(temp, "wb") as out:
             while total is None or done < total:
-                headers["Range"] = f"bytes={done}-{done + chunk - 1}"
-                request = urllib.request.Request(info["url"], headers=headers)
-                with urllib.request.urlopen(request, timeout=30) as response:
-                    if total is None:
-                        size = (response.headers.get("Content-Range") or "").rpartition("/")[2]
-                        total = int(size) if size.isdigit() else int(info.get("filesize") or 0) or None
-                    data = response.read()
-                if not data:
-                    break
-                out.write(data)
-                done += len(data)
-                if total is None:
-                    break
+                # Commit only a verified chunk. A disconnected request retries this offset,
+                # preserving earlier chunks without duplicating the failed response's bytes.
+                attempt_limit = 3
+                for attempt in range(4):
+                    headers = dict(info.get("http_headers") or {})
+                    end = min(done + chunk - 1, total - 1) if total else done + chunk - 1
+                    headers["Range"] = f"bytes={done}-{end}"
+                    headers["Accept-Encoding"] = "identity"
+                    try:
+                        request = urllib.request.Request(info["url"], headers=headers)
+                        with urllib.request.urlopen(request, timeout=30) as response:
+                            if response.status == 206:
+                                match = re.fullmatch(r"bytes (\d+)-(\d+)/(\d+)",
+                                    response.headers.get("Content-Range", ""))
+                                if not match:
+                                    raise ValueError("Missing or invalid download range")
+                                start, last, size = map(int, match.groups())
+                                if start != done or last < start or last > end or size <= last:
+                                    raise ValueError("Server returned the wrong download range")
+                                if total is not None and total != size:
+                                    raise ValueError("Download size changed")
+                                total = size
+                                etag = response.headers.get("ETag")
+                                if validator and etag and validator != etag:
+                                    raise ValueError("Download content changed")
+                                validator = validator or etag
+                                expected = last - start + 1
+                                length = response.headers.get("Content-Length")
+                                if length is not None and int(length) != expected:
+                                    raise ValueError("Download range length disagrees")
+                                data = response.read(expected + 1)
+                                if len(data) != expected:
+                                    raise OSError("Download chunk ended early")
+                                out.write(data)
+                                done += len(data)
+                            elif response.status == 200 and done == 0:
+                                # Some hosts ignore Range. Accept a complete, sized response
+                                # only at offset zero, streaming it without loading it all in RAM.
+                                size = int(response.headers.get("Content-Length") or 0)
+                                if size <= 0 or total is not None and total != size:
+                                    raise ValueError("Full download has no reliable size")
+                                total = size
+                                while done < total:
+                                    data = response.read(min(chunk, total - done))
+                                    if not data:
+                                        raise OSError("Full download ended early")
+                                    out.write(data)
+                                    done += len(data)
+                            else:
+                                raise ValueError("Server did not honor the download range")
+                        break
+                    except urllib.error.HTTPError as error:
+                        code = error.code
+                        error.close()
+                        if code in (401, 403, 410) and refresh is not None and not refreshed:
+                            refreshed = True
+                            fresh = refresh()
+                            # An audio prefix cannot be joined to another format or recording.
+                            if (fresh.get("format_id"), fresh.get("ext")) != identity or (
+                                    done > 0 and not identity[0]):
+                                raise ValueError("Refreshed download uses a different format")
+                            fresh_size = int(fresh.get("filesize") or 0) or None
+                            if fresh_size and total and fresh_size != total:
+                                raise ValueError("Refreshed download size changed")
+                            info = fresh
+                            # The final retry must actually use the link we just resolved.
+                            if attempt == 2:
+                                attempt_limit = 4
+                        elif code not in (408, 429, 500, 502, 503, 504):
+                            raise
+                        if attempt + 1 >= attempt_limit:
+                            raise OSError("Download retry limit reached") from error
+                        time.sleep(0.25 * (attempt + 1))
+                    except (OSError, http.client.HTTPException) as error:
+                        if attempt + 1 >= attempt_limit:
+                            raise OSError("Download retry limit reached") from error
+                        time.sleep(0.25 * (attempt + 1))
+            if total is None or done != total:
+                raise OSError("Download is incomplete")
         os.replace(temp, filepath)
     except Exception:
         if os.path.exists(temp):
