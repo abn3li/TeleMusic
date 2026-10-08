@@ -6,7 +6,6 @@ import com.abn3li.telemusic.ui.theme.paper
 import com.abn3li.telemusic.ui.theme.ink
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.foundation.combinedClickable
-import android.net.Uri
 import com.abn3li.telemusic.data.browse.BrowseTrack
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
@@ -539,9 +538,11 @@ private fun YoutubeSongRow(result: YtDlpSearchResult, state: YouTubeDownloadUiSt
     val label = value.kind.label()
     // YouTube's own line often starts with the kind already ("Album • Linkin Park • 2010").
     val subtitle = value.subtitle?.takeIf { it.isNotBlank() }
+    // ...or with a more exact kind ("Single • Metallica • 2020" for an album card): then it says it.
+    val ownKind = subtitle?.substringBefore(" • ")?.trim()
     val line = when {
         subtitle == null -> label
-        subtitle.startsWith(label, ignoreCase = true) -> subtitle
+        ownKind != null && ownKind.lowercase() in KIND_WORDS -> subtitle
         else -> "$label · $subtitle"
     }
     CollectionRow(value.title, line, value.kind == BrowseKind.ARTIST, value.thumbnailUrl) { open(value) }
@@ -596,3 +597,6 @@ private fun Header(title: String, seeAll: (() -> Unit)? = null, action: (@Compos
 private fun ResultSection.title() = name.lowercase().replaceFirstChar { it.uppercase() }
 private fun BrowseKind.label() = when (this) { BrowseKind.ARTIST -> "Artist"; BrowseKind.ALBUM -> "Album"; BrowseKind.PLAYLIST -> "Playlist"; BrowseKind.OTHER -> "YouTube Music" }
 private val GenreColors = listOf(Color(0xFF8A2846), Color(0xFF3C3489), Color(0xFF6B3D0F), Color(0xFF7A1F1F), Color(0xFF0F5E4A), Color(0xFF1D4F7A), Color(0xFF72243E), Color(0xFF3D4A1C))
+
+// Words YouTube Music starts a card's line with to say what it is.
+private val KIND_WORDS = setOf("album", "single", "ep", "playlist", "artist", "song", "video", "podcast", "episode", "profile", "mix")

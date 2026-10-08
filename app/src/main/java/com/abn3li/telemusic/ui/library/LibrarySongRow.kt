@@ -18,15 +18,12 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
-import androidx.compose.foundation.gestures.Orientation
-import androidx.compose.foundation.gestures.draggable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.awaitHorizontalTouchSlopOrCancellation
 import androidx.compose.foundation.gestures.horizontalDrag
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChange
-import androidx.compose.foundation.gestures.rememberDraggableState
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -263,8 +260,13 @@ internal fun SwipeToPlayNext(
                     awaitEachGesture {
                         val down = awaitFirstDown(requireUnconsumed = false)
                         var start = 0f
+                        // Only a clearly sideways move claims the row: a diagonal scroll that
+                        // drifts right is left to the list, so scrolling never sticks on a row.
                         val claimed = awaitHorizontalTouchSlopOrCancellation(down.id) { change, over ->
-                            if (over > 0f) { change.consume(); start = over }
+                            val moved = change.position - down.position
+                            if (over > 0f && kotlin.math.abs(moved.x) > kotlin.math.abs(moved.y) * SIDEWAYS_RATIO) {
+                                change.consume(); start = over
+                            }
                         } ?: return@awaitEachGesture
                         if (rowWidth == 0) return@awaitEachGesture
                         dragBy(start)
@@ -281,6 +283,9 @@ internal fun SwipeToPlayNext(
         )
     }
 }
+
+// How much more sideways than up/down a move must be to start "Play next".
+private const val SIDEWAYS_RATIO = 1.5f
 
 @Composable
 internal fun SongArtwork(song: SongEntity, size: Dp, corner: Dp) {

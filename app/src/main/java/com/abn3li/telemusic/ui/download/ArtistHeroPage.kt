@@ -31,6 +31,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -268,15 +269,16 @@ internal fun ArtistHeroLayout(
                             AsyncImage(model = photoUrl, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
                         }
                     }
+                    // Only where the fades show: a shade under the status bar and the fade into the
+                    // page. (One full-size overlay also painted the clear middle every frame.)
                     Box(
-                        Modifier.fillMaxSize().background(
-                            Brush.verticalGradient(
-                                0f to Color.Black.copy(alpha = 0.32f),
-                                0.18f to Color.Transparent,
-                                0.45f to Color.Transparent,
-                                0.8f to tint.copy(alpha = 0.75f),
-                                1f to tint
-                            )
+                        Modifier.align(Alignment.TopCenter).fillMaxWidth().fillMaxHeight(0.18f).background(
+                            Brush.verticalGradient(listOf(Color.Black.copy(alpha = 0.32f), Color.Transparent))
+                        )
+                    )
+                    Box(
+                        Modifier.align(Alignment.BottomCenter).fillMaxWidth().fillMaxHeight(0.55f).background(
+                            Brush.verticalGradient(0f to Color.Transparent, 0.64f to tint.copy(alpha = 0.75f), 1f to tint)
                         )
                     )
                     Column(

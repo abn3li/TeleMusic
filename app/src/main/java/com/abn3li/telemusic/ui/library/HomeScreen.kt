@@ -1,15 +1,20 @@
 package com.abn3li.telemusic.ui.library
 
-import com.abn3li.telemusic.ui.theme.LocalPalette
-import com.abn3li.telemusic.ui.theme.paper
+import coil.imageLoader
+import androidx.compose.foundation.gestures.stopScroll
+import kotlinx.coroutines.launch
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.input.pointer.positionChange
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.foundation.gestures.horizontalDrag
+import androidx.compose.foundation.gestures.awaitHorizontalTouchSlopOrCancellation
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.snapping.rememberSnapFlingBehavior
 import com.abn3li.telemusic.ui.theme.ink
 import androidx.compose.foundation.ExperimentalFoundationApi
-import androidx.compose.foundation.pager.HorizontalPager
-import androidx.compose.foundation.pager.PagerDefaults
-import androidx.compose.foundation.pager.PagerSnapDistance
-import androidx.compose.foundation.pager.rememberPagerState
-import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.unit.Dp
 import androidx.compose.foundation.border
 import com.abn3li.telemusic.data.local.displayArtwork
@@ -485,7 +490,7 @@ private fun androidx.compose.foundation.lazy.LazyListScope.youTubeShelf(
     onPlayTracks: (List<BrowseTrack>, Int) -> Unit,
     onOpenCollection: (BrowseCollection) -> Unit
 ) {
-    item("yt_header_$index") {
+    item("yt_header_$index", contentType = "yt_header") {
         val showAll: () -> Unit = {
             onOpenCollection(
                 BrowseCollection(
@@ -501,7 +506,30 @@ private fun androidx.compose.foundation.lazy.LazyListScope.youTubeShelf(
             else -> HomeSectionHeader(shelf.title, strapline = shelf.strapline, onSeeAll = showAll, seeAllLabel = "Show all")
         }
     }
-    item("yt_shelf_$index") { YouTubeShelf(shelf, index, onPlayTracks, onOpenCollection) }
+    item("yt_shelf_$index", contentType = shelf.layoutKind()) {
+        // Each shelf's row owns its scrolling (see shelfDrag); the title row above doesn't move it.
+        val row = rememberLazyListState()
+        val fling = rememberStartSnap(row)
+        androidx.compose.runtime.CompositionLocalProvider(LocalShelfRow provides ShelfRow(row, fling)) {
+            YouTubeShelf(shelf, index, onPlayTracks, onOpenCollection)
+        }
+    }
+}
+
+/** The row a shelf's covers scroll in, handed to whichever layout the shelf uses. */
+private class ShelfRow(val state: androidx.compose.foundation.lazy.LazyListState, val fling: androidx.compose.foundation.gestures.FlingBehavior)
+private val LocalShelfRow = androidx.compose.runtime.staticCompositionLocalOf<ShelfRow?> { null }
+
+/** Which layout a shelf gets (see YouTubeShelf) - shelves of one kind reuse each other's build. */
+private fun com.abn3li.telemusic.data.browse.HomeShelf.layoutKind(): String {
+    val name = title.lowercase()
+    return when {
+        isForgottenFavorites() -> "yt_covers"
+        listRows -> "yt_rows"
+        "listen again" in name -> "yt_grid"
+        "mix" in name && collections.isNotEmpty() && tracks.isEmpty() -> "yt_mixes"
+        else -> "yt_covers"
+    }
 }
 
 private fun com.abn3li.telemusic.data.browse.HomeShelf.isForgottenFavorites(): Boolean {
@@ -529,7 +557,9 @@ private fun YouTubeShelf(
         shelf.listRows -> QuickPicks(shelf.tracks, onPlayTracks)
         "listen again" in title -> ListenAgainGrid(shelf, onPlayTracks, onOpenCollection)
         "mix" in title && shelf.collections.isNotEmpty() && shelf.tracks.isEmpty() ->
-            LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            LazyRow(state = LocalShelfRow.current!!.state, modifier = Modifier.shelfDrag(LocalShelfRow.current!!.state, LocalShelfRow.current!!.fling, COVER_MAX_FLING),
+                flingBehavior = LocalShelfRow.current!!.fling, userScrollEnabled = false,
+                contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 itemsIndexed(shelf.collections, key = { i, item -> "mix_${index}_${i}_${item.browseId}" }) { i, item ->
                     YouTubeMixTile(item, MixColors[i % MixColors.size]) { onOpenCollection(item) }
                 }
@@ -538,95 +568,152 @@ private fun YouTubeShelf(
     }
 }
 
-/** Four full-width song rows per page. A swipe settles on the next whole group. */
+/** Quick picks, like YouTube Music: columns of four songs in a row that scrolls freely and
+ * stops at the nearest column, the next one peeking in from the edge. */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun QuickPicks(tracks: List<BrowseTrack>, onPlay: (List<BrowseTrack>, Int) -> Unit) {
     if (tracks.isEmpty()) return
-    val pages = remember(tracks) { tracks.withIndex().chunked(4) }
-    val pager = rememberPagerState(pageCount = { pages.size })
-    Column {
-    HorizontalPager(state = pager, modifier = Modifier.fillMaxWidth(),
-        contentPadding = PaddingValues(horizontal = 16.dp), pageSpacing = 14.dp,
-        verticalAlignment = Alignment.Top,
-        flingBehavior = PagerDefaults.flingBehavior(pager, pagerSnapDistance = PagerSnapDistance.atMost(1))) { page ->
-        Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(20.dp))
-            .background(LibraryFieldColor).border(1.dp, ink.copy(alpha = 0.06f), RoundedCornerShape(20.dp))
-            .padding(horizontal = 12.dp, vertical = 4.dp).heightIn(min = 256.dp)) {
-            pages[page].forEachIndexed { row, (i, track) ->
-                Row(Modifier.fillMaxWidth().heightIn(min = 62.dp)
-                    .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) { onPlay(tracks, i) },
-                    verticalAlignment = Alignment.CenterVertically) {
-                    coil.compose.AsyncImage(model = track.thumbnailUrl, contentDescription = null,
-                        contentScale = androidx.compose.ui.layout.ContentScale.Crop,
-                        modifier = Modifier.size(46.dp).clip(RoundedCornerShape(9.dp)).background(LibraryFieldColor))
-                    Column(Modifier.weight(1f).padding(start = 12.dp)) {
-                        Text(track.title, color = ink, fontSize = 15.sp, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        Text(track.artist, color = ink.copy(alpha = 0.55f), fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    }
-                    Icon(Icons.Rounded.PlayArrow, contentDescription = null, tint = ink.copy(alpha = 0.45f),
-                        modifier = Modifier.padding(start = 8.dp).size(20.dp))
-                }
-                if (row < pages[page].lastIndex) Box(Modifier.fillMaxWidth().padding(start = 58.dp)
-                    .height(1.dp).background(ink.copy(alpha = 0.07f)))
+    val play by rememberUpdatedState(onPlay)
+    val columns = remember(tracks) { tracks.withIndex().chunked(4) }
+    // Every cover is fetched and decoded at its row size up front (a few small images), so a
+    // column sliding in draws covers that are ready instead of preparing them on that frame.
+    val context = LocalContext.current
+    val coverPx = with(LocalDensity.current) { 46.dp.roundToPx() }
+    LaunchedEffect(tracks) {
+        tracks.forEach { track ->
+            track.thumbnailUrl?.let { url ->
+                context.imageLoader.enqueue(coil.request.ImageRequest.Builder(context).data(url).size(coverPx).build())
             }
         }
     }
-    FeedPageIndicator(pager.pageCount, pager.currentPage)
-    }
-}
-
-@Composable
-private fun FeedPageIndicator(count: Int, current: Int) {
-    if (count <= 1) return
-    Row(Modifier.fillMaxWidth().padding(top = 12.dp, bottom = 2.dp),
-        horizontalArrangement = Arrangement.spacedBy(5.dp, Alignment.CenterHorizontally),
-        verticalAlignment = Alignment.CenterVertically) {
-        val start = (current - 3).coerceIn(0, (count - 7).coerceAtLeast(0))
-        for (page in start until minOf(count, start + 7)) {
-            Box(Modifier.size(if (page == current) 6.dp else 4.dp)
-                .clip(RoundedCornerShape(50)).background(if (page == current) AppAccent else ink.copy(alpha = 0.22f)))
+    // A column is most of the screen, so the next one shows at the edge.
+    val columnWidth = LocalConfiguration.current.screenWidthDp.dp * 0.86f
+    val shelfRow = LocalShelfRow.current!!
+    LazyRow(state = shelfRow.state, modifier = Modifier.shelfDrag(shelfRow.state, shelfRow.fling), flingBehavior = shelfRow.fling, userScrollEnabled = false,
+        contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        items(columns.size, key = { "qp_$it" }, contentType = { "qp_column" }) { column ->
+            Column(Modifier.width(columnWidth).clip(RoundedCornerShape(20.dp))
+                .background(LibraryFieldColor).border(1.dp, ink.copy(alpha = 0.06f), RoundedCornerShape(20.dp))
+                .padding(horizontal = 12.dp, vertical = 4.dp).heightIn(min = 256.dp)) {
+                columns[column].forEachIndexed { rowIndex, (i, track) ->
+                    Row(Modifier.fillMaxWidth().heightIn(min = 62.dp)
+                        .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) { play(tracks, i) },
+                        verticalAlignment = Alignment.CenterVertically) {
+                        coil.compose.AsyncImage(model = track.thumbnailUrl, contentDescription = null,
+                            contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                            modifier = Modifier.size(46.dp).clip(RoundedCornerShape(9.dp)).background(LibraryFieldColor))
+                        Column(Modifier.weight(1f).padding(start = 12.dp)) {
+                            Text(track.title, color = ink, fontSize = 15.sp, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Text(track.artist, color = ink.copy(alpha = 0.55f), fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        }
+                        Icon(Icons.Rounded.PlayArrow, contentDescription = null, tint = ink.copy(alpha = 0.45f),
+                            modifier = Modifier.padding(start = 8.dp).size(20.dp))
+                    }
+                    if (rowIndex < columns[column].lastIndex) Box(Modifier.fillMaxWidth().padding(start = 58.dp)
+                        .height(1.dp).background(ink.copy(alpha = 0.07f)))
+                }
+            }
         }
     }
 }
 
-/** Responsive cover pages. Each page keeps its rows together, including a partly filled last page. */
+/**
+ * How a shelf follows a finger, like YouTube Music's: a touch stops a gliding shelf; a move that
+ * is clearly sideways (more sideways than up/down) drags it and flings it with the finger's speed,
+ * then it stops at a cover; anything else is left to the page, which scrolls. (The row's own
+ * scrolling grabbed any touch on a moving shelf at once, whatever its direction, so a scroll up
+ * or down right after a flick shook the shelf instead of moving the page.)
+ */
+@Composable
+private fun Modifier.shelfDrag(row: androidx.compose.foundation.lazy.LazyListState,
+    fling: androidx.compose.foundation.gestures.FlingBehavior, maxFling: Dp = SHELF_MAX_FLING): Modifier {
+    val scope = rememberCoroutineScope()
+    return pointerInput(row, fling) {
+        val tracker = androidx.compose.ui.input.pointer.util.VelocityTracker()
+        awaitEachGesture {
+            val down = awaitFirstDown(requireUnconsumed = false)
+            if (row.isScrollInProgress) scope.launch { row.stopScroll() }
+            tracker.resetTracking()
+            tracker.addPosition(down.uptimeMillis, down.position)
+            var start = 0f
+            val drag = awaitHorizontalTouchSlopOrCancellation(down.id) { change, over ->
+                val moved = change.position - down.position
+                if (kotlin.math.abs(moved.x) > kotlin.math.abs(moved.y)) { change.consume(); start = over }
+            } ?: return@awaitEachGesture
+            row.dispatchRawDelta(-start)
+            var dragged = start
+            horizontalDrag(drag.id) { change ->
+                tracker.addPosition(change.uptimeMillis, change.position)
+                row.dispatchRawDelta(-change.positionChange().x)
+                dragged += change.positionChange().x
+                change.consume()
+            }
+            // A shelf goes about one screen of covers per flick, like YouTube Music's - full
+            // long-list momentum threw it 5 to 20 covers, so only a slow drag moved it by one.
+            val limit = maxFling.toPx()
+            val velocity = (-tracker.calculateVelocity().x).coerceIn(-limit, limit)
+            if (kotlin.math.abs(velocity) < SHELF_SLOW_RELEASE.toPx()) {
+                // A slow swipe finishes in the direction it was dragged: on to the next cover, or
+                // back to show the one on the left in full. Snapping to the nearest cover pulled
+                // a short drag back against the finger, which felt like resistance and a bounce.
+                val forward = dragged < 0
+                val first = row.firstVisibleItemIndex
+                val target = if (forward && row.firstVisibleItemScrollOffset > 0) first + 1 else first
+                scope.launch { row.animateScrollToItem(target.coerceAtMost(row.layoutInfo.totalItemsCount - 1)) }
+            } else {
+                scope.launch { row.scroll { with(fling) { performFling(velocity) } } }
+            }
+        }
+    }
+}
+
+// The fastest a flick throws a shelf: about one screen of covers before it stops at one.
+// Song tables (Quick picks, Long listens, Trending): wide columns, one per flick.
+private val SHELF_MAX_FLING = 700.dp
+// Cover shelves (albums, mixes, Listen again): a flick carries on across several covers, like
+// YouTube Music's; capped so it never races to the end.
+private val COVER_MAX_FLING = 2200.dp
+// Below this release speed a swipe is a slow one (see shelfDrag).
+private val SHELF_SLOW_RELEASE = 350.dp
+
+/** Stops a flung row with an item lined up at its left edge, like YouTube Music (the
+ * default centred the item instead). */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun CoverPages(count: Int, rows: Int, minimumCoverWidth: Dp, extraHeight: Dp = 0.dp,
-    content: @Composable (index: Int, coverWidth: Dp) -> Unit) {
+private fun rememberStartSnap(row: androidx.compose.foundation.lazy.LazyListState): androidx.compose.foundation.gestures.FlingBehavior {
+    val layout = remember(row) {
+        androidx.compose.foundation.gestures.snapping.SnapLayoutInfoProvider(row,
+            positionInLayout = androidx.compose.foundation.gestures.snapping.SnapPositionInLayout { _, _, _, _, _ -> 0 })
+    }
+    return rememberSnapFlingBehavior(layout)
+}
+
+/**
+ * A row of covers that scrolls freely with momentum and stops at the nearest cover, like
+ * YouTube Music's shelves; [rows] covers are stacked in each column ("Listen again": two).
+ * Only the covers on screen are built.
+ */
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun CoverRow(count: Int, rows: Int, coverWidth: Dp, content: @Composable (index: Int) -> Unit) {
     if (count == 0) return
-    BoxWithConstraints(Modifier.fillMaxWidth()) {
-        val gap = 10.dp
-        val usable = (maxWidth - 32.dp).coerceAtLeast(1.dp)
-        val columns = ((usable + gap) / (minimumCoverWidth + gap)).toInt().coerceAtLeast(1)
-        val coverWidth = (usable - gap * (columns - 1)) / columns
-        val perPage = columns * rows
-        val pager = rememberPagerState(pageCount = { (count + perPage - 1) / perPage })
-        Column {
-        HorizontalPager(state = pager, modifier = Modifier.fillMaxWidth(),
-            contentPadding = PaddingValues(horizontal = 16.dp), pageSpacing = 16.dp,
-            verticalAlignment = Alignment.Top,
-            flingBehavior = PagerDefaults.flingBehavior(pager, pagerSnapDistance = PagerSnapDistance.atMost(1))) { page ->
-            Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                repeat(rows) { row ->
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(gap)) {
-                        repeat(columns) { column ->
-                            val index = page * perPage + column * rows + row
-                            Box(Modifier.width(coverWidth).heightIn(min = coverWidth + extraHeight)) {
-                                if (index < count) content(index, coverWidth)
-                            }
-                        }
-                    }
+    val shelfRow = LocalShelfRow.current!!
+    val columns = (count + rows - 1) / rows
+    LazyRow(state = shelfRow.state, modifier = Modifier.shelfDrag(shelfRow.state, shelfRow.fling, COVER_MAX_FLING), flingBehavior = shelfRow.fling, userScrollEnabled = false,
+        contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        items(columns, key = { "col_$it" }, contentType = { "cover_column_$rows" }) { column ->
+            Column(Modifier.width(coverWidth), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                repeat(rows) { r ->
+                    val index = column * rows + r
+                    if (index < count) content(index)
                 }
             }
-        }
-        FeedPageIndicator(pager.pageCount, pager.currentPage)
         }
     }
 }
 
-/** "Listen again": covers in two rows, swiped sideways together. Songs play, the rest open. */
+/** "Listen again": covers in two rows that scroll together. Songs play, the rest open. */
 @Composable
 private fun ListenAgainGrid(
     shelf: com.abn3li.telemusic.data.browse.HomeShelf,
@@ -634,19 +721,21 @@ private fun ListenAgainGrid(
     onOpen: (BrowseCollection) -> Unit,
     rows: Int = 2
 ) {
+    val play by rememberUpdatedState(onPlay)
+    val open by rememberUpdatedState(onOpen)
     val entries = remember(shelf) {
-        shelf.tracks.mapIndexed { i, t -> Triple(t.thumbnailUrl, t.title, { onPlay(shelf.tracks, i) }) } +
-            shelf.collections.map { c -> Triple(c.thumbnailUrl, c.title, { onOpen(c) }) }
+        shelf.tracks.mapIndexed { i, t -> Triple(t.thumbnailUrl, t.title, { play(shelf.tracks, i) }) } +
+            shelf.collections.map { c -> Triple(c.thumbnailUrl, c.title, { open(c) }) }
     }
-    val captionHeight = with(LocalDensity.current) { 17.sp.toDp() } + 6.dp
-    CoverPages(entries.size, rows = rows, minimumCoverWidth = 96.dp, extraHeight = captionHeight) { index, coverWidth ->
-        val (url, title, open) = entries[index]
-        Column(Modifier.width(coverWidth).clickable(onClick = open)) {
-        coil.compose.AsyncImage(model = url, contentDescription = null,
-            contentScale = androidx.compose.ui.layout.ContentScale.Crop,
-            modifier = Modifier.size(coverWidth).clip(RoundedCornerShape(12.dp)).background(LibraryFieldColor))
-        Text(title, color = ink.copy(alpha = 0.9f), fontSize = 12.sp, lineHeight = 17.sp,
-            maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 6.dp))
+    val coverWidth = 112.dp
+    CoverRow(entries.size, rows = rows, coverWidth = coverWidth) { index ->
+        val (url, title, onClick) = entries[index]
+        Column(Modifier.width(coverWidth).clickable(onClick = onClick)) {
+            coil.compose.AsyncImage(model = url, contentDescription = null,
+                contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                modifier = Modifier.size(coverWidth).clip(RoundedCornerShape(12.dp)).background(LibraryFieldColor))
+            Text(title, color = ink.copy(alpha = 0.9f), fontSize = 12.sp, lineHeight = 17.sp,
+                maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 6.dp))
         }
     }
 }
@@ -687,22 +776,24 @@ private fun YouTubeMixTile(item: BrowseCollection, color: Color, onClick: () -> 
 
 private data class HomeCoverEntry(val artwork: String?, val title: String, val subtitle: String?, val open: () -> Unit)
 
-/** A mixed YouTube shelf remains one row; songs play and collections open in place. */
+/** A mixed YouTube shelf: one row of covers; songs play and collections open in place. */
 @Composable
 private fun HomeCoverShelf(
     shelf: com.abn3li.telemusic.data.browse.HomeShelf,
     onPlay: (List<BrowseTrack>, Int) -> Unit,
     onOpen: (BrowseCollection) -> Unit
 ) {
-    val entries = remember(shelf, onPlay, onOpen) {
+    val play by rememberUpdatedState(onPlay)
+    val open by rememberUpdatedState(onOpen)
+    val entries = remember(shelf) {
         shelf.tracks.mapIndexed { index, track ->
-            HomeCoverEntry(track.thumbnailUrl, track.title, track.artist) { onPlay(shelf.tracks, index) }
+            HomeCoverEntry(track.thumbnailUrl, track.title, track.artist) { play(shelf.tracks, index) }
         } + shelf.collections.map { collection ->
-            HomeCoverEntry(collection.thumbnailUrl, collection.title, collection.subtitle) { onOpen(collection) }
+            HomeCoverEntry(collection.thumbnailUrl, collection.title, collection.subtitle) { open(collection) }
         }
     }
-    val textHeight = with(LocalDensity.current) { 17.sp.toDp() + 16.sp.toDp() } + 5.dp
-    CoverPages(entries.size, rows = 1, minimumCoverWidth = 104.dp, extraHeight = textHeight) { index, coverWidth ->
+    val coverWidth = 140.dp
+    CoverRow(entries.size, rows = 1, coverWidth = coverWidth) { index ->
         val entry = entries[index]
         Column(Modifier.width(coverWidth).clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = entry.open)) {
             coil.compose.AsyncImage(model = entry.artwork, contentDescription = null,

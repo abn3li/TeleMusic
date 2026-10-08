@@ -40,6 +40,7 @@ import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -687,15 +688,16 @@ internal fun <T> DetailPageScaffold(
                                 translationY = if (listState.firstVisibleItemIndex == 0) listState.firstVisibleItemScrollOffset * 0.45f else 0f
                             }
                         ) { hero() }
+                        // Only where the fades show: a shade under the status bar and the fade into
+                        // the page. (One full-size overlay also painted the clear middle every frame.)
                         Box(
-                            Modifier.matchParentSize().background(
-                                Brush.verticalGradient(
-                                    0f to Color.Black.copy(alpha = 0.32f),
-                                    0.18f to Color.Transparent,
-                                    0.45f to Color.Transparent,
-                                    0.8f to paper.copy(alpha = 0.75f),
-                                    1f to paper
-                                )
+                            Modifier.align(Alignment.TopCenter).fillMaxWidth().fillMaxHeight(0.18f).background(
+                                Brush.verticalGradient(listOf(Color.Black.copy(alpha = 0.32f), Color.Transparent))
+                            )
+                        )
+                        Box(
+                            Modifier.align(Alignment.BottomCenter).fillMaxWidth().fillMaxHeight(0.55f).background(
+                                Brush.verticalGradient(0f to Color.Transparent, 0.64f to paper.copy(alpha = 0.75f), 1f to paper)
                             )
                         )
                         Column(

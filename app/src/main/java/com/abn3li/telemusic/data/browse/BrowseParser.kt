@@ -57,18 +57,17 @@ object BrowseParser {
                 more?.optString("browseId")?.takeIf { it.isNotBlank() }, more?.optString("params")?.takeIf { it.isNotBlank() })
         }
 
-    /** A two-row card that plays a song (its own watch link) - null for one that opens a page,
-     * or a video's widescreen card (this app plays audio, see parseTwoRowCollection). */
+    /** A two-row card that plays (its own watch link): a song, or a video or podcast episode -
+     * those play as audio too, since some songs only exist as videos. Null for one that opens
+     * a page. */
     private fun parseTwoRowTrack(renderer: JSONObject): BrowseTrack? {
         val videoId = renderer.opt("navigationEndpoint").obj()?.opt("watchEndpoint").obj()
             ?.optString("videoId")?.takeIf { it.isNotBlank() } ?: return null
-        if ("VIDEO" in renderer.optString("aspectRatio")) return null
         val thumbnails = renderer.opt("thumbnailRenderer").obj()?.opt("musicThumbnailRenderer").obj()
             ?.opt("thumbnail").obj()?.opt("thumbnails").arr()
-        if (thumbnails.isWidescreen()) return null
         val title = renderer.opt("title").obj()?.runs().orEmpty().ifBlank { return null }
         val artist = renderer.opt("subtitle").obj()?.runs()?.let(::isolateParts)
-            ?.split(" • ")?.firstOrNull { it.isNotBlank() && it != "Song" }?.trim().orEmpty()
+            ?.split(" • ")?.firstOrNull { it.isNotBlank() && it.trim() !in KIND_LABELS }?.trim().orEmpty()
         return BrowseTrack(videoId = videoId, title = title, artist = artist, thumbnailUrl = thumbnails.best())
     }
 
@@ -83,6 +82,24 @@ object BrowseParser {
     /** Playlists made by listeners, from the home feed's own community shelves ("Trending
      * community playlists", "From the community"). Works on the feed's first page and on its
      * continuation pages alike, since it looks for the shelves wherever they sit. */
+    /** YouTube Music's New releases page as one Home shelf: its New Release Mix (new songs from
+     * the artists you listen to, when signed in) first, then its albums & singles, with "Show all"
+     * opening the full list. Null when the page has none. */
+    fun parseNewReleasesShelf(response: JSONObject, title: String): HomeShelf? {
+        val mixes = collectRenderers(response, "gridRenderer").flatMap { grid ->
+            val items = grid.opt("items").arr() ?: return@flatMap emptyList()
+            (0 until items.length()).mapNotNull { i ->
+                items.optJSONObject(i)?.opt("musicTwoRowItemRenderer").obj()?.let { parseTwoRowCollection(it) }
+            }
+        }
+        val releases = parseHomeShelves(response).firstOrNull { shelf ->
+            shelf.collections.isNotEmpty() && shelf.collections.any { it.kind == BrowseKind.ALBUM }
+        } ?: parseHomeShelves(response).firstOrNull { it.collections.isNotEmpty() }
+        val cards = (mixes + releases?.collections.orEmpty()).distinctBy { it.browseId + it.params.orEmpty() }
+        if (cards.isEmpty()) return null
+        return HomeShelf(title, emptyList(), cards, moreBrowseId = releases?.moreBrowseId, moreParams = releases?.moreParams)
+    }
+
     fun parseCommunityPlaylists(response: JSONObject): List<BrowseCollection> {
         val playlists = LinkedHashMap<String, BrowseCollection>()
         collectRenderers(response, "musicCarouselShelfRenderer").forEach { carousel ->
@@ -172,21 +189,17 @@ object BrowseParser {
         val kind = when {
             "ARTIST" in pageType -> BrowseKind.ARTIST
             "ALBUM" in pageType -> BrowseKind.ALBUM
-            "PLAYLIST" in pageType -> BrowseKind.PLAYLIST
+            // A podcast show's page is its list of episodes, opened like a playlist.
+            "PLAYLIST" in pageType || "PODCAST_SHOW" in pageType -> BrowseKind.PLAYLIST
             else -> BrowseKind.OTHER
         }
         val title = renderer.opt("title").obj()?.runs().orEmpty()
         if (title.isBlank()) return null
         val subtitle = renderer.opt("subtitle").obj()?.runs()?.let(::isolateParts)
 
-        val aspectRatio = renderer.optString("aspectRatio")
-        // An explicit VIDEO-shaped aspect ratio is a hard skip; anything else falls through to
-        // the same thumbnail-shape check parseTrackRow uses, since not every response bothers
-        // setting this field on every card.
-        if ("VIDEO" in aspectRatio) return null
+        // Video-shaped cards are kept: a video's or a show's page plays as audio like any other.
         val thumbnails = renderer.opt("thumbnailRenderer").obj()?.opt("musicThumbnailRenderer").obj()
             ?.opt("thumbnail").obj()?.opt("thumbnails").arr()
-        if (thumbnails.isWidescreen()) return null
 
         return BrowseCollection(
             browseId = browseId,
@@ -208,14 +221,15 @@ object BrowseParser {
     fun parseBrowseContent(response: JSONObject): BrowseContent {
         val trackRenderers = collectRenderers(response, "musicResponsiveListItemRenderer")
         val tracks = LinkedHashMap<String, BrowseTrack>()
+        // Videos among the songs are kept: they play as audio, and some songs only exist as one.
         trackRenderers.forEach { renderer ->
             parseTrackRow(renderer)?.let { tracks[it.videoId] = it }
         }
-        // A listener's playlist made of music videos (most "PL" playlists on an artist page) has
-        // only widescreen rows: rather than an empty page, its songs are kept - they play as audio
-        // like any other. A list of real songs still leaves out the odd video among them.
-        if (tracks.isEmpty()) trackRenderers.forEach { renderer ->
-            parseTrackRow(renderer, allowWidescreen = true)?.let { tracks[it.videoId] = it }
+        // A podcast show's page: its episodes, each playing as audio.
+        val show = collectRenderers(response, "musicResponsiveHeaderRenderer").firstOrNull()
+            ?.opt("straplineTextOne").obj()?.runs()?.takeIf { it.isNotBlank() }
+        collectRenderers(response, "musicMultiRowListItemRenderer").forEach { renderer ->
+            parseEpisodeRow(renderer, show)?.let { tracks.putIfAbsent(it.videoId, it) }
         }
         if (tracks.isNotEmpty()) return BrowseContent(tracks = tracks.values.toList(), header = parseCollectionHeader(response))
 
@@ -289,11 +303,42 @@ object BrowseParser {
         return tracks.values.toList()
     }
 
+    /** A podcast episode on a show's page: its title, the show (or the line under it), its
+     * picture and length ("2 hr 35 min"). Plays as audio like any video. */
+    private fun parseEpisodeRow(renderer: JSONObject, show: String?): BrowseTrack? {
+        val videoId = renderer.opt("onTap").obj()?.opt("watchEndpoint").obj()?.optString("videoId")
+            ?.takeIf { it.isNotBlank() } ?: return null
+        val title = renderer.opt("title").obj()?.runs().orEmpty().ifBlank { return null }
+        val thumbnails = renderer.opt("thumbnail").obj()?.opt("musicThumbnailRenderer").obj()
+            ?.opt("thumbnail").obj()?.opt("thumbnails").arr()
+        val length = renderer.opt("playbackProgress").obj()?.opt("musicPlaybackProgressRenderer").obj()
+            ?.opt("playbackProgressText").obj()?.runs().orEmpty()
+        return BrowseTrack(
+            videoId = videoId,
+            title = title,
+            artist = show ?: renderer.opt("subtitle").obj()?.runs()?.let(::isolateParts).orEmpty(),
+            thumbnailUrl = thumbnails.best(),
+            durationSeconds = parseSpokenDurationSeconds(length)
+        )
+    }
+
+    /** "2 hr 35 min" / "48 min" / "1 hr" -> seconds (0 when there's none). */
+    private fun parseSpokenDurationSeconds(text: String): Int {
+        val hours = Regex("""(\d+)\s*hr""").find(text)?.groupValues?.get(1)?.toIntOrNull() ?: 0
+        val minutes = Regex("""(\d+)\s*min""").find(text)?.groupValues?.get(1)?.toIntOrNull() ?: 0
+        val seconds = Regex("""(\d+)\s*sec""").find(text)?.groupValues?.get(1)?.toIntOrNull() ?: 0
+        return hours * 3600 + minutes * 60 + seconds
+    }
+
+    // The first words of a card's line that say what it is rather than who made it.
+    private val KIND_LABELS = setOf("Song", "Video", "Episode", "Podcast", "Single", "Album", "EP")
+
     private fun kindOf(endpoint: JSONObject): BrowseKind? {
         val pageType = endpoint.opt("browseEndpointContextSupportedConfigs").obj()
             ?.opt("browseEndpointContextMusicConfig").obj()?.optString("pageType").orEmpty()
         return when {
-            "USER_CHANNEL" in pageType || "PODCAST" in pageType || "EPISODE" in pageType -> null
+            "USER_CHANNEL" in pageType || "EPISODE" in pageType || "NON_MUSIC_AUDIO" in pageType -> null
+            "PODCAST_SHOW" in pageType -> BrowseKind.PLAYLIST
             "ARTIST" in pageType -> BrowseKind.ARTIST
             "ALBUM" in pageType -> BrowseKind.ALBUM
             "PLAYLIST" in pageType -> BrowseKind.PLAYLIST
@@ -406,7 +451,7 @@ object BrowseParser {
 
     /** One playable row - null for a video-shaped one (see this file's own top-level doc: this
      * app only ever surfaces real audio tracks, never a music video standing in for one). */
-    private fun parseTrackRow(renderer: JSONObject, allowWidescreen: Boolean = false): BrowseTrack? {
+    private fun parseTrackRow(renderer: JSONObject, allowWidescreen: Boolean = true): BrowseTrack? {
         val overlayEndpoint = renderer.opt("overlay").obj()?.opt("musicItemThumbnailOverlayRenderer").obj()
             ?.opt("content").obj()?.opt("musicPlayButtonRenderer").obj()?.opt("playNavigationEndpoint").obj()
             ?.opt("watchEndpoint").obj()

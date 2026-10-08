@@ -159,10 +159,10 @@ internal class YouTubeHistoryReporter(
                 app.youtubeWebSession.scope(account)
                 val tracking = client.record(video, play.nonce, account)
                 if (tracking == null) {
-                    Log.w(TAG, "YouTube listening history skipped: signed out or account changed")
+                    android.util.Log.i(TAG, "YouTube listening history skipped: signed out or account changed")
                     return@launch
                 }
-                Log.i(TAG, "YouTube listening history registered; video=$video; listeningReports=${tracking.watchtimeUrl != null}")
+                android.util.Log.i(TAG, "YouTube listening history registered; video=$video; listeningReports=${tracking.watchtimeUrl != null}")
                 withContext(Dispatchers.Main) {
                     play.tracking = tracking
                     if (play.closed || current !== play) sendWatchtime(play, SystemClock.elapsedRealtime(), final = true)
@@ -174,7 +174,7 @@ internal class YouTubeHistoryReporter(
                 // Only the reason (an HTTP code, "no tracking URL", a network error) - never
                 // authentication, cookies or tracking URLs; playback is unaffected.
                 val reason = if (e is java.io.IOException) e.javaClass.simpleName else e.message
-                Log.w(TAG, "Couldn't register YouTube listening history; video=$video; reason=$reason")
+                android.util.Log.i(TAG, "Couldn't register YouTube listening history; video=$video; reason=$reason")
             }
         }
     }
@@ -190,13 +190,13 @@ internal class YouTubeHistoryReporter(
         app.workScope.launch(Dispatchers.IO) {
             try {
                 if (client.watchtime(tracking, play.nonce, account, seconds, final)) {
-                    Log.i(TAG, "YouTube listening time reported; seconds=$seconds; final=$final")
+                    android.util.Log.i(TAG, "YouTube listening time reported; seconds=$seconds; final=$final")
                 }
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
                 val reason = if (e is java.io.IOException) e.javaClass.simpleName else e.message
-                Log.w(TAG, "Couldn't report YouTube listening time; reason=$reason")
+                android.util.Log.i(TAG, "Couldn't report YouTube listening time; reason=$reason")
             }
         }
     }

@@ -233,6 +233,7 @@ def resolve_stream_url(video_id, format_selector="bestaudio/best"):
     url = f"https://music.youtube.com/watch?v={video_id}"
     t0 = time.monotonic()
     info, mode, last_error = None, None, None
+    failures = []
     for mode, attempt in (("light", light), ("full", opts), ("default", defaults)):
         try:
             with yt_dlp.YoutubeDL(attempt) as ydl:
@@ -242,9 +243,11 @@ def resolve_stream_url(video_id, format_selector="bestaudio/best"):
             last_error = ValueError("no stream url")
         except Exception as e:
             last_error = e
+        # Why this way failed, short, for the shareable log (yt-dlp's own message).
+        failures.append(f"{mode}: {str(last_error).replace('ERROR: ', '').strip()[:220]}")
         info = None
     if info is None:
-        raise last_error
+        raise Exception(" | ".join(failures)) from last_error
     print(f"[timing] resolve_stream_url({video_id}) [{mode}]: {time.monotonic() - t0:.2f}s")
     entry = _entry_from_info(info)
     entry["url"] = info.get("url")

@@ -59,11 +59,23 @@ class DiscoveryRepository(
                     page = client.browseContinuation(token)
                     pages++
                 }
-                shelves.values.toList()
+                withNewReleases(shelves.values.toList())
             }.onFailure { e -> android.util.Log.e("DiscoveryRepo", "personalHome(): fetch/parse failed", e) }
                 .getOrNull()
                 ?.takeIf { it.isNotEmpty() }
         }
+    }
+
+    /** Like YouTube Music's app, the feed carries a New releases shelf; the website's feed often
+     * leaves it out, so it's read from the New releases page itself (as this account) and put
+     * after the first few shelves. One request per Home load; a failure just leaves it out. */
+    private fun withNewReleases(shelves: List<com.abn3li.telemusic.data.browse.HomeShelf>): List<com.abn3li.telemusic.data.browse.HomeShelf> {
+        if (shelves.any { it.title.contains("new release", ignoreCase = true) }) return shelves
+        val releases = runCatching {
+            BrowseParser.parseNewReleasesShelf(client.browse(NEW_RELEASES_PAGE_ID), NEW_RELEASES_TITLE)
+        }.onFailure { e -> android.util.Log.w("DiscoveryRepo", "New releases not read: ${e.message}") }
+            .getOrNull() ?: return shelves
+        return shelves.toMutableList().apply { add(minOf(NEW_RELEASES_POSITION, size), releases) }
     }
 
     /** After signing in or out: what was read as the old account (or anonymously) goes. */
@@ -317,6 +329,10 @@ class DiscoveryRepository(
         /** Not a YouTube id either: "Show all" of a signed-in Home shelf with no page of its own. */
         const val SHELF_BROWSE_PREFIX = "telemusic_shelf:"
         private const val COMMUNITY_FEED_PAGES = 4
-        private const val PERSONAL_FEED_PAGES = 3
+        // The website's feed is ~5 pages; YouTube Music's app shows all of them.
+        private const val PERSONAL_FEED_PAGES = 6
+        private const val NEW_RELEASES_PAGE_ID = "FEmusic_new_releases"
+        private const val NEW_RELEASES_TITLE = "New releases"
+        private const val NEW_RELEASES_POSITION = 3
     }
 }

@@ -249,7 +249,10 @@ fun TgMusicNavGraph(navController: NavHostController = rememberNavController()) 
             NavHost(
                 navController = navController,
                 startDestination = startDestination,
-                modifier = Modifier.padding(innerPadding).windowInsetsPadding(barsInsets.only(WindowInsetsSides.Top)).then(rememberVerticalBounce(currentRoute)),
+                // No edge effect: the page just stops at its ends. (Android's stretch stays off -
+                // Samsung's renderer crashed with it - and the custom bounce that replaced it got
+                // in the way of touches and of Home's pull to refresh.)
+                modifier = Modifier.padding(innerPadding).windowInsetsPadding(barsInsets.only(WindowInsetsSides.Top)),
                 enterTransition = { EnterTransition.None },
                 exitTransition = { ExitTransition.None },
                 popEnterTransition = { EnterTransition.None },
