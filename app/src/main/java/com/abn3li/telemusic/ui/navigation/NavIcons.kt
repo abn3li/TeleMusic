@@ -10,7 +10,7 @@ import androidx.compose.ui.unit.dp
 
 /**
  * The bottom bar's own icon family: one 24-unit grid, a 1.9 rounded stroke, round caps and
- * joins, so the three read as a set. Drawn in black and tinted by the bar (Icon's tint), so
+ * joins, so the tabs read as a set. Drawn in black and tinted by the bar (Icon's tint), so
  * the same vector serves the grey and accent states.
  */
 internal object NavIcons {
@@ -23,6 +23,10 @@ internal object NavIcons {
     private const val SEARCH =
         "M10.6 4.2A6.4 6.4 0 1 1 10.6 17A6.4 6.4 0 1 1 10.6 4.2Z M15.3 15.3L20 20"
 
+    // Compass with the same rounded outline as the other navigation icons.
+    private const val DISCOVER =
+        "M12 3.5A8.5 8.5 0 1 1 12 20.5A8.5 8.5 0 1 1 12 3.5Z M15.8 8.2L13.6 13.6L8.2 15.8L10.4 10.4Z"
+
     // Two track spines and a flagged note: a music collection, not a single note.
     private const val LIBRARY_STROKES = "M4.3 7V19.2 M8.2 5V19.2 M15.4 17V5.3L20.4 4.1V7.3"
     private const val LIBRARY_NOTE_HEAD = "M13 14.4A2.6 2.6 0 1 1 13 19.6A2.6 2.6 0 1 1 13 14.4Z"
@@ -31,6 +35,7 @@ internal object NavIcons {
 
     val Home: ImageVector by lazy { icon("NavHome") { stroked(HOME) } }
     val Search: ImageVector by lazy { icon("NavSearch") { stroked(SEARCH) } }
+    val Discover: ImageVector by lazy { icon("NavDiscover") { stroked(DISCOVER) } }
     val Library: ImageVector by lazy {
         icon("NavLibrary") {
             stroked(LIBRARY_STROKES)

@@ -61,6 +61,7 @@ import com.abn3li.telemusic.data.browse.FULL_ARTWORK_SIZE
 import com.abn3li.telemusic.data.browse.googleArtworkAtSize
 import com.abn3li.telemusic.data.local.SongEntity
 import com.abn3li.telemusic.ui.library.CoverTile
+import com.abn3li.telemusic.ui.library.feedArtworkBorder
 import com.abn3li.telemusic.ui.library.LargeTitleGrid
 import com.abn3li.telemusic.ui.library.LibraryDivider
 import com.abn3li.telemusic.ui.library.SectionHeader
@@ -243,13 +244,16 @@ internal fun LazyListScope.trackRows(
 /** An album / playlist / artist card in a shelf, sized like the library artist page's album
  * cards; an artist's picture is round. */
 @Composable
-internal fun CollectionCard(item: BrowseCollection, onClick: () -> Unit) {
+internal fun CollectionCard(item: BrowseCollection, artworkBorder: Boolean = false, onClick: () -> Unit) {
     val round = item.kind == BrowseKind.ARTIST
     Column(
         Modifier.width(142.dp).youtubeCollectionActions(item, onClick),
         horizontalAlignment = if (round) Alignment.CenterHorizontally else Alignment.Start
     ) {
-        Box(Modifier.fillMaxWidth().aspectRatio(1f).then(if (round) Modifier.clip(CircleShape) else Modifier)) {
+        val artworkShape = if (round) CircleShape else androidx.compose.foundation.shape.RoundedCornerShape(8.dp)
+        Box(Modifier.fillMaxWidth().aspectRatio(1f)
+            .then(if (artworkBorder) Modifier.feedArtworkBorder(artworkShape) else Modifier)
+            .then(if (round) Modifier.clip(CircleShape) else Modifier)) {
             CoverTile(
                 item.thumbnailUrl,
                 Modifier.fillMaxWidth().aspectRatio(1f),

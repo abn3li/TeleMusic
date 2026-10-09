@@ -290,7 +290,7 @@ internal fun SwipeToPlayNext(
 private const val SIDEWAYS_RATIO = 1.5f
 
 @Composable
-internal fun SongArtwork(song: SongEntity, size: Dp, corner: Dp) {
+internal fun SongArtwork(song: SongEntity, size: Dp, corner: Dp, modifier: Modifier = Modifier) {
     // The cached list thumbnail is only 160 px - sharp in a list row, blurry stretched across a
     // Home card (128 dp is ~380 px). Big tiles load the full cover instead; Coil decodes it down
     // to the tile's size once and keeps it in memory, so scrolling back costs nothing.
@@ -298,7 +298,7 @@ internal fun SongArtwork(song: SongEntity, size: Dp, corner: Dp) {
     var fullFailed by remember(song.telegramMessageId) { mutableStateOf(false) }
     val art = if (size >= LARGE_TILE && !fullFailed) song.displayArtwork else song.listArtwork
     Box(
-        Modifier.size(size).clip(RoundedCornerShape(corner)).background(LocalPalette.current.raised),
+        modifier.size(size).clip(RoundedCornerShape(corner)).background(LocalPalette.current.raised),
         contentAlignment = Alignment.Center
     ) {
         Icon(Icons.Rounded.MusicNote, null, tint = ink.copy(alpha = 0.3f), modifier = Modifier.size(size * 0.45f))
@@ -323,7 +323,7 @@ private val LARGE_TILE = 96.dp
 
 /** The long-press card: song header, then actions. Pops in at the pressed row. */
 @Composable
-private fun SongContextMenu(song: SongEntity, actions: LibrarySongActions, anchorTopPx: Float, onDismiss: () -> Unit) {
+internal fun SongContextMenu(song: SongEntity, actions: LibrarySongActions, anchorTopPx: Float, onDismiss: () -> Unit) {
     val context = LocalContext.current
     var showArtworkDialog by remember { mutableStateOf(false) }
     LibraryContextMenu(anchorTopPx, onDismiss) { maxHeight, onAction ->

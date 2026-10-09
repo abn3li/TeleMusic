@@ -11,6 +11,8 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.Dispatchers
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.geometry.Rect
 import com.abn3li.telemusic.ui.theme.SystemBarsState
 import androidx.compose.foundation.layout.WindowInsets
@@ -59,6 +61,7 @@ import com.abn3li.telemusic.data.browse.BrowseTrack
 import com.abn3li.telemusic.ui.download.BrowseCollectionScreen
 import com.abn3li.telemusic.ui.onboarding.OnboardingScreen
 import com.abn3li.telemusic.ui.search.SearchScreen
+import com.abn3li.telemusic.ui.search.DiscoverScreen
 import com.abn3li.telemusic.ui.library.AlbumDetailScreen
 import com.abn3li.telemusic.ui.library.ArtistDetailScreen
 import com.abn3li.telemusic.ui.library.ArtistSongsScreen
@@ -66,6 +69,8 @@ import com.abn3li.telemusic.ui.library.LibraryAlbumsScreen
 import com.abn3li.telemusic.ui.library.LibraryArtistsScreen
 import com.abn3li.telemusic.ui.library.LibraryCallbacks
 import com.abn3li.telemusic.ui.library.LibraryHomeScreen
+import com.abn3li.telemusic.ui.library.LibraryLocalMusicScreen
+import com.abn3li.telemusic.ui.library.LibraryRecentlyAddedScreen
 import com.abn3li.telemusic.ui.library.LibraryPlaylistsScreen
 import com.abn3li.telemusic.ui.library.LibrarySongsScreen
 import com.abn3li.telemusic.ui.library.LibraryViewModel
@@ -84,7 +89,8 @@ import com.abn3li.telemusic.ui.sync.SyncScreen
 
 private val LibraryRoutes = setOf(
     Routes.LIBRARY, Routes.LIBRARY_SONGS, Routes.LIBRARY_ALBUMS, Routes.LIBRARY_ARTISTS, Routes.LIBRARY_PLAYLISTS,
-    Routes.ALBUM, Routes.ARTIST, Routes.ARTIST_SONGS, Routes.PLAYLIST, Routes.SMART_PLAYLIST
+    Routes.ALBUM, Routes.ARTIST, Routes.ARTIST_SONGS, Routes.PLAYLIST, Routes.SMART_PLAYLIST,
+    Routes.LIBRARY_LOCAL_MUSIC, Routes.LIBRARY_RECENTLY_ADDED, Routes.LIBRARY_SEARCH
 )
 
 object Routes {
@@ -95,6 +101,9 @@ object Routes {
     const val LIBRARY_ALBUMS = "library/albums"
     const val LIBRARY_ARTISTS = "library/artists"
     const val LIBRARY_PLAYLISTS = "library/playlists"
+    const val LIBRARY_LOCAL_MUSIC = "library/local_music"
+    const val LIBRARY_RECENTLY_ADDED = "library/recently_added"
+    const val LIBRARY_SEARCH = "library/search"
     const val ARTIST_SONGS = "artist_songs/{artist}"
     const val SYNC = "sync"
     const val SETTINGS = "settings"
@@ -103,6 +112,7 @@ object Routes {
     const val PLAYLIST = "playlist/{id}/{name}"
     const val SMART_PLAYLIST = "smart_playlist/{kind}"
     const val SEARCH = "search"
+    const val DISCOVER = "discover"
     const val YOUTUBE_SIGN_IN = "youtube_sign_in"
     const val SPOTIFY = "spotify"
     const val YOUTUBE_BROWSE = "youtube_browse/{browseId}/{title}/{params}"
@@ -208,12 +218,14 @@ fun TgMusicNavGraph(navController: NavHostController = rememberNavController()) 
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = navBackStackEntry?.destination?.route
     val inLibrary = currentRoute in LibraryRoutes
-    val showBottomBar = inLibrary || currentRoute in listOf(Routes.HOME, Routes.SEARCH, Routes.SYNC, Routes.SETTINGS)
+    val showBottomBar = inLibrary || currentRoute in listOf(Routes.HOME, Routes.DISCOVER, Routes.SEARCH, Routes.SYNC, Routes.SETTINGS)
 
     val frostedBackdrop = rememberFrostedBackdrop()
     // The player's open/close movement: the page steps back under it, the dock moves with it.
     val playerTransition = remember { com.abn3li.telemusic.ui.nowplaying.PlayerTransition() }
+    val searchFocusRequest = rememberSaveable { mutableIntStateOf(0) }
     val navigateTab: (String) -> Unit = { route ->
+        if (route == Routes.SEARCH) searchFocusRequest.intValue++
         when {
             // Home tapped: back to the Home page (a playlist/artist opened from Home
             // sits on top of it).
@@ -310,12 +322,16 @@ fun TgMusicNavGraph(navController: NavHostController = rememberNavController()) 
                         viewModel = libraryViewModel,
                         callbacks = libraryCallbacks,
                         onOpenSettings = { navController.navigate(Routes.SETTINGS) },
-                        onOpenPlaylist = { id, name -> navController.navigate(Routes.playlist(id, name)) },
                         onOpenSmartPlaylist = { kind -> navController.navigate(Routes.smartPlaylist(kind)) },
                         onOpenCollection = { c -> navController.navigate(Routes.youtubeBrowse(c.browseId, c.title, c.params)) },
                         onPlayTracks = { tracks, index -> playStreams(tracks, index, false) },
                         nowPlayingId = playerState.song?.telegramMessageId,
                         isPlaying = playerState.isPlaying
+                    )
+                }
+                composable(Routes.DISCOVER) {
+                    DiscoverScreen(
+                        onOpenCollection = { c -> navController.navigate(Routes.youtubeBrowse(c.browseId, c.title, c.params)) }
                     )
                 }
                 composable(Routes.SEARCH) {
@@ -324,7 +340,8 @@ fun TgMusicNavGraph(navController: NavHostController = rememberNavController()) 
                         callbacks = libraryCallbacks,
                         onOpenPlaylist = { id, name -> navController.navigate(Routes.playlist(id, name)) },
                         onOpenCollection = { c -> navController.navigate(Routes.youtubeBrowse(c.browseId, c.title, c.params)) },
-                        onPlayTracks = playStreams
+                        onPlayTracks = playStreams,
+                        focusRequest = searchFocusRequest.intValue
                     )
                 }
                 composable(Routes.SPOTIFY) {
@@ -335,11 +352,34 @@ fun TgMusicNavGraph(navController: NavHostController = rememberNavController()) 
                 }
                 composable(Routes.LIBRARY) {
                     LibraryHomeScreen(
+                        viewModel = libraryViewModel,
+                        callbacks = libraryCallbacks,
                         onOpenPlaylists = { navController.navigate(Routes.LIBRARY_PLAYLISTS) },
                         onOpenArtists = { navController.navigate(Routes.LIBRARY_ARTISTS) },
                         onOpenAlbums = { navController.navigate(Routes.LIBRARY_ALBUMS) },
                         onOpenSongs = { navController.navigate(Routes.LIBRARY_SONGS) },
-                        onOpenSettings = { navController.navigate(Routes.SETTINGS) }
+                        onOpenSettings = { navController.navigate(Routes.SETTINGS) },
+                        onOpenPlaylist = { id, name -> navController.navigate(Routes.playlist(id, name)) },
+                        onOpenSmartPlaylist = { kind -> navController.navigate(Routes.smartPlaylist(kind)) },
+                        onOpenDownloads = { navController.navigate(Routes.smartPlaylist(SmartPlaylistKind.DOWNLOADED)) },
+                        onOpenLocalMusic = { navController.navigate(Routes.LIBRARY_LOCAL_MUSIC) },
+                        onOpenRecentlyAdded = { navController.navigate(Routes.LIBRARY_RECENTLY_ADDED) }
+                    )
+                }
+                composable(Routes.LIBRARY_LOCAL_MUSIC) {
+                    LibraryLocalMusicScreen(libraryViewModel, libraryCallbacks)
+                }
+                composable(Routes.LIBRARY_RECENTLY_ADDED) {
+                    LibraryRecentlyAddedScreen(libraryViewModel, libraryCallbacks)
+                }
+                composable(Routes.LIBRARY_SEARCH) {
+                    SearchScreen(
+                        libraryViewModel = libraryViewModel,
+                        callbacks = libraryCallbacks,
+                        onOpenPlaylist = { id, name -> navController.navigate(Routes.playlist(id, name)) },
+                        onOpenCollection = { c -> navController.navigate(Routes.youtubeBrowse(c.browseId, c.title, c.params)) },
+                        onPlayTracks = playStreams,
+                        startInLibrary = true
                     )
                 }
                 composable(Routes.LIBRARY_SONGS) {

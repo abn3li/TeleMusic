@@ -45,7 +45,7 @@ data class HomeData(
     val loaded: Boolean = false
 )
 
-/** One tile in the Library page's Pinned grid - a real playlist or a smart one. */
+/** One tile in the Library page's Pinned shelf - a real playlist or a smart one. */
 data class PinnedPlaylist(
     val key: String,
     val title: String,
@@ -125,6 +125,17 @@ class LibraryViewModel(private val repository: MusicRepository) : ViewModel() {
 
     /** Every library song, with nothing hidden - what the search page looks through. */
     val allSongs: StateFlow<List<SongEntity>> = repository.observeLibrary(SortField.TITLE, true)
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    // These pages read only while open. Sorting and filtering happen on library changes,
+    // off the UI thread, so scrolling and an idle page do no extra work.
+    val recentlyAddedSongs: StateFlow<List<SongEntity>> = repository.observeLibrary(SortField.DATE_ADDED, false)
+        .flowOn(kotlinx.coroutines.Dispatchers.Default)
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val localSongs: StateFlow<List<SongEntity>> = repository.observeLibrary(SortField.TITLE, true)
+        .map { songs -> songs.filter { it.isLocalImport && it.localFilePath != null } }
+        .flowOn(kotlinx.coroutines.Dispatchers.Default)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     val albums: StateFlow<List<AlbumSummary>> = repository.observeAlbums().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())

@@ -14,7 +14,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
 data class DiscoveryUiState(
-    // Search browse content (cached by DiscoveryRepository, so a second visit is instant).
+    // Discover's categories (cached by DiscoveryRepository, so a second visit is instant).
     val isLoading: Boolean = true,
     val genres: List<BrowseCollection> = emptyList(),
     // The user's pinned-by-URL playlists, straight from Room: an import or remove shows up here
@@ -23,13 +23,13 @@ data class DiscoveryUiState(
     val importPlaylistError: String? = null
 )
 
-/** The Search tab's categories and playlists imported by link. */
+/** Discover's categories and playlists imported by link. */
 class DiscoveryViewModel(
     private val ytDlpRepository: YtDlpRepository,
     private val discoveryRepository: DiscoveryRepository
 ) : ViewModel() {
     // Starts with the categories when they're already in memory (they are, from app start on any
-    // phone that has loaded them once), so opening Search shows them at once - no spinner.
+    // phone that has loaded them once), so opening Discover shows them at once - no spinner.
     private val _uiState = MutableStateFlow(
         discoveryRepository.genresIfLoaded().let { DiscoveryUiState(isLoading = it == null, genres = it.orEmpty()) }
     )
@@ -46,7 +46,7 @@ class DiscoveryViewModel(
         }
     }
 
-    /** Fetches genres. The Search tab keeps this ViewModel while you switch tabs,
+    /** Fetches genres. Discover keeps this ViewModel while you switch tabs,
      * so a start without a connection is retried from the error message ([reload]). */
     private fun load() {
         loadJob = viewModelScope.launch {

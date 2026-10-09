@@ -57,7 +57,7 @@ internal val ClassicDockInset = 136.dp
 internal val ClassicTabsInset = 72.dp
 internal val ClassicMiniPlayerInset = 58.dp
 
-/** The three tabs share one capsule; the transport stays in its own row above it. */
+/** The tabs share one capsule; the transport stays in its own row above it. */
 @Composable
 internal fun ClassicDock(
     currentRoute: String?,
@@ -132,7 +132,7 @@ internal fun ClassicDock(
 
 @Composable
 private fun ClassicTabs(currentRoute: String?, onNavigate: (String) -> Unit, capsules: FrostedCapsules, modifier: Modifier = Modifier) {
-    val routes = remember { listOf(Routes.HOME, Routes.SEARCH, Routes.LIBRARY) }
+    val routes = remember { listOf(Routes.HOME, Routes.DISCOVER, Routes.SEARCH, Routes.LIBRARY) }
     val selectedIndex = routes.indexOf(currentRoute)
     val indicator = animateFloatAsState(selectedIndex.coerceAtLeast(0).toFloat(),
         spring(dampingRatio = 0.72f, stiffness = 320f), label = "tabIndicator")
@@ -144,8 +144,8 @@ private fun ClassicTabs(currentRoute: String?, onNavigate: (String) -> Unit, cap
         val gap = 6.dp
         val rowWidth = with(density) { rowSize.width.toDp() }
         val rowHeight = with(density) { rowSize.height.toDp() }
-        val tabWidth = ((rowWidth - gap * 2) / 3).coerceAtLeast(0.dp)
-        // Keep the highlight around the glyph and label, even with only three full-width targets.
+        val tabWidth = ((rowWidth - gap * (routes.size - 1)) / routes.size).coerceAtLeast(0.dp)
+        // Keep the highlight around the glyph and label on wider screens too.
         val highlightWidth = ((rowWidth - gap * 3) / 4).coerceIn(0.dp, tabWidth)
         val stride = with(density) { (tabWidth + gap).toPx() }
         val highlightInset = with(density) { ((tabWidth - highlightWidth) / 2).toPx() }
@@ -161,8 +161,9 @@ private fun ClassicTabs(currentRoute: String?, onNavigate: (String) -> Unit, cap
         Row(Modifier.fillMaxWidth().onSizeChanged { rowSize = it },
             horizontalArrangement = Arrangement.spacedBy(gap)) {
             ClassicTab(NavIcons.Home, "Home", selectedIndex == 0, { onNavigate(Routes.HOME) }, Modifier.weight(1f))
-            ClassicTab(NavIcons.Search, "Search", selectedIndex == 1, { onNavigate(Routes.SEARCH) }, Modifier.weight(1f))
-            ClassicTab(NavIcons.Library, "Library", selectedIndex == 2, { onNavigate(Routes.LIBRARY) }, Modifier.weight(1f))
+            ClassicTab(NavIcons.Discover, "Discover", selectedIndex == 1, { onNavigate(Routes.DISCOVER) }, Modifier.weight(1f))
+            ClassicTab(NavIcons.Search, "Search", selectedIndex == 2, { onNavigate(Routes.SEARCH) }, Modifier.weight(1f))
+            ClassicTab(NavIcons.Library, "Library", selectedIndex == 3, { onNavigate(Routes.LIBRARY) }, Modifier.weight(1f))
         }
     }
 }

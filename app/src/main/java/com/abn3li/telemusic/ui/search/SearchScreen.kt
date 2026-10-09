@@ -66,6 +66,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -106,7 +107,6 @@ import com.abn3li.telemusic.data.local.SongEntity
 import com.abn3li.telemusic.ui.download.CenteredMessage
 import com.abn3li.telemusic.ui.download.CenteredSpinner
 import com.abn3li.telemusic.ui.download.CollectionCard
-import com.abn3li.telemusic.ui.download.DiscoveryUiState
 import com.abn3li.telemusic.ui.download.DiscoveryViewModel
 import com.abn3li.telemusic.ui.download.ImportPlaylistPrompt
 import com.abn3li.telemusic.ui.download.Thumbnail
@@ -125,7 +125,6 @@ import com.abn3li.telemusic.ui.library.LibraryFieldColor
 import android.widget.Toast
 import androidx.compose.material.icons.rounded.QueuePlayNext
 import com.abn3li.telemusic.ui.library.SwipeToPlayNext
-import com.abn3li.telemusic.ui.library.LibrarySearchField
 import com.abn3li.telemusic.ui.library.LibrarySongActions
 import com.abn3li.telemusic.ui.library.LibrarySongRow
 import com.abn3li.telemusic.ui.library.LibraryViewModel
@@ -156,7 +155,9 @@ fun SearchScreen(
     callbacks: LibraryCallbacks,
     onOpenPlaylist: (Long, String) -> Unit,
     onOpenCollection: (BrowseCollection) -> Unit,
-    onPlayTracks: (tracks: List<BrowseTrack>, index: Int, shuffle: Boolean) -> Unit
+    onPlayTracks: (tracks: List<BrowseTrack>, index: Int, shuffle: Boolean) -> Unit,
+    startInLibrary: Boolean = false,
+    focusRequest: Int = 0
 ) {
     val app = LocalContext.current.applicationContext as TgMusicApp
     val search = viewModel<YouTubeDownloadViewModel>(factory = viewModelFactory { initializer {
@@ -184,66 +185,61 @@ fun SearchScreen(
     }
     // Saveable: opening a result leaves this screen, and Back should land on the same page
     // (YouTube Music / Your Library) and list (overview / See all) as before.
-    var source by rememberSaveable { mutableStateOf(SearchSource.YOUTUBE) }
+    var source by rememberSaveable { mutableStateOf(if (startInLibrary) SearchSource.LIBRARY else SearchSource.YOUTUBE) }
     var section by rememberSaveable { mutableStateOf(ResultSection.OVERVIEW) }
-    // The results field should take over focus only for the Browse -> Results transition. When
-    // this destination is recreated after returning from an album/artist/playlist, this starts
-    // false, so Search is restored without reopening the keyboard.
-    var focusResultsField by remember { mutableStateOf(false) }
+    // Library's search opens ready to type. Save the handled request so returning from a
+    // result restores the page without reopening the keyboard.
+    var focusResultsField by rememberSaveable { mutableStateOf(startInLibrary) }
+    var handledFocusRequest by rememberSaveable { mutableIntStateOf(0) }
+    // Each explicit tap on the Search tab asks for focus once. Returning from a result
+    // restores the handled request, so it doesn't unexpectedly reopen the keyboard.
+    LaunchedEffect(focusRequest) {
+        if (focusRequest != handledFocusRequest) {
+            handledFocusRequest = focusRequest
+            focusResultsField = true
+        }
+    }
     LaunchedEffect(query, source) {
         section = ResultSection.OVERVIEW
         if (query.isNotEmpty() && source == SearchSource.YOUTUBE) {
             delay(YOUTUBE_SEARCH_DELAY_MS); search.search()
         }
     }
+    state.downloadConflict?.let { conflict -> DownloadAnywayPrompt(conflict, search::dismissDownloadConflict) }
+    BackHandler(query.isNotEmpty()) {
+        if (section != ResultSection.OVERVIEW) section = ResultSection.OVERVIEW else search.onQueryChange("")
+    }
+    ResultsScreen(state, source, section, library, actions, callbacks,
+        { source = it }, { section = it }, search::onQueryChange, { if (source == SearchSource.YOUTUBE) search.search(true) },
+        { if (startInLibrary) callbacks.onBack() else search.onQueryChange("") }, onOpenPlaylist, onOpenCollection,
+        // Queues every song result from the tapped one, so Next / Previous walk the results.
+        { result ->
+            val tracks = state.results.map { BrowseTrack(it.videoId, it.title, it.artist, it.thumbnailUrl, it.durationSeconds) }
+            onPlayTracks(tracks, state.results.indexOfFirst { it.videoId == result.videoId }.coerceAtLeast(0), false)
+        },
+        { result ->
+            callbacks.onPlayNext(app.musicRepository.queueIdsForStreams(listOf(
+                BrowseTrack(result.videoId, result.title, result.artist, result.thumbnailUrl, result.durationSeconds))).first())
+            Toast.makeText(app, "Playing next", Toast.LENGTH_SHORT).show()
+        },
+        { result -> app.downloadGate.run { search.onDownloadIconClick(result) } },
+        focusResultsField,
+        { focusResultsField = false })
+}
+
+@Composable
+fun DiscoverScreen(onOpenCollection: (BrowseCollection) -> Unit) {
+    val app = LocalContext.current.applicationContext as TgMusicApp
     val discovery = viewModel<DiscoveryViewModel>(factory = viewModelFactory { initializer {
         DiscoveryViewModel(app.ytDlpRepository, app.discoveryRepository)
     } })
     val feed by discovery.uiState.collectAsState()
     var showImport by remember { mutableStateOf(false) }
     if (showImport) ImportPlaylistPrompt(discovery) { showImport = false }
-    state.downloadConflict?.let { conflict -> DownloadAnywayPrompt(conflict, search::dismissDownloadConflict) }
-    BackHandler(query.isNotEmpty()) {
-        if (section != ResultSection.OVERVIEW) section = ResultSection.OVERVIEW else search.onQueryChange("")
-    }
-    if (query.isEmpty()) {
-        BrowseScreen(state.query, { value ->
-            if (value.isNotEmpty()) focusResultsField = true
-            search.onQueryChange(value)
-        }, feed, onOpenCollection, { showImport = true },
-            discovery::removeImportedPlaylist, discovery::reload)
-    } else {
-        ResultsScreen(state, source, section, library, actions, callbacks,
-            { source = it }, { section = it }, search::onQueryChange, { search.search(true) },
-            { search.onQueryChange("") }, onOpenPlaylist, onOpenCollection,
-            // Queues every song result from the tapped one, so Next / Previous walk the results.
-            { result ->
-                val tracks = state.results.map { BrowseTrack(it.videoId, it.title, it.artist, it.thumbnailUrl, it.durationSeconds) }
-                onPlayTracks(tracks, state.results.indexOfFirst { it.videoId == result.videoId }.coerceAtLeast(0), false)
-            },
-            { result ->
-                callbacks.onPlayNext(app.musicRepository.queueIdsForStreams(listOf(
-                    BrowseTrack(result.videoId, result.title, result.artist, result.thumbnailUrl, result.durationSeconds))).first())
-                Toast.makeText(app, "Playing next", Toast.LENGTH_SHORT).show()
-            },
-            { result -> app.downloadGate.run { search.onDownloadIconClick(result) } },
-            focusResultsField,
-            { focusResultsField = false })
-    }
-}
-
-@Composable
-private fun BrowseScreen(
-    query: String, onQueryChange: (String) -> Unit, feed: DiscoveryUiState,
-    onOpenCollection: (BrowseCollection) -> Unit, onImport: () -> Unit,
-    onRemove: (ImportedPlaylistEntity) -> Unit, onRetry: () -> Unit
-) {
-    LargeTitleList(title = "Search", stickyContent = {
-        LibrarySearchField(query, "Songs, artists, albums", onQueryChange)
-    }) {
+    LargeTitleList(title = "Discover") {
         item("imported_header") { Header("Your Imported Playlists", action = {
             Icon(Icons.Rounded.Add, "Import playlist", tint = AppAccent,
-                modifier = Modifier.size(30.dp).clickable(onClick = onImport))
+                modifier = Modifier.size(30.dp).clickable { showImport = true })
         }) }
         if (feed.importedPlaylists.isEmpty()) item("imported_empty") {
             Text("Tap + to add a YouTube or Spotify playlist.", color = GroupLabelColor,
@@ -252,13 +248,13 @@ private fun BrowseScreen(
             LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp), contentPadding = PaddingValues(horizontal = 18.dp)) {
                 itemsIndexed(feed.importedPlaylists, key = { index, p -> "imported_${index}_${p.browseId}" }) { _, p -> ImportedCard(p, {
                     onOpenCollection(BrowseCollection(p.browseId, null, p.title, p.subtitle, p.thumbnailUrl, BrowseKind.PLAYLIST))
-                }, { onRemove(p) }) }
+                }, { discovery.removeImportedPlaylist(p) }) }
             }
         }
         when {
             feed.isLoading -> item("loading") { CenteredSpinner() }
             feed.genres.isEmpty() -> item("error") {
-                Box(Modifier.fillMaxWidth().clickable(onClick = onRetry)) { CenteredMessage("Couldn't load YouTube Music. Tap to try again.") }
+                Box(Modifier.fillMaxWidth().clickable(onClick = discovery::reload)) { CenteredMessage("Couldn't load YouTube Music. Tap to try again.") }
             }
             else -> browseContent(feed.genres, onOpenCollection)
         }
@@ -309,7 +305,11 @@ private fun ResultsScreen(
             if (!SystemBarsState.playerOpen) Modifier.frostedBackdropSource(backdrop, paper) else Modifier
         )) { page ->
             LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(top = ResultsHeaderHeight + statusBar, bottom = LocalMiniPlayerInset.current + 24.dp)) {
-                if (page == 0) youtubeResults(section, state, loading, onSection, openCollection, play, playNext, download)
+                if (state.query.isBlank()) item("search_hint") {
+                    Text(if (page == 0) "Search songs, artists, albums and playlists on YouTube Music."
+                        else "Search songs, artists, albums and playlists in your library.", color = GroupLabelColor,
+                        fontSize = 16.sp, modifier = Modifier.padding(20.dp))
+                } else if (page == 0) youtubeResults(section, state, loading, onSection, openCollection, play, playNext, download)
                 else libraryResults(section, library, actions, callbacks, onSection, openPlaylist)
             }
         }
@@ -338,6 +338,7 @@ private fun ResultsHeader(query: String, source: SearchSource, onQuery: (String)
     LaunchedEffect(requestFocus) {
         if (requestFocus) {
             focus.requestFocus()
+            keyboard?.show()
             onFocusHandled()
         }
     }
@@ -380,7 +381,11 @@ private fun ResultsHeader(query: String, source: SearchSource, onQuery: (String)
                     }))
                 Icon(Icons.Rounded.Cancel, "Clear", tint = ink.copy(.45f), modifier = Modifier.size(20.dp).clickable { onQuery("") })
             }
-            Text("Cancel", color = AppAccent, fontSize = 16.sp, modifier = Modifier.clickable(onClick = onCancel))
+            Text("Cancel", color = AppAccent, fontSize = 16.sp, modifier = Modifier.clickable {
+                focusManager.clearFocus()
+                keyboard?.hide()
+                onCancel()
+            })
         }
         Row(Modifier.fillMaxWidth().height(38.dp).clip(RoundedCornerShape(9.dp)).background(LibraryFieldColor).padding(2.dp),
             horizontalArrangement = Arrangement.spacedBy(2.dp)) {

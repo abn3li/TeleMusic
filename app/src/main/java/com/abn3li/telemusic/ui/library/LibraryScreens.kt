@@ -6,6 +6,10 @@ import com.abn3li.telemusic.ui.theme.ink
 import androidx.compose.ui.platform.LocalContext
 import com.abn3li.telemusic.TgMusicApp
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.layout.onPlaced
+import androidx.compose.ui.layout.positionInWindow
+import androidx.compose.ui.layout.LayoutCoordinates
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.ui.platform.LocalHapticFeedback
@@ -118,51 +122,18 @@ private fun debounced(text: String): String {
     return value
 }
 
-@Composable
-fun LibraryHomeScreen(
-    onOpenPlaylists: () -> Unit,
-    onOpenArtists: () -> Unit,
-    onOpenAlbums: () -> Unit,
-    onOpenSongs: () -> Unit,
-    onOpenSettings: () -> Unit
-) {
-    LargeTitleList(
-        title = "Library",
-        titleTrailing = {
-            Icon(
-                Icons.Rounded.AccountCircle,
-                contentDescription = "Settings",
-                tint = AppAccent,
-                modifier = Modifier
-                    .size(34.dp)
-                    .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onOpenSettings)
-            )
-        }
-    ) {
-        item("links") {
-            Column(Modifier.fillMaxWidth()) {
-                LibraryLinkRow(Icons.AutoMirrored.Rounded.QueueMusic, "Playlists", onOpenPlaylists)
-                LibraryDivider(start = 60.dp)
-                LibraryLinkRow(Icons.Rounded.MicExternalOn, "Artists", onOpenArtists)
-                LibraryDivider(start = 60.dp)
-                LibraryLinkRow(Icons.Rounded.Album, "Albums", onOpenAlbums)
-                LibraryDivider(start = 60.dp)
-                LibraryLinkRow(Icons.Rounded.MusicNote, "Songs", onOpenSongs)
-                LibraryDivider(start = 60.dp)
-            }
-        }
-    }
-}
-
-/** One cover in Home's Pinned grid; long-press offers Unpin. */
+/** One cover in Library's Pinned shelf; long-press offers Unpin. */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-internal fun PinnedTile(item: PinnedPlaylist, onLeft: Boolean, onOpen: () -> Unit, onUnpin: () -> Unit, modifier: Modifier = Modifier) {
+internal fun PinnedTile(item: PinnedPlaylist, onOpen: () -> Unit, onUnpin: () -> Unit, modifier: Modifier = Modifier) {
     val haptics = LocalHapticFeedback.current
     var menuOpen by remember { mutableStateOf(false) }
     var tileHeightPx by remember { mutableIntStateOf(0) }
+    var menuAlignStart by remember { mutableStateOf(true) }
+    val tileLayout = remember { arrayOfNulls<LayoutCoordinates>(1) }
+    val screenMiddle = with(LocalDensity.current) { LocalConfiguration.current.screenWidthDp.dp.toPx() / 2 }
     val gapPx = with(LocalDensity.current) { 6.dp.roundToPx() }
-    Box(modifier.onSizeChanged { tileHeightPx = it.height }) {
+    Box(modifier.onPlaced { tileLayout[0] = it }.onSizeChanged { tileHeightPx = it.height }) {
         Column(
             Modifier
                 .fillMaxWidth()
@@ -172,32 +143,38 @@ internal fun PinnedTile(item: PinnedPlaylist, onLeft: Boolean, onOpen: () -> Uni
                     onClick = onOpen,
                     onLongClick = {
                         haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                        // A shelf can move any card to either side. Choose the menu's side
+                        // on hold instead of assuming the card still sits in its original column.
+                        val layout = tileLayout[0]?.takeIf { it.isAttached }
+                        menuAlignStart = layout == null || layout.positionInWindow().x + layout.size.width / 2f < screenMiddle
                         menuOpen = true
                     }
                 )
         ) {
             if (item.smartKind != null) {
                 Box(
-                    Modifier.fillMaxWidth().aspectRatio(1f).clip(RoundedCornerShape(7.dp)).background(LibraryTileColor),
+                    Modifier.fillMaxWidth().aspectRatio(1f).feedArtworkBorder(RoundedCornerShape(9.dp))
+                        .clip(RoundedCornerShape(9.dp)).background(LibraryTileColor),
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(item.smartKind.icon(), contentDescription = null, tint = AppAccent, modifier = Modifier.fillMaxSize(0.42f))
                 }
             } else {
-                CoverTile(item.artworkUrl, Modifier.fillMaxWidth().aspectRatio(1f), corner = 7, placeholder = Icons.AutoMirrored.Rounded.QueueMusic)
+                CoverTile(item.artworkUrl, Modifier.fillMaxWidth().aspectRatio(1f).feedArtworkBorder(RoundedCornerShape(9.dp)), corner = 9, placeholder = Icons.AutoMirrored.Rounded.QueueMusic)
             }
-            Spacer(Modifier.height(5.dp))
-            Text(item.title, color = ink.copy(alpha = 0.9f), fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Text("Playlist", color = ink.copy(alpha = 0.6f), fontSize = 13.sp, lineHeight = 17.sp, maxLines = 1)
+            Spacer(Modifier.height(7.dp))
+            Text(item.title, color = ink, fontSize = 14.sp, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Spacer(Modifier.height(2.dp))
+            Text("Playlist", color = ink.copy(alpha = 0.5f), fontSize = 13.sp, maxLines = 1)
         }
         // Opens just under the tile, growing toward the screen's middle so it never runs off an edge.
         LibraryFloatingMenu(
             expanded = menuOpen,
             onDismiss = { menuOpen = false },
-            alignStart = onLeft,
+            alignStart = menuAlignStart,
             offsetYPx = tileHeightPx + gapPx
         ) {
-            LibraryMenuItem("Unpin", Icons.Rounded.PushPin) { menuOpen = false; onUnpin() }
+            LibraryMenuItem("Unpin from Library", Icons.Rounded.PushPin) { menuOpen = false; onUnpin() }
         }
     }
 }
@@ -466,8 +443,8 @@ private fun ArtistRow(artist: ArtistSummary, onClick: () -> Unit) {
 }
 
 @Composable
-internal fun ArtistAvatar(url: String?, sizeDp: Int) {
-    Box(Modifier.size(sizeDp.dp).clip(CircleShape).background(Color(0xFF8E8E93)), contentAlignment = Alignment.BottomCenter) {
+internal fun ArtistAvatar(url: String?, sizeDp: Int, modifier: Modifier = Modifier) {
+    Box(modifier.size(sizeDp.dp).clip(CircleShape).background(Color(0xFF8E8E93)), contentAlignment = Alignment.BottomCenter) {
         Icon(Icons.Rounded.Person, null, tint = Color(0xFFE5E5EA), modifier = Modifier.fillMaxSize(0.8f))
         if (!url.isNullOrEmpty()) {
             AsyncImage(model = url, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
