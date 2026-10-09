@@ -16,6 +16,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.graphics.drawscope.withTransform
+import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Canvas
@@ -25,6 +27,7 @@ import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.drawscope.ContentDrawScope
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.clipPath
+import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.RoundRect
@@ -152,13 +155,24 @@ internal fun Modifier.frostedSurface(
 /** Capsules (the dock's player and tabs) that share one frosted material - see [frostedCapsuleGroup]. */
 internal class FrostedCapsules {
     val bounds = mutableStateMapOf<Int, Rect>()
+    // While true (the dock moving with the player) the glass is not blurred again: the blur
+    // already made is drawn moved, scaled and faded with each capsule ([moves]) - the same
+    // glass throughout, so nothing is swapped (or flashes) when the movement ends.
+    var moving: () -> Boolean = { false }
+    val moves = mutableMapOf<Int, () -> CapsuleMove>()
 }
+
+/** Where a capsule is drawn while it moves: shifted down by [dy], scaled about its centre, faded. */
+internal class CapsuleMove(val dy: Float, val scale: Float, val alpha: Float)
 
 /** One of [capsules]: its place in the group, so the group's material shows inside it. */
 @Composable
 internal fun Modifier.frostedCapsule(capsules: FrostedCapsules, id: Int): Modifier {
     DisposableEffect(capsules, id) { onDispose { capsules.bounds.remove(id) } }
     return onPlaced { coordinates ->
+        // Its resting place only: mid-movement this position already includes the capsule's own
+        // shift, which the group adds again ([CapsuleMove]) - the glass then ran ahead of it.
+        if (capsules.moving()) return@onPlaced
         val rect = Rect(coordinates.positionInParent(), coordinates.size.toSize())
         if (capsules.bounds[id] != rect) capsules.bounds[id] = rect
     }.clip(RoundedCornerShape(percent = 50))
@@ -179,6 +193,11 @@ internal fun Modifier.frostedCapsuleGroup(backdrop: FrostedBackdrop, capsules: F
     }
     return onGloballyPositioned { position = it.positionInRoot() }
         .drawWithContent {
+            if (capsules.moving()) {
+                drawMovingCapsules(capsules, surface, light)
+                drawContent()
+                return@drawWithContent
+            }
             val shapes = capsules.bounds.values.toList()
             if (shapes.isNotEmpty()) {
                 val path = Path().apply {
@@ -206,6 +225,42 @@ internal fun Modifier.frostedCapsuleGroup(backdrop: FrostedBackdrop, capsules: F
         }
 }
 
+/** The capsules mid-movement: the blur last made, moved and faded with each one - not made again. */
+private fun DrawScope.drawMovingCapsules(capsules: FrostedCapsules, surface: NativeFrostedSurface?, light: Boolean) {
+    val tint = if (light) Color(0xFFF7F7F9) else Color(0xFF0D0D0F)
+    val recorded = Build.VERSION.SDK_INT >= 31 && surface != null && surface.hasRecording()
+    // Kept in every frame of the movement, even with both capsules faded out: a picture the
+    // screen stops drawing is thrown away, and the capsules then came back as plain black until
+    // the glass was made again - a flash as the player finished closing.
+    if (recorded) clipRect(0f, 0f, 0f, 0f) { surface!!.drawRecorded(this) }
+    val border = Stroke(0.5.dp.toPx())
+    for ((id, rect) in capsules.bounds) {
+        val move = capsules.moves[id]?.invoke() ?: CapsuleMove(0f, 1f, 1f)
+        if (move.alpha <= 0.001f) continue
+        val corner = CornerRadius(rect.height / 2f)
+        withTransform({
+            translate(0f, move.dy)
+            scale(move.scale, move.scale, rect.center)
+        }) {
+            val outline = Path().apply { addRoundRect(RoundRect(rect, corner)) }
+            clipPath(outline) {
+                drawIntoCanvas { canvas ->
+                    // One capsule's glass faded as a whole (an offscreen layer, during the movement only).
+                    canvas.saveLayer(rect, androidx.compose.ui.graphics.Paint().apply { alpha = move.alpha })
+                    if (recorded) {
+                        surface!!.drawRecorded(this)
+                        drawRect(FrostedGrain.brush)
+                    }
+                    drawRect(tint.copy(alpha = if (recorded) { if (light) 0.73f else 0.8f } else 1f))
+                    canvas.restore()
+                }
+            }
+            drawRoundRect(Color.White.copy(alpha = 0.10f * move.alpha), topLeft = rect.topLeft, size = rect.size,
+                cornerRadius = corner, style = border)
+        }
+    }
+}
+
 @RequiresApi(31)
 private class NativeFrostedSurface {
     val node = RenderNode("Frosted surface")
@@ -213,6 +268,24 @@ private class NativeFrostedSurface {
     private var effectHeight = 0
     private var effectDensity = 0f
     private var blurEffect: RenderEffect? = null
+    // How the last recording maps back onto the surface (see drawRecorded).
+    private var recordedPadding = 0f
+    private var recordedScale = 1f
+
+    fun hasRecording(): Boolean = node.hasDisplayList()
+
+    /** The blur as last recorded, drawn again without recording it (the surface moving). */
+    fun drawRecorded(scope: DrawScope) = with(scope) {
+        val canvas = drawContext.canvas.nativeCanvas
+        canvas.save()
+        try {
+            canvas.translate(-recordedPadding, -recordedPadding)
+            canvas.scale(1f / recordedScale, 1f / recordedScale)
+            canvas.drawRenderNode(node)
+        } finally {
+            canvas.restore()
+        }
+    }
 
     fun draw(scope: DrawScope, source: NativeFrostedSource, position: Offset) = with(scope) {
         // Nine times fewer pixels than a full-resolution effect, confined to these small pills.
@@ -247,15 +320,9 @@ private class NativeFrostedSurface {
         } finally {
             node.endRecording()
         }
-        val canvas = drawContext.canvas.nativeCanvas
-        canvas.save()
-        try {
-            canvas.translate(-padding, -padding)
-            canvas.scale(1f / scale, 1f / scale)
-            canvas.drawRenderNode(node)
-        } finally {
-            canvas.restore()
-        }
+        recordedPadding = padding
+        recordedScale = scale
+        drawRecorded(this)
     }
 }
 

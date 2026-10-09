@@ -79,6 +79,9 @@ data class LyricsSourceState(
     val message: String? = null
 )
 
+// How long buffering must last before the player shows its spinner (see onPlaybackStateChanged).
+private const val BUFFERING_SHOWN_AFTER_MS = 400L
+
 class NowPlayingViewModel(
     private val repository: MusicRepository,
     private val playbackController: PlaybackController,
@@ -90,6 +93,8 @@ class NowPlayingViewModel(
     private val _uiState = MutableStateFlow(NowPlayingUiState())
     val uiState: StateFlow<NowPlayingUiState> = _uiState
     private var tickerJob: Job? = null
+    private var bufferingJob: Job? = null
+    private var latestPlaybackState = Player.STATE_IDLE
     private var loadJob: Job? = null
     private var prefetchJob: Job? = null
     private var lyricsJob: Job? = null
@@ -327,7 +332,21 @@ class NowPlayingViewModel(
             // A song ending moves the queue on in MusicService (so it works with the app closed);
             // this screen follows the new song through onMediaItemTransition above.
             override fun onPlaybackStateChanged(playbackState: Int) {
-                _uiState.value = _uiState.value.copy(isBuffering = playbackState == Player.STATE_BUFFERING)
+                latestPlaybackState = playbackState
+                bufferingJob?.cancel()
+                if (playbackState != Player.STATE_BUFFERING) {
+                    if (_uiState.value.isBuffering) _uiState.value = _uiState.value.copy(isBuffering = false)
+                    return
+                }
+                // Shown only once buffering lasts: a quality upgrade's switch to FLAC (and any
+                // short stall) buffers for a moment, and swapping the play button for a spinner
+                // and back mid-scroll redrew the dock and hitched the page behind it.
+                bufferingJob = viewModelScope.launch {
+                    delay(BUFFERING_SHOWN_AFTER_MS)
+                    if (latestPlaybackState == Player.STATE_BUFFERING) {
+                        _uiState.value = _uiState.value.copy(isBuffering = true)
+                    }
+                }
             }
     }
 

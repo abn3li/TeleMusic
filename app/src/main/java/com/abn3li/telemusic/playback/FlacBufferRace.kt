@@ -30,6 +30,9 @@ private sealed interface FlacRaceEvent {
 }
 
 /** Two independent files may compete; only a verified playable buffer can own playback. */
+// How often a transfer's progress reaches the main thread (see the download loop in start()).
+private const val PROGRESS_INTERVAL_MS = 120L
+
 internal suspend fun awaitReadyFlacBuffer(session: PeerFlacClient, target: FlacTarget, directory: File,
     position: () -> Long, report: (FlacUpgradeStage, String, FlacTransferInfo?) -> Unit): ReadyFlacBuffer = coroutineScope {
     val events = Channel<FlacRaceEvent>(Channel.BUFFERED)
@@ -72,8 +75,18 @@ internal suspend fun awaitReadyFlacBuffer(session: PeerFlacClient, target: FlacT
                 events.send(FlacRaceEvent.Progress(attempt, buffer, null))
                 withFlacTimeout(180000, "FLAC download") {
                     var header: FlacHeader? = null
+                    var lastProgressAt = 0L
+                    var held = false
                     while (true) {
-                        withFlacTimeout(20000, "FLAC data stalled") { buffer.updates.receive() }
+                        // A held-back progress is still delivered after a quiet interval, so a
+                        // transfer that pauses right after it doesn't leave its last bytes unseen.
+                        if (held && kotlinx.coroutines.withTimeoutOrNull(PROGRESS_INTERVAL_MS) { buffer.updates.receive() } == null) {
+                            held = false
+                            lastProgressAt = System.nanoTime()
+                            header?.let { events.send(FlacRaceEvent.Progress(attempt, buffer, it)) }
+                            continue
+                        }
+                        if (!held) withFlacTimeout(20000, "FLAC data stalled") { buffer.updates.receive() }
                         buffer.checkFailure()
                         if (header == null) header = readFlacHeader(buffer.prefix())
                         val verified = header
@@ -85,7 +98,17 @@ internal suspend fun awaitReadyFlacBuffer(session: PeerFlacClient, target: FlacT
                             throw FlacPeerException(if (kotlin.math.abs(verified.durationMs - target.durationMs) > 2500)
                                 "FLAC timing differs · unsafe to switch" else "FLAC recording did not match")
                         }
-                        events.send(FlacRaceEvent.Progress(attempt, buffer, verified))
+                        // At most one progress event per PROGRESS_INTERVAL_MS (the first and the
+                        // last always): every data packet used to reach the main thread - hundreds
+                        // a second - and each re-checked readiness and redrew the quality status,
+                        // which stalled the screen for half a second as the bytes started.
+                        val now = System.nanoTime()
+                        if (lastProgressAt == 0L || buffer.complete ||
+                            now - lastProgressAt >= PROGRESS_INTERVAL_MS * 1_000_000L) {
+                            lastProgressAt = now
+                            held = false
+                            events.send(FlacRaceEvent.Progress(attempt, buffer, verified))
+                        } else held = true
                         if (buffer.complete) break
                     }
                 }

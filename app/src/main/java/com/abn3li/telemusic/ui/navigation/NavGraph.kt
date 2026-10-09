@@ -38,6 +38,12 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.graphics.TransformOrigin
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -205,8 +211,8 @@ fun TgMusicNavGraph(navController: NavHostController = rememberNavController()) 
     val showBottomBar = inLibrary || currentRoute in listOf(Routes.HOME, Routes.SEARCH, Routes.SYNC, Routes.SETTINGS)
 
     val frostedBackdrop = rememberFrostedBackdrop()
-    val dockPlayerBounds = remember { mutableStateOf<Rect?>(null) }
-    val readDockBounds = remember { { dockPlayerBounds.value } }
+    // The player's open/close movement: the page steps back under it, the dock moves with it.
+    val playerTransition = remember { com.abn3li.telemusic.ui.nowplaying.PlayerTransition() }
     val navigateTab: (String) -> Unit = { route ->
         when {
             // Home tapped: back to the Home page (a playlist/artist opened from Home
@@ -246,12 +252,30 @@ fun TgMusicNavGraph(navController: NavHostController = rememberNavController()) 
         onOpen = { c -> navController.navigate(Routes.youtubeBrowse(c.browseId, c.title, c.params)) },
         onPlay = playStreams, onPlayNext = { ids -> playerViewModel.playNext(ids) }
     ) {
-    Box(Modifier.fillMaxSize()) {
+    // Black behind the page while it steps back under the opening player.
+    Box(Modifier.fillMaxSize().drawBehind { if (playerTransition.expansion.value > 0.001f) drawRect(Color.Black) }) {
       // The status bar's gap is kept on the pages themselves (below), not here: the Scaffold clips
       // to its own bounds, and an artist / album / playlist page draws its artwork up behind
       // the status bar.
       val barsInsets = WindowInsets.systemBars.union(WindowInsets.displayCutout)
-      Box(Modifier.fillMaxSize().windowInsetsPadding(barsInsets.only(WindowInsetsSides.Horizontal + WindowInsetsSides.Bottom))) {
+      val pageCorner = with(LocalDensity.current) { 22.dp.toPx() }
+      val pageDrop = with(LocalDensity.current) { 10.dp.toPx() }
+      Box(Modifier.fillMaxSize()
+          .graphicsLayer {
+              // The page steps back as the player opens over it: a little smaller, lower, with
+              // rounded corners. A layer change only - the page itself isn't drawn again.
+              val progress = playerTransition.expansion.value
+              transformOrigin = TransformOrigin(0.5f, 0f)
+              val scale = 1f - 0.07f * progress
+              scaleX = scale
+              scaleY = scale
+              translationY = pageDrop * progress
+              if (progress > 0.001f) {
+                  shape = RoundedCornerShape(pageCorner * progress)
+                  clip = true
+              } else clip = false
+          }
+          .windowInsetsPadding(barsInsets.only(WindowInsetsSides.Horizontal + WindowInsetsSides.Bottom))) {
         Scaffold(
             contentWindowInsets = WindowInsets(0),
             modifier = Modifier.then(
@@ -403,9 +427,15 @@ fun TgMusicNavGraph(navController: NavHostController = rememberNavController()) 
 
         DownloadLocationPrompt(app)
       }
+        // ...and darkens.
+        Box(Modifier.fillMaxSize().drawBehind {
+            val progress = playerTransition.expansion.value
+            if (progress > 0.001f) drawRect(Color.Black.copy(alpha = 0.55f * progress))
+        })
 
         PlayerSheetOverlay(
             viewModel = playerViewModel,
+            transition = playerTransition,
             // A YouTube song opens its artist's YouTube Music page (found from the song itself);
             // a Telegram or imported song the library's artist page, where those songs are.
             onOpenArtist = { artist ->
@@ -417,7 +447,6 @@ fun TgMusicNavGraph(navController: NavHostController = rememberNavController()) 
                 } else navController.navigate(Routes.artist(artist))
             },
             onOpenAlbum = { album -> navController.navigate(Routes.album(album)) },
-            miniPlayerBounds = readDockBounds,
             miniPlayerContent = { state, expand, drag, dragEnd, miniModifier ->
                 ClassicDock(
                     currentRoute = if (inLibrary) Routes.LIBRARY else currentRoute,
@@ -431,7 +460,7 @@ fun TgMusicNavGraph(navController: NavHostController = rememberNavController()) 
                     onPlayPause = { playerViewModel.togglePlayPause() },
                     onNext = { playerViewModel.nextSong() },
                     onPrevious = { playerViewModel.previousSong() },
-                    onPlayerBounds = { dockPlayerBounds.value = it },
+                    transition = playerTransition,
                     showTabs = showBottomBar,
                     modifier = miniModifier.windowInsetsPadding(barsInsets.only(WindowInsetsSides.Horizontal))
                 )

@@ -48,6 +48,8 @@ import coil.compose.AsyncImage
 import com.abn3li.telemusic.data.local.displayArtwork
 import com.abn3li.telemusic.ui.library.CalmSpinner
 import com.abn3li.telemusic.ui.nowplaying.NowPlayingUiState
+import com.abn3li.telemusic.ui.nowplaying.PlayerTransition
+import com.abn3li.telemusic.ui.nowplaying.easeOutCubic
 import com.abn3li.telemusic.ui.theme.LocalPalette
 import kotlin.math.abs
 
@@ -69,31 +71,67 @@ internal fun ClassicDock(
     onPlayPause: () -> Unit,
     onNext: () -> Unit,
     onPrevious: () -> Unit,
-    onPlayerBounds: (Rect) -> Unit,
+    transition: PlayerTransition,
     showTabs: Boolean,
     modifier: Modifier = Modifier
 ) {
     if (!showTabs && state.song == null) return
 
-    // The player and the tabs share one frosted material: the page is blurred once for both.
-    val capsules = remember { FrostedCapsules() }
+    // The player and the tabs share one frosted material: the page is blurred once for both,
+    // except while they move with the player (see FrostedCapsules.paused).
+    val density = LocalDensity.current
+    val sink = with(density) { 90.dp.toPx() }
+    // How each part moves with the player - the content (below) and its glass (drawn by the
+    // group, see FrostedCapsules.moves) follow the same numbers.
+    val playerMove = {
+        val progress = transition.expansion.value
+        val from = transition.origin?.player?.top ?: transition.dockPlayer?.top ?: 0f
+        // Whole again just before the player has closed: the closing slows right down at its
+        // end, and a capsule still fading in through those frames then snapped to solid (a flash).
+        CapsuleMove(dy = -from * progress, scale = 1f, alpha = 1f - transition.stage(0.02f, 0.12f))
+    }
+    val tabsMove = {
+        val gone = easeOutCubic(transition.stage(0.06f, 0.6f))
+        CapsuleMove(dy = sink * gone, scale = 1f - 0.04f * gone, alpha = 1f - gone)
+    }
+    val capsules = remember(transition) {
+        FrostedCapsules().apply {
+            moving = { transition.expansion.value > 0.001f }
+            moves[0] = playerMove
+            moves[1] = tabsMove
+        }
+    }
     Column(modifier.fillMaxWidth()
         .padding(start = 16.dp, end = 16.dp, bottom = maxOf(bottomInset, 15.dp) + 2.dp)
         .clickable(remember { MutableInteractionSource() }, indication = null) {}
         .frostedCapsuleGroup(backdrop, capsules)) {
         if (state.song != null) {
-            ClassicMiniPlayer(state, onExpand, onExpandDrag, onExpandDragEnd, onPlayPause, onNext, onPrevious,
+            ClassicMiniPlayer(state, onExpand, onExpandDrag, onExpandDragEnd, onPlayPause, onNext, onPrevious, transition,
                 Modifier.fillMaxWidth().height(56.dp)
-                    .onGloballyPositioned { onPlayerBounds(it.boundsInRoot()) }
+                    .onGloballyPositioned { transition.dockPlayer = it.boundsInRoot() }
+                    .graphicsLayer {
+                        // Rides up with the card's top edge and gives way to it quickly, so the
+                        // artwork and title flying out of it are seen.
+                        val move = playerMove()
+                        translationY = move.dy
+                        alpha = move.alpha
+                    }
                     .frostedCapsule(capsules, 0))
             if (showTabs) Spacer(Modifier.height(8.dp))
         }
-        if (showTabs) ClassicTabs(currentRoute, onNavigate, capsules)
+        if (showTabs) ClassicTabs(currentRoute, onNavigate, capsules, Modifier.graphicsLayer {
+            // The tabs sink away over the first half of the opening and rise back as it closes.
+            val move = tabsMove()
+            translationY = move.dy
+            scaleX = move.scale
+            scaleY = move.scale
+            alpha = move.alpha
+        })
     }
 }
 
 @Composable
-private fun ClassicTabs(currentRoute: String?, onNavigate: (String) -> Unit, capsules: FrostedCapsules) {
+private fun ClassicTabs(currentRoute: String?, onNavigate: (String) -> Unit, capsules: FrostedCapsules, modifier: Modifier = Modifier) {
     val routes = remember { listOf(Routes.HOME, Routes.SEARCH, Routes.LIBRARY) }
     val selectedIndex = routes.indexOf(currentRoute)
     val indicator = animateFloatAsState(selectedIndex.coerceAtLeast(0).toFloat(),
@@ -102,7 +140,7 @@ private fun ClassicTabs(currentRoute: String?, onNavigate: (String) -> Unit, cap
     val density = LocalDensity.current
     val ink = LocalPalette.current.ink
     var rowSize by remember { mutableStateOf(IntSize.Zero) }
-    Box(Modifier.fillMaxWidth().frostedCapsule(capsules, 1).padding(6.dp)) {
+    Box(modifier.fillMaxWidth().frostedCapsule(capsules, 1).padding(6.dp)) {
         val gap = 6.dp
         val rowWidth = with(density) { rowSize.width.toDp() }
         val rowHeight = with(density) { rowSize.height.toDp() }
@@ -161,7 +199,8 @@ private fun ClassicTab(icon: ImageVector, label: String, selected: Boolean, onCl
 private fun ClassicMiniPlayer(
     state: NowPlayingUiState, onExpand: () -> Unit,
     onExpandDrag: (Float) -> Unit, onExpandDragEnd: (Float) -> Unit,
-    onPlayPause: () -> Unit, onNext: () -> Unit, onPrevious: () -> Unit, modifier: Modifier
+    onPlayPause: () -> Unit, onNext: () -> Unit, onPrevious: () -> Unit,
+    transition: PlayerTransition, modifier: Modifier
 ) {
     val song = state.song ?: return
     val ink = LocalPalette.current.ink
@@ -179,12 +218,19 @@ private fun ClassicMiniPlayer(
             .clickable(remember { MutableInteractionSource() }, indication = null, onClick = onExpand)
             .padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically
     ) {
-        Box(Modifier.size(40.dp).clip(RoundedCornerShape(8.dp)).background(ink.copy(alpha = 0.08f)),
+        Box(Modifier.size(40.dp)
+            .onGloballyPositioned { transition.dockArtwork = it.boundsInRoot() }
+            // Hidden while its copy in the player flies; back (over the closing's slow last
+            // frames) before the player has finished closing, so it doesn't pop in at the end.
+            .graphicsLayer { alpha = if (transition.origin?.artwork != null) 1f - transition.stage(0.01f, 0.04f) else 1f }
+            .clip(RoundedCornerShape(8.dp)).background(ink.copy(alpha = 0.08f)),
             contentAlignment = Alignment.Center) {
             Icon(Icons.Rounded.MusicNote, null, tint = ink.copy(alpha = 0.4f), modifier = Modifier.size(20.dp))
             AsyncImage(song.displayArtwork, null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
         }
         Column(Modifier.weight(1f).padding(start = 10.dp, end = 4.dp)
+            .onGloballyPositioned { transition.dockTitle = it.boundsInRoot() }
+            .graphicsLayer { alpha = if (transition.origin?.title != null) 1f - transition.stage(0.01f, 0.04f) else 1f }
             .draggable(drag, Orientation.Horizontal, onDragStopped = { velocity ->
                 val travel = swipeTravel[0]
                 if (abs(travel) >= threshold || abs(velocity) >= 1400f) {
