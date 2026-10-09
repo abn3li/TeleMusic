@@ -25,6 +25,13 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.asPaddingValues
+import androidx.compose.foundation.layout.displayCutout
+import androidx.compose.foundation.layout.only
+import androidx.compose.foundation.layout.statusBars
+import androidx.compose.foundation.layout.union
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -69,12 +76,14 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
@@ -89,10 +98,39 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Popup
 import androidx.compose.ui.window.PopupProperties
 import com.abn3li.telemusic.ui.nowplaying.LocalMiniPlayerInset
+import com.abn3li.telemusic.ui.navigation.FrostedBackdrop
+import com.abn3li.telemusic.ui.navigation.frostedBackdropSource
+import com.abn3li.telemusic.ui.navigation.frostedSurface
+import com.abn3li.telemusic.ui.navigation.rememberFrostedBackdrop
 import kotlinx.coroutines.delay
 
 internal val LibraryBarHeight = 54.dp
 internal val SearchStickyHeight = 61.dp
+
+@Composable
+internal fun frostedHeaderTopInset(): Dp {
+    DisposableEffect(Unit) {
+        SystemBarsState.frostedHeaderPages++
+        onDispose { SystemBarsState.frostedHeaderPages-- }
+    }
+    return WindowInsets.statusBars.union(WindowInsets.displayCutout)
+        .only(WindowInsetsSides.Top).asPaddingValues().calculateTopPadding()
+}
+
+/** Keep controls below the system icons while letting the list and its blur reach behind them. */
+internal fun Modifier.extendBehindStatusBar(inset: Dp): Modifier = layout { measurable, constraints ->
+    // A page with no height limit (inside a scrolling parent) is laid out as it is: adding to
+    // an unbounded height would overflow.
+    if (!constraints.hasBoundedHeight) {
+        val placeable = measurable.measure(constraints)
+        return@layout layout(placeable.width, placeable.height) { placeable.place(0, 0) }
+    }
+    val extra = inset.roundToPx()
+    val placeable = measurable.measure(
+        constraints.copy(minHeight = constraints.minHeight + extra, maxHeight = constraints.maxHeight + extra)
+    )
+    layout(placeable.width, constraints.maxHeight) { placeable.place(0, -extra) }
+}
 
 /**
  * iOS-style page: a big 35sp title scrolls with the list and fades out; once it's gone a compact
@@ -112,6 +150,7 @@ internal fun LargeTitleList(
     overlay: (@Composable BoxScope.() -> Unit)? = null,
     // A Settings-style page of grouped cards: grey page, white cards in the light theme.
     grouped: Boolean = false,
+    showTopBar: Boolean = true,
     content: LazyListScope.() -> Unit
 ) {
     val palette = LocalPalette.current
@@ -122,7 +161,7 @@ internal fun LargeTitleList(
         }
     }
     CompositionLocalProvider(LocalPalette provides if (grouped) palette.groupedPage() else palette) {
-        LargeTitleListBody(title, onBack, listState, titleTrailing, barActions, stickyContent, stickyHeight, overlay, content)
+        LargeTitleListBody(title, onBack, listState, titleTrailing, barActions, stickyContent, stickyHeight, overlay, showTopBar, content)
     }
 }
 
@@ -136,9 +175,12 @@ private fun LargeTitleListBody(
     stickyContent: (@Composable () -> Unit)?,
     stickyHeight: Dp,
     overlay: (@Composable BoxScope.() -> Unit)?,
+    showTopBar: Boolean,
     content: LazyListScope.() -> Unit
 ) {
     var barHeightPx by remember { mutableIntStateOf(0) }
+    val backdrop = rememberFrostedBackdrop()
+    val statusBar = frostedHeaderTopInset()
     val titleAlpha by remember(listState) {
         derivedStateOf {
             val first = listState.layoutInfo.visibleItemsInfo.firstOrNull { it.index == 0 }
@@ -158,11 +200,14 @@ private fun LargeTitleListBody(
     }
     val bottomInset = LocalMiniPlayerInset.current + 24.dp
 
-    Box(Modifier.fillMaxSize().background(paper)) {
+    Box(Modifier.fillMaxSize().extendBehindStatusBar(statusBar).background(paper)) {
         LazyColumn(
             state = listState,
-            modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(top = LibraryBarHeight)
+            modifier = Modifier.fillMaxSize().then(
+                if (showSmallTitle && !SystemBarsState.playerOpen) Modifier.frostedBackdropSource(backdrop, paper)
+                else Modifier
+            ),
+            contentPadding = PaddingValues(top = statusBar + if (showTopBar) LibraryBarHeight else 0.dp)
         ) {
             item("large_title") { LargeTitle(title, titleTrailing, { titleAlpha }) }
             if (stickyContent != null) item("sticky_space") { Spacer(Modifier.height(stickyHeight)) }
@@ -175,16 +220,24 @@ private fun LargeTitleListBody(
                     .offset { IntOffset(0, stickyOffset) }
                     .fillMaxWidth()
                     .height(stickyHeight)
-                    .background(paper)
+                    .then(
+                        if (showSmallTitle) Modifier.frostedSurface(backdrop, shape = RectangleShape, drawBorder = false)
+                        else Modifier.background(paper)
+                    )
             ) { stickyContent() }
         }
-        overlay?.invoke(this)
+        if (overlay != null) {
+            Box(Modifier.fillMaxSize().padding(top = statusBar)) { overlay() }
+        }
         LibraryTitleBar(
             title = title,
             onBack = onBack,
             showSmallTitle = showSmallTitle,
             showDivider = stickyContent == null,
             actions = barActions,
+            backdrop = backdrop,
+            statusBar = statusBar,
+            showToolbar = showTopBar,
             modifier = Modifier.onSizeChanged { barHeightPx = it.height }
         )
     }
@@ -200,6 +253,8 @@ internal fun LargeTitleGrid(
     content: LazyGridScope.() -> Unit
 ) {
     var barHeightPx by remember { mutableIntStateOf(0) }
+    val backdrop = rememberFrostedBackdrop()
+    val statusBar = frostedHeaderTopInset()
     val titleAlpha by remember(gridState) {
         derivedStateOf {
             val first = gridState.layoutInfo.visibleItemsInfo.firstOrNull { it.index == 0 }
@@ -219,14 +274,17 @@ internal fun LargeTitleGrid(
     }
     val bottomInset = LocalMiniPlayerInset.current + 24.dp
 
-    Box(Modifier.fillMaxSize().background(paper)) {
+    Box(Modifier.fillMaxSize().extendBehindStatusBar(statusBar).background(paper)) {
         LazyVerticalGrid(
             state = gridState,
             columns = GridCells.Fixed(2),
-            modifier = Modifier.fillMaxSize(),
+            modifier = Modifier.fillMaxSize().then(
+                if (showSmallTitle && !SystemBarsState.playerOpen) Modifier.frostedBackdropSource(backdrop, paper)
+                else Modifier
+            ),
             horizontalArrangement = Arrangement.spacedBy(15.dp),
             verticalArrangement = Arrangement.spacedBy(20.dp),
-            contentPadding = PaddingValues(start = 18.dp, end = 18.dp, top = LibraryBarHeight)
+            contentPadding = PaddingValues(start = 18.dp, end = 18.dp, top = LibraryBarHeight + statusBar)
         ) {
             item("large_title", span = { GridItemSpan(2) }) { LargeTitle(title, null, { titleAlpha }, grid = true) }
             if (stickyContent != null) {
@@ -241,7 +299,10 @@ internal fun LargeTitleGrid(
                     .offset { IntOffset(0, stickyOffset) }
                     .fillMaxWidth()
                     .height(SearchStickyHeight)
-                    .background(paper)
+                    .then(
+                        if (showSmallTitle) Modifier.frostedSurface(backdrop, shape = RectangleShape, drawBorder = false)
+                        else Modifier.background(paper)
+                    )
             ) { stickyContent() }
         }
         LibraryTitleBar(
@@ -250,6 +311,8 @@ internal fun LargeTitleGrid(
             showSmallTitle = showSmallTitle,
             showDivider = stickyContent == null,
             actions = null,
+            backdrop = backdrop,
+            statusBar = statusBar,
             modifier = Modifier.onSizeChanged { barHeightPx = it.height }
         )
     }
@@ -284,11 +347,20 @@ private fun LibraryTitleBar(
     showSmallTitle: Boolean,
     showDivider: Boolean,
     actions: (@Composable RowScope.() -> Unit)?,
+    backdrop: FrostedBackdrop,
+    statusBar: Dp,
+    showToolbar: Boolean = true,
     modifier: Modifier = Modifier
 ) {
-    // Always opaque: the page is black anyway, and fading this in only once the large title had
-    // scrolled away let rows flash through the bar for a few frames on a fast fling.
-    Box(modifier.fillMaxWidth().height(LibraryBarHeight).background(paper)) {
+    // Sample only the list, so the bar never blurs its own title or buttons into the background.
+    // Before the large title scrolls away, keep the original page-colour header.
+    val background = if (showSmallTitle) {
+        Modifier.frostedSurface(backdrop, shape = RectangleShape, drawBorder = false)
+    } else Modifier.background(paper)
+    val toolbarHeight = if (showToolbar) LibraryBarHeight else 0.dp
+    Box(modifier.fillMaxWidth().height(toolbarHeight + statusBar).then(background).padding(top = statusBar)) {
+        // Home keeps the system status area readable without covering the feed with a toolbar.
+        if (!showToolbar) return@Box
         if (onBack != null) {
             Icon(
                 Icons.AutoMirrored.Rounded.ArrowBackIos,

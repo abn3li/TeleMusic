@@ -90,6 +90,8 @@ object SystemBarsState {
     var groupedPages by mutableIntStateOf(0)
     // Pages whose picture runs up behind a see-through status bar (an artist's page).
     var heroPages by mutableIntStateOf(0)
+    // Pages whose blurred header also draws behind the clock and battery.
+    var frostedHeaderPages by mutableIntStateOf(0)
     // Such pages whose photo is still under the status bar (its icons stay light). Each page
     // adds and removes only its own entry, so one leaving can't undo the next one's.
     val heroesOverPhoto = mutableStateListOf<Any>()

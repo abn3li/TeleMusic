@@ -2,6 +2,10 @@ package com.abn3li.telemusic.ui.library
 
 import com.abn3li.telemusic.ui.download.NoResults
 import com.abn3li.telemusic.ui.download.heroTopInset
+import com.abn3li.telemusic.ui.navigation.FrostedHeaderBackground
+import com.abn3li.telemusic.ui.navigation.frostedBackdropSource
+import com.abn3li.telemusic.ui.navigation.rememberFrostedBackdrop
+import com.abn3li.telemusic.ui.navigation.FrostedBackdrop
 import com.abn3li.telemusic.ui.theme.SystemBarsState
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.layout.layout
@@ -602,7 +606,7 @@ internal fun HeroButtonRow(content: @Composable RowScope.() -> Unit) {
 /**
  * The layout every album / artist / playlist page shares, library or YouTube alike: the hero
  * (artwork fading into black, title, [subtitle], [detailLine], then [heroActions] - its buttons),
- * the rows from [body], the top bar that turns solid as the hero scrolls away, and in-page
+ * the rows from [body], the top bar that becomes frosted as the hero scrolls away, and in-page
  * search ([matches] decides which [items] a query keeps; [heroActions] gets openSearch).
  */
 @Composable
@@ -631,6 +635,7 @@ internal fun <T> DetailPageScaffold(
     val scope = rememberCoroutineScope()
     val configuration = LocalConfiguration.current
     val statusBar = heroTopInset()
+    val backdrop = rememberFrostedBackdrop()
     val heroHeight = (configuration.screenHeightDp.dp * 0.6f).coerceIn(380.dp, 560.dp) + statusBar
     val heroHeightPx = with(LocalDensity.current) { heroHeight.toPx() }
     var searching by rememberSaveable { mutableStateOf(false) }
@@ -651,6 +656,7 @@ internal fun <T> DetailPageScaffold(
             }
         }
     }
+    val showFrostedHeader by remember(searching) { derivedStateOf { collapse > 0f } }
     val closeSearch = {
         searchText = ""
         searching = false
@@ -702,7 +708,9 @@ internal fun <T> DetailPageScaffold(
             }
             .background(paper)
     ) {
-        LazyColumn(state = listState, modifier = Modifier.fillMaxSize()) {
+        LazyColumn(state = listState, modifier = Modifier.fillMaxSize().then(
+            if (showFrostedHeader && !SystemBarsState.playerOpen) Modifier.frostedBackdropSource(backdrop, paper) else Modifier
+        )) {
             if (!searching) {
                 item("hero") {
                     Box(Modifier.fillMaxWidth().height(heroHeight).clipToBounds()) {
@@ -831,6 +839,7 @@ internal fun <T> DetailPageScaffold(
             onFavorite = onFavorite,
             menu = menu,
             statusBar = statusBar,
+            backdrop = backdrop,
             modifier = Modifier.onSizeChanged { barHeightPx = it.height }
         )
     }
@@ -910,6 +919,7 @@ private fun DetailTopBar(
     onFavorite: () -> Unit,
     menu: (@Composable ColumnScope.(close: () -> Unit) -> Unit)?,
     statusBar: Dp,
+    backdrop: FrostedBackdrop,
     modifier: Modifier = Modifier
 ) {
     val progress = collapse()
@@ -918,67 +928,68 @@ private fun DetailTopBar(
     val surface = lerp(Color.Black.copy(alpha = 0.34f), ink.copy(alpha = 0.08f), progress)
     val barInk = lerp(Color.White, ink, progress)
     var menuOpen by remember { mutableStateOf(false) }
-    Box(
-        modifier
-            .fillMaxWidth()
-            .background(paper.copy(alpha = progress * 0.96f))
-            .padding(top = statusBar)
-            .padding(horizontal = 16.dp, vertical = 10.dp)
-    ) {
-        Text(
-            title,
-            color = ink,
-            fontSize = 17.sp,
-            fontWeight = FontWeight.Bold,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier
-                .align(Alignment.Center)
-                .padding(horizontal = 110.dp)
-                .graphicsLayer { alpha = ((collapse() - 0.85f) / 0.15f).coerceIn(0f, 1f) }
-        )
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Box(
-                Modifier
-                    .size(38.dp)
-                    .clip(CircleShape)
-                    .background(surface)
-                    .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onBack),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(Icons.AutoMirrored.Rounded.ArrowBackIos, "Back", tint = barInk, modifier = Modifier.padding(start = 5.dp).size(18.dp))
-            }
-            Spacer(Modifier.weight(1f))
-            Row(
-                Modifier.height(38.dp).clip(RoundedCornerShape(19.dp)).background(surface).padding(horizontal = 4.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                if (favorite != null) {
-                    Box(
-                        Modifier.size(34.dp).clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onFavorite),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            if (favorite) Icons.Rounded.Star else Icons.Rounded.StarBorder,
-                            contentDescription = "Favorite",
-                            tint = if (favorite) AppAccent else barInk,
-                            modifier = Modifier.size(22.dp)
-                        )
-                    }
-                    if (menu != null) {
-                        Spacer(Modifier.width(1.dp).height(18.dp).background(barInk.copy(alpha = 0.25f)))
-                    }
+    Box(modifier.fillMaxWidth()) {
+        FrostedHeaderBackground(backdrop, collapse)
+        Box(
+            Modifier.fillMaxWidth()
+                .padding(top = statusBar)
+                .padding(horizontal = 16.dp, vertical = 10.dp)
+        ) {
+            Text(
+                title,
+                color = ink,
+                fontSize = 17.sp,
+                fontWeight = FontWeight.Bold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier
+                    .align(Alignment.Center)
+                    .padding(horizontal = 110.dp)
+                    .graphicsLayer { alpha = ((collapse() - 0.85f) / 0.15f).coerceIn(0f, 1f) }
+            )
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    Modifier
+                        .size(38.dp)
+                        .clip(CircleShape)
+                        .background(surface)
+                        .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onBack),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(Icons.AutoMirrored.Rounded.ArrowBackIos, "Back", tint = barInk, modifier = Modifier.padding(start = 5.dp).size(18.dp))
                 }
-                if (menu != null) {
-                    Box {
+                Spacer(Modifier.weight(1f))
+                Row(
+                    Modifier.height(38.dp).clip(RoundedCornerShape(19.dp)).background(surface).padding(horizontal = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    if (favorite != null) {
                         Box(
-                            Modifier.size(34.dp).clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) { menuOpen = true },
+                            Modifier.size(34.dp).clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onFavorite),
                             contentAlignment = Alignment.Center
                         ) {
-                            Icon(Icons.Rounded.MoreHoriz, "More", tint = barInk, modifier = Modifier.size(26.dp))
+                            Icon(
+                                if (favorite) Icons.Rounded.Star else Icons.Rounded.StarBorder,
+                                contentDescription = "Favorite",
+                                tint = if (favorite) AppAccent else barInk,
+                                modifier = Modifier.size(22.dp)
+                            )
                         }
-                        LibraryFloatingMenu(expanded = menuOpen, onDismiss = { menuOpen = false }) {
-                            menu { menuOpen = false }
+                        if (menu != null) {
+                            Spacer(Modifier.width(1.dp).height(18.dp).background(barInk.copy(alpha = 0.25f)))
+                        }
+                    }
+                    if (menu != null) {
+                        Box {
+                            Box(
+                                Modifier.size(34.dp).clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) { menuOpen = true },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(Icons.Rounded.MoreHoriz, "More", tint = barInk, modifier = Modifier.size(26.dp))
+                            }
+                            LibraryFloatingMenu(expanded = menuOpen, onDismiss = { menuOpen = false }) {
+                                menu { menuOpen = false }
+                            }
                         }
                     }
                 }

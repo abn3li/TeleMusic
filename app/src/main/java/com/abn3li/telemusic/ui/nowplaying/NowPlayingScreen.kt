@@ -77,6 +77,7 @@ import com.abn3li.telemusic.data.local.displayArtwork
 import com.abn3li.telemusic.TgMusicApp
 import com.abn3li.telemusic.data.settings.PlayerEffects
 import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.RoundRect
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Outline
@@ -109,6 +110,9 @@ fun PlayerSheetOverlay(
     bottomOffset: Dp = 84.dp,
     onOpenArtist: (String) -> Unit = {},
     onOpenAlbum: (String) -> Unit = {},
+    miniPlayerBounds: (() -> Rect?)? = null,
+    // The mini player (the dock): state, open, drag-to-open, drag released, its modifier.
+    miniPlayerContent: @Composable (NowPlayingUiState, () -> Unit, (Float) -> Unit, (Float) -> Unit, Modifier) -> Unit,
     modifier: Modifier = Modifier
 ) = BoxWithConstraints(modifier.fillMaxSize()) {
     val stableState by viewModel.stableUiState.collectAsState()
@@ -116,11 +120,12 @@ fun PlayerSheetOverlay(
 
     val expansionFraction = remember { Animatable(0f) }
     var isExpanded by remember { mutableStateOf(false) }
+    var transitionOrigin by remember { mutableStateOf<Rect?>(null) }
 
     val density = LocalDensity.current
     val parentHeightPx = constraints.maxHeight.toFloat()
-    // The mini player's own rectangle - the card grows out of exactly this shape and shrinks
-    // back into it (see MiniPlayer: 12dp side margins, 56dp tall, 16dp corners).
+    // Where the card starts before the dock's player has been measured (it grows out of and
+    // shrinks back into the dock's own player once it has - see miniPlayerBounds).
     val miniHeightPx = with(density) { MiniPlayerBarHeight.toPx() }
     val miniSidePx = with(density) { MiniPlayerSideMargin.toPx() }
     val miniCornerPx = with(density) { MiniPlayerCorner.toPx() }
@@ -128,12 +133,23 @@ fun PlayerSheetOverlay(
     val cardShadowPx = with(density) { 18.dp.toPx() }
 
     fun expand() {
+        if (!isExpanded && transitionOrigin == null) transitionOrigin = miniPlayerBounds?.invoke()
         isExpanded = true
         coroutineScope.launch { expansionFraction.animateTo(1f, SHEET_TRANSITION_SPEC) }
     }
     fun collapse() {
         isExpanded = false
-        coroutineScope.launch { expansionFraction.animateTo(0f, SHEET_TRANSITION_SPEC) }
+        coroutineScope.launch {
+            expansionFraction.animateTo(0f, SHEET_TRANSITION_SPEC)
+            transitionOrigin = null
+        }
+    }
+
+    LaunchedEffect(isExpanded) {
+        if (!isExpanded) {
+            snapshotFlow { expansionFraction.value }.first { it <= 0.001f }
+            transitionOrigin = null
+        }
     }
 
     key(isExpanded) {
@@ -166,60 +182,58 @@ fun PlayerSheetOverlay(
                 // to fill the screen. Content is laid out full size and simply revealed by the
                 // growing clip, riding up with the card's top edge.
                 val progress = expansionFraction.value
-                val side = lerpFloat(miniSidePx, 0f, progress)
-                val cardHeight = lerpFloat(miniHeightPx, size.height, progress)
-                translationY = lerpFloat(miniTopPx, 0f, progress)
-                shape = RevealCardShape(side, cardHeight, lerpFloat(miniCornerPx, 0f, progress))
+                val origin = transitionOrigin ?: miniPlayerBounds?.invoke()
+                val originHeight = origin?.height ?: miniHeightPx
+                // The dock's player is a capsule; before it has been measured, the default shape.
+                val originCorner = if (origin != null) originHeight / 2f else miniCornerPx
+                val side = lerpFloat(origin?.left ?: miniSidePx, 0f, progress)
+                val right = lerpFloat(origin?.let { size.width - it.right } ?: miniSidePx, 0f, progress)
+                val cardHeight = lerpFloat(originHeight, size.height, progress)
+                translationY = lerpFloat(origin?.top ?: miniTopPx, 0f, progress)
+                shape = RevealCardShape(side, cardHeight, lerpFloat(originCorner, 0f, progress), right)
                 clip = true
                 shadowElevation = if (progress > 0.001f && progress < 0.999f) cardShadowPx else 0f
             }
     )
     }
 
-    // Drawn above the card and carried up with its top edge, fading out as the card opens - so
-    // opening reads as the mini player itself turning into the full player.
-    MiniPlayer(
-        state = stableState,
-        onPlayPause = { viewModel.togglePlayPause() },
-        onNext = { viewModel.nextSong() },
-        onPrevious = { viewModel.previousSong() },
-        onClick = { expand() },
-        onExpandDrag = { delta ->
-            coroutineScope.launch {
-                expansionFraction.snapTo((expansionFraction.value - delta / parentHeightPx).coerceIn(0f, 1f))
-            }
-        },
-        onExpandDragEnd = { velocity ->
-            if (velocity < -600f || expansionFraction.value > 0.25f) expand() else collapse()
-        },
-        bottomOffset = bottomOffset,
-        modifier = Modifier
-            .align(Alignment.BottomCenter)
-            .offset {
-                // Out of the way once mostly open, so its invisible bounds can't catch taps
-                // meant for the player's own header.
-                if (expansionFraction.value >= 0.5f) IntOffset(0, parentHeightPx.roundToInt() + 100) else IntOffset.Zero
-            }
-            .graphicsLayer {
-                val progress = expansionFraction.value
-                translationY = -miniTopPx * progress
-                alpha = (1f - progress * 3f).coerceIn(0f, 1f)
-            }
-    )
+    // The mini player rides with the card's top edge and fades into the resting player page.
+    val miniModifier = Modifier
+        .align(Alignment.BottomCenter)
+        .offset {
+            if (expansionFraction.value >= 0.5f) IntOffset(0, parentHeightPx.roundToInt() + 100) else IntOffset.Zero
+        }
+        .graphicsLayer {
+            val progress = expansionFraction.value
+            val origin = transitionOrigin ?: miniPlayerBounds?.invoke()
+            translationY = -(origin?.top ?: miniTopPx) * progress
+            alpha = (1f - progress * 3f).coerceIn(0f, 1f)
+        }
+    val onExpandDrag: (Float) -> Unit = { delta ->
+        if (expansionFraction.value <= 0.001f) transitionOrigin = miniPlayerBounds?.invoke()
+        coroutineScope.launch {
+            expansionFraction.snapTo((expansionFraction.value - delta / parentHeightPx).coerceIn(0f, 1f))
+        }
+    }
+    val onExpandDragEnd: (Float) -> Unit = { velocity ->
+        if (velocity < -600f || expansionFraction.value > 0.25f) expand() else collapse()
+    }
+    miniPlayerContent(stableState, { expand() }, onExpandDrag, onExpandDragEnd, miniModifier)
 }
 
 /** Rounded-rect clip covering [height] px from the top, inset [side] px on both sides. */
 private class RevealCardShape(
     private val side: Float,
     private val height: Float,
-    private val radius: Float
+    private val radius: Float,
+    private val right: Float = side
 ) : Shape {
     override fun createOutline(size: Size, layoutDirection: LayoutDirection, density: Density): Outline =
         Outline.Rounded(
             RoundRect(
                 left = side,
                 top = 0f,
-                right = size.width - side,
+                right = size.width - right,
                 bottom = height.coerceAtMost(size.height),
                 cornerRadius = CornerRadius(radius)
             )

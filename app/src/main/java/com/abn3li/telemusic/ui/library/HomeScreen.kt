@@ -73,6 +73,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.Color
@@ -144,9 +145,10 @@ fun HomeScreen(
     Box(Modifier.fillMaxSize().nestedScroll(refresh.nestedScrollConnection)) {
     LargeTitleList(
         title = "Home",
+        showTopBar = false,
         overlay = {
-            // Clip the indicator's animated entry to the feed, below the fixed title bar.
-            Box(Modifier.fillMaxSize().padding(top = LibraryBarHeight).clipToBounds()) {
+            // Clip the indicator's animated entry below the system status area.
+            Box(Modifier.fillMaxSize().clipToBounds()) {
                 PullToRefreshContainer(state = refresh, containerColor = LibraryFieldColor, contentColor = AppAccent,
                     modifier = Modifier.align(Alignment.TopCenter))
             }
@@ -229,7 +231,7 @@ fun HomeScreen(
         if (homeFeeds.telegram && (home.dailyMix.isNotEmpty() || home.rediscover.isNotEmpty())) {
             item("mixes_header") { HomeSectionHeader("Made for You") }
             item("mixes") {
-                LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                LazyRow(ShelfOwnLayer, contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     if (home.dailyMix.isNotEmpty()) item("daily") {
                         MixCard("Daily Mix", "Your most played", MixDaily, home.dailyMix) { callbacks.onPlayCollection(home.dailyMix.map { it.telegramMessageId }, false) }
                     }
@@ -248,7 +250,7 @@ fun HomeScreen(
         if (homeFeeds.telegram && topArtists.isNotEmpty()) {
             item("artists_header") { HomeSectionHeader("Top Artists") }
             item("artists") {
-                LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                LazyRow(ShelfOwnLayer, contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     items(topArtists, key = { it.artist }) { artist ->
                         Column(
                             Modifier.width(84.dp).clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) { callbacks.onOpenArtist(artist.artist) },
@@ -276,6 +278,7 @@ fun HomeScreen(
             }
             item("community") {
                 LazyRow(
+                    ShelfOwnLayer,
                     contentPadding = PaddingValues(horizontal = 16.dp),
                     horizontalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
@@ -291,6 +294,7 @@ fun HomeScreen(
             item("new_releases_header") { HomeSectionHeader("New releases") }
             item("new_releases") {
                 LazyRow(
+                    ShelfOwnLayer,
                     contentPadding = PaddingValues(horizontal = 16.dp),
                     horizontalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
@@ -312,6 +316,11 @@ fun HomeScreen(
 }
 
 private const val COMMUNITY_SHELF_SIZE = 5
+
+// Each shelf draws on its own layer: swiping one then changes only that strip of the page, so the
+// frosted dock and header (which blur the page behind them) are redone only when something behind
+// them really moved - not for every frame of a shelf swipe elsewhere on the page.
+private val ShelfOwnLayer = Modifier.graphicsLayer()
 
 // How bright (average, 0-1) a dark cover's blurred card is lifted to - see BlurredArtwork.
 private const val CARD_MIN_BRIGHTNESS = 0.2f
@@ -451,7 +460,7 @@ private fun SongShelf(songs: List<SongEntity>, callbacks: LibraryCallbacks) {
     LaunchedEffect(songs.firstOrNull()?.telegramMessageId) {
         if (atStart) rowState.scrollToItem(0)
     }
-    LazyRow(state = rowState, contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+    LazyRow(state = rowState, modifier = ShelfOwnLayer, contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
         itemsIndexed(songs, key = { _, s -> s.telegramMessageId }) { index, song ->
             Column(Modifier.width(128.dp).then(homeSongActions(song) { callbacks.onPlay(ids, index) })) {
                 SongArtwork(song, 128.dp, 6.dp)
@@ -572,7 +581,7 @@ private fun YouTubeShelf(
         shelf.listRows -> QuickPicks(shelf.tracks, onPlayTracks)
         "listen again" in title -> ListenAgainGrid(shelf, onPlayTracks, onOpenCollection)
         "mix" in title && shelf.collections.isNotEmpty() && shelf.tracks.isEmpty() ->
-            LazyRow(state = LocalShelfRow.current!!.state, modifier = Modifier.shelfDrag(LocalShelfRow.current!!.state, LocalShelfRow.current!!.fling, COVER_MAX_FLING),
+            LazyRow(state = LocalShelfRow.current!!.state, modifier = Modifier.shelfDrag(LocalShelfRow.current!!.state, LocalShelfRow.current!!.fling, COVER_MAX_FLING).then(ShelfOwnLayer),
                 flingBehavior = LocalShelfRow.current!!.fling, userScrollEnabled = false,
                 contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 itemsIndexed(shelf.collections, key = { i, item -> "mix_${index}_${i}_${item.browseId}" }) { i, item ->
@@ -605,7 +614,7 @@ private fun QuickPicks(tracks: List<BrowseTrack>, onPlay: (List<BrowseTrack>, In
     // A column is most of the screen, so the next one shows at the edge.
     val columnWidth = LocalConfiguration.current.screenWidthDp.dp * 0.86f
     val shelfRow = LocalShelfRow.current!!
-    LazyRow(state = shelfRow.state, modifier = Modifier.shelfDrag(shelfRow.state, shelfRow.fling), flingBehavior = shelfRow.fling, userScrollEnabled = false,
+    LazyRow(state = shelfRow.state, modifier = Modifier.shelfDrag(shelfRow.state, shelfRow.fling).then(ShelfOwnLayer), flingBehavior = shelfRow.fling, userScrollEnabled = false,
         contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
         items(columns.size, key = { "qp_$it" }, contentType = { "qp_column" }) { column ->
             Column(Modifier.width(columnWidth).clip(RoundedCornerShape(20.dp))
@@ -715,7 +724,7 @@ private fun CoverRow(count: Int, rows: Int, coverWidth: Dp, content: @Composable
     if (count == 0) return
     val shelfRow = LocalShelfRow.current!!
     val columns = (count + rows - 1) / rows
-    LazyRow(state = shelfRow.state, modifier = Modifier.shelfDrag(shelfRow.state, shelfRow.fling, COVER_MAX_FLING), flingBehavior = shelfRow.fling, userScrollEnabled = false,
+    LazyRow(state = shelfRow.state, modifier = Modifier.shelfDrag(shelfRow.state, shelfRow.fling, COVER_MAX_FLING).then(ShelfOwnLayer), flingBehavior = shelfRow.fling, userScrollEnabled = false,
         contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
         items(columns, key = { "col_$it" }, contentType = { "cover_column_$rows" }) { column ->
             Column(Modifier.width(coverWidth), verticalArrangement = Arrangement.spacedBy(16.dp)) {

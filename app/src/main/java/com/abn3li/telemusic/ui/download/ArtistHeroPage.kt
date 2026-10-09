@@ -93,6 +93,9 @@ import com.abn3li.telemusic.ui.library.CalmSpinner
 import com.abn3li.telemusic.ui.library.SectionHeader
 import com.abn3li.telemusic.ui.nowplaying.LocalMiniPlayerInset
 import com.abn3li.telemusic.ui.theme.LocalPalette
+import com.abn3li.telemusic.ui.navigation.FrostedHeaderBackground
+import com.abn3li.telemusic.ui.navigation.frostedBackdropSource
+import com.abn3li.telemusic.ui.navigation.rememberFrostedBackdrop
 import com.abn3li.telemusic.ui.theme.SystemBarsState
 import com.abn3li.telemusic.ui.theme.ink
 import com.abn3li.telemusic.ui.theme.paper
@@ -211,6 +214,7 @@ internal fun ArtistHeroLayout(
     val pageInk = ink
 
     val statusBar = heroTopInset()
+    val backdrop = rememberFrostedBackdrop()
     val heroHeight = (LocalConfiguration.current.screenHeightDp.dp * 0.6f).coerceIn(380.dp, 560.dp) + statusBar
     val heroPx = with(density) { heroHeight.toPx() }
     val listState = rememberLazyListState()
@@ -223,6 +227,7 @@ internal fun ArtistHeroLayout(
             }
         }
     }
+    val showFrostedHeader by remember(searching) { derivedStateOf { collapse > 0f } }
     val closeSearch = {
         searchText = ""
         searching = false
@@ -250,7 +255,9 @@ internal fun ArtistHeroLayout(
             }
             .background(tint)
     ) {
-        LazyColumn(state = listState, modifier = Modifier.fillMaxSize()) {
+        LazyColumn(state = listState, modifier = Modifier.fillMaxSize().then(
+            if (showFrostedHeader && !SystemBarsState.playerOpen) Modifier.frostedBackdropSource(backdrop, tint) else Modifier
+        )) {
             if (searching) item("search") {
                 Box(Modifier.fillMaxWidth().padding(top = 64.dp + statusBar)) {
                     LibrarySearchField(searchText, searchHint.orEmpty(), { searchText = it })
@@ -358,38 +365,40 @@ internal fun ArtistHeroLayout(
             item("bottom_inset") { Spacer(Modifier.height(LocalMiniPlayerInset.current + 24.dp)) }
         }
 
-        // Back and Share over the photo; fills with the page colour once the name has gone.
-        Box(
-            Modifier
-                .fillMaxWidth()
-                .drawBehind { drawRect(tint.copy(alpha = collapse)) }
-                .padding(top = statusBar)
-                .padding(horizontal = 16.dp, vertical = 10.dp)
-        ) {
-            Text(
-                name,
-                color = pageInk,
-                fontSize = 17.sp,
-                fontWeight = FontWeight.Bold,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.align(Alignment.Center).padding(horizontal = 60.dp).graphicsLayer { alpha = collapse }
-            )
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                BarButton(Icons.AutoMirrored.Rounded.ArrowBackIos, "Back", { collapse }, iconStart = 5.dp, onClick = if (searching) closeSearch else onBack)
-                Spacer(Modifier.weight(1f))
-                if (!searching) Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    if (onShare != null) BarButton(Icons.Rounded.Share, "Share", { collapse }, onClick = onShare)
-                    if (searchHint != null) BarButton(Icons.Rounded.Search, "Search", { collapse }) {
-                        searching = true
-                        scope.launch { listState.scrollToItem(0) }
-                    }
-                    if (menu != null) {
-                        var menuOpen by remember { mutableStateOf(false) }
-                        Box {
-                            BarButton(Icons.Rounded.MoreHoriz, "More", { collapse }) { menuOpen = true }
-                            LibraryFloatingMenu(expanded = menuOpen, onDismiss = { menuOpen = false }) {
-                                menu { menuOpen = false }
+        // The material fades in over the scrolling page while controls stay sharp.
+        Box(Modifier.fillMaxWidth()) {
+            FrostedHeaderBackground(backdrop) { collapse }
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(top = statusBar)
+                    .padding(horizontal = 16.dp, vertical = 10.dp)
+            ) {
+                Text(
+                    name,
+                    color = pageInk,
+                    fontSize = 17.sp,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.align(Alignment.Center).padding(horizontal = 60.dp).graphicsLayer { alpha = collapse }
+                )
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    BarButton(Icons.AutoMirrored.Rounded.ArrowBackIos, "Back", { collapse }, iconStart = 5.dp, onClick = if (searching) closeSearch else onBack)
+                    Spacer(Modifier.weight(1f))
+                    if (!searching) Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        if (onShare != null) BarButton(Icons.Rounded.Share, "Share", { collapse }, onClick = onShare)
+                        if (searchHint != null) BarButton(Icons.Rounded.Search, "Search", { collapse }) {
+                            searching = true
+                            scope.launch { listState.scrollToItem(0) }
+                        }
+                        if (menu != null) {
+                            var menuOpen by remember { mutableStateOf(false) }
+                            Box {
+                                BarButton(Icons.Rounded.MoreHoriz, "More", { collapse }) { menuOpen = true }
+                                LibraryFloatingMenu(expanded = menuOpen, onDismiss = { menuOpen = false }) {
+                                    menu { menuOpen = false }
+                                }
                             }
                         }
                     }

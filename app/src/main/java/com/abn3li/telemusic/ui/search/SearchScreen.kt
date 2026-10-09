@@ -3,6 +3,15 @@ import com.abn3li.telemusic.ui.download.youtubeTrackActions
 import com.abn3li.telemusic.ui.download.youtubeCollectionActions
 
 import com.abn3li.telemusic.ui.download.DownloadAnywayPrompt
+import com.abn3li.telemusic.ui.library.extendBehindStatusBar
+import com.abn3li.telemusic.ui.library.frostedHeaderTopInset
+import com.abn3li.telemusic.ui.navigation.FrostedBackdrop
+import com.abn3li.telemusic.ui.navigation.frostedBackdropSource
+import com.abn3li.telemusic.ui.navigation.frostedSurface
+import com.abn3li.telemusic.ui.navigation.rememberFrostedBackdrop
+import com.abn3li.telemusic.ui.theme.SystemBarsState
+import androidx.compose.ui.graphics.RectangleShape
+import androidx.compose.ui.unit.Dp
 import com.abn3li.telemusic.ui.theme.LocalPalette
 import com.abn3li.telemusic.ui.theme.paper
 import com.abn3li.telemusic.ui.theme.ink
@@ -293,23 +302,27 @@ private fun ResultsScreen(
         val selected = SearchSource.entries[pagerState.currentPage]
         if (selected != source) onSource(selected)
     }
-    Box(Modifier.fillMaxSize().background(paper)) {
-        HorizontalPager(state = pagerState, modifier = Modifier.fillMaxSize()) { page ->
-            LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(top = ResultsHeaderHeight, bottom = LocalMiniPlayerInset.current + 24.dp)) {
+    val backdrop = rememberFrostedBackdrop()
+    val statusBar = frostedHeaderTopInset()
+    Box(Modifier.fillMaxSize().extendBehindStatusBar(statusBar).background(paper)) {
+        HorizontalPager(state = pagerState, modifier = Modifier.fillMaxSize().then(
+            if (!SystemBarsState.playerOpen) Modifier.frostedBackdropSource(backdrop, paper) else Modifier
+        )) { page ->
+            LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(top = ResultsHeaderHeight + statusBar, bottom = LocalMiniPlayerInset.current + 24.dp)) {
                 if (page == 0) youtubeResults(section, state, loading, onSection, openCollection, play, playNext, download)
                 else libraryResults(section, library, actions, callbacks, onSection, openPlaylist)
             }
         }
         ResultsHeader(state.query, pagerSource, onQuery, onSearch, onCancel, { selected ->
             scope.launch { pagerState.animateScrollToPage(selected.ordinal) }
-        }, requestFocus, onFocusHandled)
+        }, requestFocus, onFocusHandled, backdrop, statusBar)
     }
 }
 
 @Composable
 private fun ResultsHeader(query: String, source: SearchSource, onQuery: (String) -> Unit,
     onSearch: () -> Unit, onCancel: () -> Unit, onSource: (SearchSource) -> Unit,
-    requestFocus: Boolean, onFocusHandled: () -> Unit) {
+    requestFocus: Boolean, onFocusHandled: () -> Unit, backdrop: FrostedBackdrop, statusBar: Dp) {
     val focus = remember { FocusRequester() }
     val focusManager = LocalFocusManager.current
     val keyboard = LocalSoftwareKeyboardController.current
@@ -347,7 +360,9 @@ private fun ResultsHeader(query: String, source: SearchSource, onQuery: (String)
         rootView.viewTreeObserver.addOnGlobalLayoutListener(listener)
         onDispose { rootView.viewTreeObserver.removeOnGlobalLayoutListener(listener) }
     }
-    Column(Modifier.fillMaxWidth().height(ResultsHeaderHeight).background(paper).padding(horizontal = 18.dp).padding(top = 5.dp, bottom = 9.dp),
+    Column(Modifier.fillMaxWidth().height(ResultsHeaderHeight + statusBar)
+        .frostedSurface(backdrop, shape = RectangleShape, drawBorder = false)
+        .padding(top = statusBar).padding(horizontal = 18.dp).padding(top = 5.dp, bottom = 9.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             Row(Modifier.weight(1f).height(44.dp).clip(RoundedCornerShape(10.dp)).background(LibraryFieldColor).padding(horizontal = 10.dp),

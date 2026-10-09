@@ -6,19 +6,16 @@ import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.union
 import androidx.compose.foundation.layout.displayCutout
 import androidx.compose.foundation.layout.systemBars
-import com.abn3li.telemusic.ui.theme.paper
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.Dispatchers
 import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.animation.animateColorAsState
-import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.Spring
-import androidx.compose.animation.core.spring
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.ui.geometry.Rect
+import com.abn3li.telemusic.ui.theme.SystemBarsState
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.windowInsetsPadding
-import androidx.compose.ui.semantics.Role
 import kotlinx.coroutines.flow.first
 import com.abn3li.telemusic.ui.library.HomeScreen
 import com.abn3li.telemusic.ui.library.AlertAction
@@ -29,23 +26,10 @@ import android.net.Uri
 import android.widget.Toast
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
-import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.foundation.interaction.collectIsPressedAsState
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.material3.Icon
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.CompositionLocalProvider
@@ -54,13 +38,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
@@ -74,7 +53,6 @@ import com.abn3li.telemusic.data.browse.BrowseTrack
 import com.abn3li.telemusic.ui.download.BrowseCollectionScreen
 import com.abn3li.telemusic.ui.onboarding.OnboardingScreen
 import com.abn3li.telemusic.ui.search.SearchScreen
-import com.abn3li.telemusic.ui.library.AppAccent
 import com.abn3li.telemusic.ui.library.AlbumDetailScreen
 import com.abn3li.telemusic.ui.library.ArtistDetailScreen
 import com.abn3li.telemusic.ui.library.ArtistSongsScreen
@@ -92,10 +70,10 @@ import com.abn3li.telemusic.ui.nowplaying.LocalMiniPlayerInset
 import com.abn3li.telemusic.ui.nowplaying.LocalPlayNext
 import com.abn3li.telemusic.ui.library.CollectionPlayback
 import com.abn3li.telemusic.ui.library.LocalCollectionPlayback
-import com.abn3li.telemusic.ui.nowplaying.MiniPlayerHeight
 import com.abn3li.telemusic.ui.nowplaying.NowPlayingViewModel
 import com.abn3li.telemusic.ui.nowplaying.PlayerSheetOverlay
 import com.abn3li.telemusic.ui.settings.SettingsScreen
+import com.abn3li.telemusic.ui.theme.LocalPalette
 import com.abn3li.telemusic.ui.sync.SyncScreen
 
 private val LibraryRoutes = setOf(
@@ -135,7 +113,7 @@ object Routes {
 }
 
 /**
- * Main application Navigation Graph with fixed Frosted Glass Bottom Bar and Floating MiniPlayer.
+ * Main application navigation with a floating bottom bar and mini player.
  */
 @Composable
 fun TgMusicNavGraph(navController: NavHostController = rememberNavController()) {
@@ -226,14 +204,44 @@ fun TgMusicNavGraph(navController: NavHostController = rememberNavController()) 
     val inLibrary = currentRoute in LibraryRoutes
     val showBottomBar = inLibrary || currentRoute in listOf(Routes.HOME, Routes.SEARCH, Routes.SYNC, Routes.SETTINGS)
 
-    val miniPlayerBottomMargin = if (showBottomBar) NavBarHeight else 12.dp
-    val miniPlayerInset = if (playerState.song != null) {
-        if (showBottomBar) NavBarHeight + MiniPlayerHeight + 12.dp else MiniPlayerHeight
-    } else if (showBottomBar) NavBarHeight + 12.dp else 0.dp
+    val frostedBackdrop = rememberFrostedBackdrop()
+    val dockPlayerBounds = remember { mutableStateOf<Rect?>(null) }
+    val readDockBounds = remember { { dockPlayerBounds.value } }
+    val navigateTab: (String) -> Unit = { route ->
+        when {
+            // Home tapped: back to the Home page (a playlist/artist opened from Home
+            // sits on top of it).
+            route == Routes.HOME -> {
+                if (!navController.popBackStack(Routes.HOME, inclusive = false)) {
+                    navController.navigate(Routes.HOME) { launchSingleTop = true }
+                }
+            }
+            // Library tapped while inside a Library page: back to the main Library
+            // page - or open it, when the page came from Home and Library isn't open.
+            route == Routes.LIBRARY && inLibrary -> {
+                if (!navController.popBackStack(Routes.LIBRARY, inclusive = false)) {
+                    navController.navigate(Routes.LIBRARY) {
+                        popUpTo(Routes.HOME)
+                        launchSingleTop = true
+                    }
+                }
+            }
+            currentRoute != route -> navController.navigate(route) {
+                popUpTo(Routes.HOME) { saveState = true }
+                launchSingleTop = true
+                restoreState = true
+            }
+        }
+    }
+    val navBarInset = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+    val floatingInsetExtra = (15.dp - navBarInset).coerceAtLeast(0.dp)
+    // Detail pages keep the same floating player, with space reserved only for the visible rows.
+    val miniPlayerInset = if (showBottomBar) {
+        (if (playerState.song != null) ClassicDockInset else ClassicTabsInset) + floatingInsetExtra
+    } else if (playerState.song != null) ClassicMiniPlayerInset + floatingInsetExtra else 0.dp
 
     // The pages and the tab bar stay clear of the system bars; only the player (below) draws
     // behind them.
-    val navBarInset = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
     com.abn3li.telemusic.ui.download.YouTubeContextProvider(
         onOpen = { c -> navController.navigate(Routes.youtubeBrowse(c.browseId, c.title, c.params)) },
         onPlay = playStreams, onPlayNext = { ids -> playerViewModel.playNext(ids) }
@@ -244,7 +252,13 @@ fun TgMusicNavGraph(navController: NavHostController = rememberNavController()) 
       // the status bar.
       val barsInsets = WindowInsets.systemBars.union(WindowInsets.displayCutout)
       Box(Modifier.fillMaxSize().windowInsetsPadding(barsInsets.only(WindowInsetsSides.Horizontal + WindowInsetsSides.Bottom))) {
-        Scaffold(contentWindowInsets = WindowInsets(0)) { innerPadding ->
+        Scaffold(
+            contentWindowInsets = WindowInsets(0),
+            modifier = Modifier.then(
+                if ((showBottomBar || playerState.song != null) && !SystemBarsState.playerOpen) Modifier.frostedBackdropSource(frostedBackdrop, LocalPalette.current.background)
+                else Modifier
+            )
+        ) { innerPadding ->
             CompositionLocalProvider(
                 LocalMiniPlayerInset provides miniPlayerInset,
                 LocalPlayNext provides playNext,
@@ -387,45 +401,11 @@ fun TgMusicNavGraph(navController: NavHostController = rememberNavController()) 
             }
         }
 
-        if (showBottomBar) {
-            AppBottomNavBar(
-                currentRoute = if (inLibrary) Routes.LIBRARY else currentRoute,
-                onNavigate = { route ->
-                    when {
-                        // Home tapped: back to the Home page (a playlist/artist opened from Home
-                        // sits on top of it).
-                        route == Routes.HOME -> {
-                            if (!navController.popBackStack(Routes.HOME, inclusive = false)) {
-                                navController.navigate(Routes.HOME) { launchSingleTop = true }
-                            }
-                        }
-                        // Library tapped while inside a Library page: back to the main Library
-                        // page - or open it, when the page came from Home and Library isn't open.
-                        route == Routes.LIBRARY && inLibrary -> {
-                            if (!navController.popBackStack(Routes.LIBRARY, inclusive = false)) {
-                                navController.navigate(Routes.LIBRARY) {
-                                    popUpTo(Routes.HOME)
-                                    launchSingleTop = true
-                                }
-                            }
-                        }
-                        currentRoute != route -> navController.navigate(route) {
-                            popUpTo(Routes.HOME) { saveState = true }
-                            launchSingleTop = true
-                            restoreState = true
-                        }
-                    }
-                },
-                modifier = Modifier.align(Alignment.BottomCenter)
-            )
-        }
-
         DownloadLocationPrompt(app)
       }
 
         PlayerSheetOverlay(
             viewModel = playerViewModel,
-            bottomOffset = miniPlayerBottomMargin + navBarInset,
             // A YouTube song opens its artist's YouTube Music page (found from the song itself);
             // a Telegram or imported song the library's artist page, where those songs are.
             onOpenArtist = { artist ->
@@ -437,111 +417,30 @@ fun TgMusicNavGraph(navController: NavHostController = rememberNavController()) 
                 } else navController.navigate(Routes.artist(artist))
             },
             onOpenAlbum = { album -> navController.navigate(Routes.album(album)) },
+            miniPlayerBounds = readDockBounds,
+            miniPlayerContent = { state, expand, drag, dragEnd, miniModifier ->
+                ClassicDock(
+                    currentRoute = if (inLibrary) Routes.LIBRARY else currentRoute,
+                    onNavigate = navigateTab,
+                    backdrop = frostedBackdrop,
+                    state = state,
+                    bottomInset = navBarInset,
+                    onExpand = expand,
+                    onExpandDrag = drag,
+                    onExpandDragEnd = dragEnd,
+                    onPlayPause = { playerViewModel.togglePlayPause() },
+                    onNext = { playerViewModel.nextSong() },
+                    onPrevious = { playerViewModel.previousSong() },
+                    onPlayerBounds = { dockPlayerBounds.value = it },
+                    showTabs = showBottomBar,
+                    modifier = miniModifier.windowInsetsPadding(barsInsets.only(WindowInsetsSides.Horizontal))
+                )
+            },
             modifier = Modifier.fillMaxSize()
         )
     }
     }
 }
-
-@Composable
-private fun AppBottomNavBar(
-    currentRoute: String?,
-    onNavigate: (String) -> Unit,
-    modifier: Modifier = Modifier
-) {
-    val items = remember {
-        listOf(
-            NavigationItem(Routes.HOME, "Home", NavIcons.Home),
-            NavigationItem(Routes.SEARCH, "Search", NavIcons.Search),
-            NavigationItem(Routes.LIBRARY, "Library", NavIcons.Library)
-        )
-    }
-
-    // The parent already clears the system bars. Adding their inset here again lifts the tabs
-    // above their intended position and crowds the mini player.
-    Box(
-        modifier = modifier
-            .fillMaxWidth()
-            .height(NavBarHeight)
-            .background(paper)
-    ) {
-        Row(
-            modifier = Modifier.fillMaxWidth().height(NavBarRowHeight),
-            horizontalArrangement = Arrangement.SpaceAround,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            items.forEach { item ->
-                NavBarItem(
-                    item = item,
-                    selected = currentRoute == item.route,
-                    onClick = { onNavigate(item.route) },
-                    modifier = Modifier.weight(1f)
-                )
-            }
-        }
-    }
-}
-
-/** Keep the touch target full size while the icon and label shrink together during a press. */
-@Composable
-private fun NavBarItem(item: NavigationItem, selected: Boolean, onClick: () -> Unit, modifier: Modifier = Modifier) {
-    val interactionSource = remember { MutableInteractionSource() }
-    val pressed by interactionSource.collectIsPressedAsState()
-    val pressScale by animateFloatAsState(
-        targetValue = if (pressed) 0.93f else 1f,
-        animationSpec = spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessMedium),
-        label = "navPressScale"
-    )
-    val color by animateColorAsState(
-        targetValue = if (selected) AppAccent else NavInactive,
-        label = "navColor"
-    )
-    Box(
-        modifier = modifier
-            .fillMaxHeight()
-            .clickable(
-                interactionSource = interactionSource,
-                indication = null,
-                role = Role.Tab,
-                onClick = onClick
-            )
-    ) {
-        Column(
-            modifier = Modifier.fillMaxSize().graphicsLayer {
-                scaleX = pressScale
-                scaleY = pressScale
-            },
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center
-        ) {
-            Icon(
-                imageVector = item.icon,
-                contentDescription = item.label,
-                tint = color,
-                modifier = Modifier.size(NavIconSize)
-            )
-            Text(
-                text = item.label,
-                color = color,
-                fontSize = 12.sp,
-                lineHeight = 12.sp,
-                fontWeight = FontWeight.Medium,
-                maxLines = 1
-            )
-        }
-    }
-}
-
-private val NavBarHeight = 64.dp
-private val NavBarRowHeight = 62.dp
-private val NavIconSize = 30.dp
-private val NavInactive = Color.Gray
-
-private data class NavigationItem(
-    val route: String,
-    val label: String,
-    val icon: ImageVector
-)
 
 /** The one-time "where should downloads go?" question, shown the first time any download is
  * started (see DownloadLocationGate). Nothing here runs until a download is actually waiting. */

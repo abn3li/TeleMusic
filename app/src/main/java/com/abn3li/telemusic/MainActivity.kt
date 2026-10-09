@@ -62,6 +62,7 @@ class MainActivity : ComponentActivity() {
             // Read here, not inside the effect, so opening or closing the player re-runs it.
             // The open player and the welcome pages are always dark, so the bars around them are too.
             val heroPage = SystemBarsState.heroPages > 0
+            val frostedHeaderPage = SystemBarsState.frostedHeaderPages > 0
             val lightBars = light && !SystemBarsState.playerOpen && !SystemBarsState.onboardingOpen
             // An artist's photo under the status bar keeps its icons light, in either theme.
             val lightStatusIcons = lightBars && !(heroPage && SystemBarsState.heroesOverPhoto.isNotEmpty())
@@ -79,7 +80,7 @@ class MainActivity : ComponentActivity() {
                 // The open player shows through both bars: its cover at the top, its colours below.
                 @Suppress("DEPRECATION")
                 window.statusBarColor = when {
-                    playerBars || heroPage -> android.graphics.Color.TRANSPARENT
+                    playerBars || heroPage || frostedHeaderPage -> android.graphics.Color.TRANSPARENT
                     lightBars && groupedPage -> LightPalette.groupedBackground.toArgb()
                     else -> bar
                 }
