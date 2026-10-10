@@ -157,7 +157,9 @@ fun TgMusicNavGraph(navController: NavHostController = rememberNavController()) 
         }
     )
 
-    val libraryViewModel = remember { LibraryViewModel(app.musicRepository) }
+    val libraryViewModel = viewModel<LibraryViewModel>(factory = viewModelFactory {
+        initializer { LibraryViewModel(app.musicRepository) }
+    })
 
     val playNext: (Long) -> Unit = remember(playerViewModel) { { id -> playerViewModel.playNext(id) } }
     val libraryCallbacks = remember(navController, playerViewModel) {
@@ -221,6 +223,7 @@ fun TgMusicNavGraph(navController: NavHostController = rememberNavController()) 
     val showBottomBar = inLibrary || currentRoute in listOf(Routes.HOME, Routes.DISCOVER, Routes.SEARCH, Routes.SYNC, Routes.SETTINGS)
 
     val frostedBackdrop = rememberFrostedBackdrop()
+    val backdropHost = remember { FrostedBackdropHost() }
     // The player's open/close movement: the page steps back under it, the dock moves with it.
     val playerTransition = remember { com.abn3li.telemusic.ui.nowplaying.PlayerTransition() }
     val searchFocusRequest = rememberSaveable { mutableIntStateOf(0) }
@@ -291,12 +294,16 @@ fun TgMusicNavGraph(navController: NavHostController = rememberNavController()) 
         Scaffold(
             contentWindowInsets = WindowInsets(0),
             modifier = Modifier.then(
-                if ((showBottomBar || playerState.song != null) && !SystemBarsState.playerOpen) Modifier.frostedBackdropSource(frostedBackdrop, LocalPalette.current.background)
+                // Pages with a frosted header already record their content. Reuse it for the
+                // dock; capturing the whole Scaffold again also replayed the header's blur.
+                if (backdropHost.active == null && (showBottomBar || playerState.song != null) && !SystemBarsState.playerOpen) Modifier.frostedBackdropSource(frostedBackdrop, LocalPalette.current.background)
                 else Modifier
             )
         ) { innerPadding ->
             CompositionLocalProvider(
                 LocalMiniPlayerInset provides miniPlayerInset,
+                LocalFrostedBackdropHost provides backdropHost,
+                LocalFrostedDockVisible provides (showBottomBar || playerState.song != null),
                 LocalPlayNext provides playNext,
                 LocalCollectionPlayback provides collectionPlayback
             ) {
@@ -491,7 +498,7 @@ fun TgMusicNavGraph(navController: NavHostController = rememberNavController()) 
                 ClassicDock(
                     currentRoute = if (inLibrary) Routes.LIBRARY else currentRoute,
                     onNavigate = navigateTab,
-                    backdrop = frostedBackdrop,
+                    backdrop = backdropHost.active ?: frostedBackdrop,
                     state = state,
                     bottomInset = navBarInset,
                     onExpand = expand,

@@ -251,13 +251,14 @@ object BrowseParser {
     }
 
     /**
-     * A browse page's own content: a track list (playlist/chart/artist page) if it has one, else
-     * the collection cards it links to instead (an artist's "Albums" shelf, say). Walks the
+     * A browse page's own content: songs and the collection cards it links to. Signed-in
+     * categories can contain both, so finding songs must not discard their other shelves. Walks the
      * whole response rather than a fixed path - a playlist's two-column layout, an artist page,
      * and a chart page all differ enough that hard-coding one path per type isn't worth it, same
      * tradeoff the search-side parser makes for the same reason.
      */
-    fun parseBrowseContent(response: JSONObject): BrowseContent {
+    fun parseBrowseContent(response: JSONObject, includeSongCards: Boolean = false): BrowseContent {
+        val header = parseCollectionHeader(response)
         val trackRenderers = collectRenderers(response, "musicResponsiveListItemRenderer")
         val tracks = LinkedHashMap<String, BrowseTrack>()
         // Videos among the songs are kept: they play as audio, and some songs only exist as one.
@@ -270,22 +271,17 @@ object BrowseParser {
         collectRenderers(response, "musicMultiRowListItemRenderer").forEach { renderer ->
             parseEpisodeRow(renderer, show)?.let { tracks.putIfAbsent(it.videoId, it) }
         }
-        if (tracks.isNotEmpty()) return BrowseContent(tracks = tracks.values.toList(), header = parseCollectionHeader(response))
-
-        if (trackRenderers.isNotEmpty()) {
-            // Real renderers were found (an actual JSONObject walk, not a text search) but none
-            // produced a usable track - cheap enough to always log, and was exactly what traced
-            // the OMV/UGC filter bug above (see parseTrackRow's own doc) to a real cause instead
-            // of the misleading "check your connection" this used to surface as.
-            android.util.Log.w(
-                "BrowseParser",
-                "parseBrowseContent(): ${trackRenderers.size} musicResponsiveListItemRenderer found but 0 produced a usable track"
-            )
-        }
-
         val collections = LinkedHashMap<String, BrowseCollection>()
         collectRenderers(response, "musicTwoRowItemRenderer").forEach { renderer ->
-            parseTwoRowCollection(renderer)?.let { collections.putIfAbsent(it.browseId, it) }
+            // Song cards belong to mixed category pages. On a playlist/album page they can
+            // instead be recommendations, which must not become part of its play/import queue.
+            (if (includeSongCards || header == null) parseTwoRowTrack(renderer) else null)
+                ?.let { tracks.putIfAbsent(it.videoId, it) }
+                ?: parseTwoRowCollection(renderer)?.let { collections.putIfAbsent(it.browseId + ":" + it.params.orEmpty(), it) }
+        }
+        // Some categories use list rows for their artists and playlists as well as their songs.
+        parseSearchCollections(response).forEach {
+            collections.putIfAbsent(it.browseId + ":" + it.params.orEmpty(), it)
         }
         // A page of moods and genres (a "Show all" can open one): buttons that each open a page
         // of playlists, like the Search tab's categories.
@@ -294,9 +290,17 @@ object BrowseParser {
             val endpoint = renderer.opt("clickCommand").obj()?.opt("browseEndpoint").obj() ?: return@forEach
             val browseId = endpoint.optString("browseId").takeIf { it.isNotBlank() } ?: return@forEach
             val params = endpoint.optString("params").takeIf { it.isNotBlank() }
-            collections.putIfAbsent(browseId + params.orEmpty(), BrowseCollection(browseId, params, title, null, null, BrowseKind.OTHER))
+            collections.putIfAbsent(browseId + ":" + params.orEmpty(), BrowseCollection(browseId, params, title, null, null, BrowseKind.OTHER))
         }
-        return BrowseContent(collections = collections.values.toList(), header = parseCollectionHeader(response))
+        if (trackRenderers.isNotEmpty() && tracks.isEmpty() && collections.isEmpty()) {
+            // Valid artist/playlist rows are not failed songs. Log only when none of the
+            // actual renderers produced content the page can display.
+            android.util.Log.w(
+                "BrowseParser",
+                "parseBrowseContent(): ${trackRenderers.size} musicResponsiveListItemRenderer found but 0 produced usable content"
+            )
+        }
+        return BrowseContent(tracks = tracks.values.toList(), collections = collections.values.toList(), header = header)
     }
 
     /**
@@ -318,11 +322,13 @@ object BrowseParser {
                 ?.opt("text").obj()?.runs()?.trim()?.takeIf { it.isNotBlank() }?.let(::isolateParts)
             val thumbnails = renderer.opt("thumbnail").obj()?.opt("musicThumbnailRenderer").obj()
                 ?.opt("thumbnail").obj()?.opt("thumbnails").arr()
+            val params = endpoint.optString("params").takeIf { it.isNotBlank() }
             out.putIfAbsent(
-                browseId,
+                // Parameters can select a different page even when the browse ID is shared.
+                browseId + ":" + params.orEmpty(),
                 BrowseCollection(
                     browseId = browseId,
-                    params = endpoint.optString("params").takeIf { it.isNotBlank() },
+                    params = params,
                     title = title,
                     subtitle = subtitle,
                     thumbnailUrl = thumbnails.best(),

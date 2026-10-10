@@ -325,6 +325,11 @@ private fun NowPlayingContent(
     var showQuality by remember { mutableStateOf(false) }
     var overflowSong by remember { mutableStateOf<SongEntity?>(null) }
 
+    val relatedVisible = showRelated && isExpanded && !state.song?.youtubeVideoId.isNullOrBlank()
+    // Keep the player mounted behind Related, but stop drawing its covered controls and lyrics.
+    // Expanded state still owns sheet navigation; audio and Related's footer stay live.
+    val visualsActive = playerVisible && !relatedVisible
+
     LaunchedEffect(state.song?.youtubeVideoId) {
         if (state.song?.youtubeVideoId.isNullOrBlank()) showRelated = false
     }
@@ -352,7 +357,8 @@ private fun NowPlayingContent(
 
     // On the Lyrics page the controls step aside after a few seconds without a touch, as long as
     // music is playing - a tap anywhere on the lyrics brings them back.
-    LaunchedEffect(page, lastInteractionMs, state.isPlaying, isExpanded) {
+    LaunchedEffect(page, lastInteractionMs, state.isPlaying, isExpanded, relatedVisible) {
+        if (relatedVisible) return@LaunchedEffect
         if (page == PlayerPage.LYRICS && state.isPlaying && isExpanded) {
             delay(CONTROLS_AUTO_HIDE_MS)
             showControls = false
@@ -411,7 +417,7 @@ private fun NowPlayingContent(
         ) {
             FloatingArtworkBackground(
                 artwork = state.song?.displayArtwork,
-                animate = isExpanded && state.isPlaying && effects.animatedBackground,
+                animate = isExpanded && visualsActive && state.isPlaying && effects.animatedBackground,
                 dim = if (page == PlayerPage.LYRICS) 0.2f else 0.36f
             )
 
@@ -445,6 +451,7 @@ private fun NowPlayingContent(
                     page = page,
                     effects = effects,
                     isExpanded = isExpanded,
+                    visualsActive = visualsActive,
                     dismissDrag = dismissDrag,
                     overflowOpen = overflowSong != null,
                     onPageChange = { page = it },
@@ -474,15 +481,16 @@ private fun NowPlayingContent(
                             .padding(horizontal = 26.dp)
                             .padding(top = 6.dp, bottom = if (!state.song?.youtubeVideoId.isNullOrBlank()) 8.dp else 36.dp)
                     ) {
-                        PlayerScrubber(viewModel = viewModel, active = playerVisible, onInteraction = onInteraction,
+                        PlayerScrubber(viewModel = viewModel, active = visualsActive, onInteraction = onInteraction,
                             qualityStatus = {
                                 state.song?.let { song ->
-                                    QualityUpgradeButton(song, active = isExpanded,
+                                    QualityUpgradeButton(song, active = isExpanded && visualsActive,
                                         onClick = { onInteraction(); showQuality = true })
                                 }
                             })
                         TransportRow(
                             state = state,
+                            visualsActive = visualsActive,
                             onPrevious = { onInteraction(); viewModel.previousSong() },
                             onPlayPause = { onInteraction(); viewModel.togglePlayPause() },
                             onNext = { onInteraction(); viewModel.nextSong() },
@@ -539,7 +547,7 @@ private fun NowPlayingContent(
             }
         }
 
-        if (showRelated && isExpanded && !state.song?.youtubeVideoId.isNullOrBlank()) {
+        if (relatedVisible) {
             RelatedSongsSheet(state, viewModel, onOpenPage = onCollapse, onDismiss = { showRelated = false })
         }
         state.song?.takeIf { showQuality && isExpanded }?.let { song ->
@@ -606,6 +614,7 @@ private fun PlayerPageArea(
     page: PlayerPage,
     effects: PlayerEffects,
     isExpanded: Boolean,
+    visualsActive: Boolean,
     dismissDrag: Modifier,
     overflowOpen: Boolean,
     onPageChange: (PlayerPage) -> Unit,
@@ -687,6 +696,7 @@ private fun PlayerPageArea(
                     state = state,
                     viewModel = viewModel,
                     effects = effects,
+                    active = isExpanded && visualsActive,
                     onOpenManualSearch = onOpenManualSearch,
                     onOpenLyricsSource = onOpenLyricsSource,
                     onUserInteraction = onInteraction
@@ -724,7 +734,7 @@ private fun PlayerPageArea(
                     overflow = TextOverflow.Ellipsis,
                     // A long title scrolls once, then rests: the scroll redraws the whole screen
                     // every frame (~45% CPU while it runs), so it shouldn't repeat.
-                    modifier = if (isExpanded) Modifier.basicMarquee(iterations = 1) else Modifier
+                    modifier = if (isExpanded && visualsActive) Modifier.basicMarquee(iterations = 1) else Modifier
                 )
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
@@ -764,7 +774,7 @@ private fun PlayerPageArea(
         CurrentLyricLine(
             lines = state.lyricLines,
             viewModel = viewModel,
-            active = isExpanded && page == PlayerPage.ARTWORK,
+            active = isExpanded && visualsActive && page == PlayerPage.ARTWORK,
             isPlaying = state.isPlaying,
             onClick = { onInteraction(); onPageChange(PlayerPage.LYRICS) },
             modifier = Modifier

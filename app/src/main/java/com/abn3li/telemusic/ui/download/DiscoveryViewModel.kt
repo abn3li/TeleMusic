@@ -98,7 +98,7 @@ class DiscoveryViewModel(
 }
 
 data class NewReleasesUiState(
-    val isLoading: Boolean = true,
+    val isLoading: Boolean = false,
     val isRefreshing: Boolean = false,
     val section: HomeSection? = null,
     // Listener-made playlists for Home; null until read, empty when the region has none.
@@ -124,6 +124,7 @@ class NewReleasesViewModel(
     private var loadJob: Job? = null
     private var communityJob: Job? = null
     private var personalJob: Job? = null
+    private var activeFeedLoads = 0
     private var feedEnabled = settings.homeFeeds.value.youtube
 
     init {
@@ -179,12 +180,25 @@ class NewReleasesViewModel(
         communityJob?.join()
     }
 
+    // Public Home loads two shelves independently. Keep the indicator until both requests
+    // finish, and clear it on cancellation or failure as well as success.
+    private fun launchFeedLoad(load: suspend () -> Unit): Job = viewModelScope.launch {
+        activeFeedLoads++
+        _uiState.update { it.copy(isLoading = true) }
+        try {
+            load()
+        } finally {
+            activeFeedLoads--
+            _uiState.update { it.copy(isLoading = activeFeedLoads > 0) }
+        }
+    }
+
     fun retryIfMissing(force: Boolean = false) {
         if (!feedEnabled) return
         if (_uiState.value.account.signedIn &&
             (force || _uiState.value.personal == null || discoveryRepository.personalHomeIsStale()) &&
             personalJob?.isActive != true) {
-            personalJob = viewModelScope.launch {
+            personalJob = launchFeedLoad {
                 val session = account.state.value.sessionId
                 _uiState.update { it.copy(isRefreshing = true) }
                 try {
@@ -200,16 +214,16 @@ class NewReleasesViewModel(
         // Signed-in Home uses only the account's own shelves; public defaults return on sign-out.
         if (_uiState.value.account.signedIn) return
         if ((force || _uiState.value.section == null) && loadJob?.isActive != true) {
-            loadJob = viewModelScope.launch {
+            loadJob = launchFeedLoad {
                 val session = account.state.value.sessionId
                 val section = discoveryRepository.newReleases(force)
                 if (session == account.state.value.sessionId) {
-                    _uiState.update { it.copy(isLoading = false, section = section ?: it.section) }
+                    _uiState.update { it.copy(section = section ?: it.section) }
                 }
             }
         }
         if ((force || _uiState.value.community == null) && communityJob?.isActive != true) {
-            communityJob = viewModelScope.launch {
+            communityJob = launchFeedLoad {
                 val session = account.state.value.sessionId
                 val community = discoveryRepository.communityPlaylists(force)
                 if (session == account.state.value.sessionId) _uiState.update { it.copy(community = community ?: it.community) }

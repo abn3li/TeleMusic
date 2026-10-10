@@ -70,6 +70,12 @@ android {
         }
     }
     buildFeatures { compose = true }
+    testOptions.unitTests.isIncludeAndroidResources = true
+    testOptions.unitTests.all {
+        // Native rendering tests leave process-wide state that can stall a later Compose test.
+        // A fresh worker per class keeps the full suite as reliable as an isolated class run.
+        it.forkEvery = 1
+    }
     sourceSets.getByName("main") {
         java.srcDir(rootProject.file("third_party/media3-ffmpeg/src/main/java"))
         assets.srcDir(layout.buildDirectory.dir("generated/openSourceNotices"))
@@ -104,6 +110,9 @@ chaquopy {
 
 dependencies {
     testImplementation("junit:junit:4.13.2")
+    // Exercise display-list reuse locally without installing on a phone or starting an emulator.
+    testImplementation("org.robolectric:robolectric:4.14.1")
+    testImplementation("androidx.compose.ui:ui-test-junit4")
     implementation("androidx.core:core-ktx:1.13.1")
     implementation("androidx.core:core-splashscreen:1.0.1")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.4")

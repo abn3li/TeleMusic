@@ -13,9 +13,11 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.geometry.CornerRadius
@@ -69,11 +71,37 @@ internal class FrostedBackdrop {
     var ready by mutableStateOf(false)
 }
 
+/** Headers and the dock sample the page's content, never a picture containing the headers. */
+internal class FrostedBackdropHost {
+    private val pages = mutableListOf<FrostedBackdrop>()
+    var active by mutableStateOf<FrostedBackdrop?>(null)
+        private set
+
+    fun attach(backdrop: FrostedBackdrop) {
+        pages.remove(backdrop)
+        pages.add(backdrop)
+        active = backdrop
+    }
+
+    fun detach(backdrop: FrostedBackdrop) {
+        pages.remove(backdrop)
+        active = pages.lastOrNull()
+    }
+}
+
+internal val LocalFrostedBackdropHost = staticCompositionLocalOf<FrostedBackdropHost?> { null }
+internal val LocalFrostedDockVisible = staticCompositionLocalOf { false }
+
 @Composable
 internal fun rememberFrostedBackdrop(): FrostedBackdrop {
     val backdrop = remember { FrostedBackdrop() }
-    DisposableEffect(backdrop) {
-        onDispose { if (Build.VERSION.SDK_INT >= 31) backdrop.source?.node?.discardDisplayList() }
+    val host = LocalFrostedBackdropHost.current
+    DisposableEffect(backdrop, host) {
+        host?.attach(backdrop)
+        onDispose {
+            host?.detach(backdrop)
+            if (Build.VERSION.SDK_INT >= 31) backdrop.source?.node?.discardDisplayList()
+        }
     }
     return backdrop
 }
@@ -133,22 +161,25 @@ internal fun Modifier.frostedSurface(
     }
     return onGloballyPositioned { position = it.positionInRoot() }
         .clip(shape)
-        .drawWithContent {
-            val source = backdrop.source
-            val canvas = drawContext.canvas.nativeCanvas
-            val sampled = backdrop.ready && Build.VERSION.SDK_INT >= 31 && surface != null && source != null &&
-                source.node.hasDisplayList() && canvas.isHardwareAccelerated
-            if (sampled) {
-                surface!!.draw(this, source!!, position - backdrop.position)
-                // Add grain at display resolution. Upscaling the blur must not enlarge its dots.
-                drawRect(FrostedGrain.brush)
-            }
+        .drawWithCache {
+            val border = Stroke(0.5.dp.toPx())
             val tint = if (light) Color(0xFFF7F7F9) else Color(0xFF0D0D0F)
-            drawRect(tint.copy(alpha = if (sampled) { if (light) 0.73f else 0.8f } else 1f))
-            if (drawBorder) {
-                drawRoundRect(Color.White.copy(alpha = 0.10f), cornerRadius = CornerRadius(size.height / 2f), style = Stroke(0.5.dp.toPx()))
+            onDrawWithContent {
+                val source = backdrop.source
+                val canvas = drawContext.canvas.nativeCanvas
+                val sampled = backdrop.ready && Build.VERSION.SDK_INT >= 31 && surface != null && source != null &&
+                    source.node.hasDisplayList() && canvas.isHardwareAccelerated
+                if (sampled) {
+                    surface!!.draw(this, source!!, position - backdrop.position)
+                    // Add grain at display resolution. Upscaling the blur must not enlarge its dots.
+                    drawRect(FrostedGrain.brush)
+                }
+                drawRect(tint.copy(alpha = if (sampled) { if (light) 0.73f else 0.8f } else 1f))
+                if (drawBorder) {
+                    drawRoundRect(Color.White.copy(alpha = 0.10f), cornerRadius = CornerRadius(size.height / 2f), style = border)
+                }
+                drawContent()
             }
-            drawContent()
         }
 }
 
@@ -192,36 +223,39 @@ internal fun Modifier.frostedCapsuleGroup(backdrop: FrostedBackdrop, capsules: F
         onDispose { if (Build.VERSION.SDK_INT >= 31) surface?.node?.discardDisplayList() }
     }
     return onGloballyPositioned { position = it.positionInRoot() }
-        .drawWithContent {
-            if (capsules.moving()) {
-                drawMovingCapsules(capsules, surface, light)
-                drawContent()
-                return@drawWithContent
-            }
+        .drawWithCache {
+            // The capsule outlines change on layout, not with every scrolled pixel behind them.
             val shapes = capsules.bounds.values.toList()
-            if (shapes.isNotEmpty()) {
-                val path = Path().apply {
-                    shapes.forEach { addRoundRect(RoundRect(it, CornerRadius(it.height / 2f))) }
-                }
-                val source = backdrop.source
-                val canvas = drawContext.canvas.nativeCanvas
-                val sampled = backdrop.ready && Build.VERSION.SDK_INT >= 31 && surface != null && source != null &&
-                    source.node.hasDisplayList() && canvas.isHardwareAccelerated
-                clipPath(path) {
-                    if (sampled) {
-                        surface!!.draw(this, source!!, position - backdrop.position)
-                        drawRect(FrostedGrain.brush)
-                    }
-                    val tint = if (light) Color(0xFFF7F7F9) else Color(0xFF0D0D0F)
-                    drawRect(tint.copy(alpha = if (sampled) { if (light) 0.73f else 0.8f } else 1f))
-                }
-                val border = Stroke(0.5.dp.toPx())
-                shapes.forEach {
-                    drawRoundRect(Color.White.copy(alpha = 0.10f), topLeft = it.topLeft, size = it.size,
-                        cornerRadius = CornerRadius(it.height / 2f), style = border)
-                }
+            val path = Path().apply {
+                shapes.forEach { addRoundRect(RoundRect(it, CornerRadius(it.height / 2f))) }
             }
-            drawContent()
+            val border = Stroke(0.5.dp.toPx())
+            val tint = if (light) Color(0xFFF7F7F9) else Color(0xFF0D0D0F)
+            onDrawWithContent {
+                if (capsules.moving()) {
+                    drawMovingCapsules(capsules, surface, light)
+                    drawContent()
+                    return@onDrawWithContent
+                }
+                if (shapes.isNotEmpty()) {
+                    val source = backdrop.source
+                    val canvas = drawContext.canvas.nativeCanvas
+                    val sampled = backdrop.ready && Build.VERSION.SDK_INT >= 31 && surface != null && source != null &&
+                        source.node.hasDisplayList() && canvas.isHardwareAccelerated
+                    clipPath(path) {
+                        if (sampled) {
+                            surface!!.draw(this, source!!, position - backdrop.position)
+                            drawRect(FrostedGrain.brush)
+                        }
+                        drawRect(tint.copy(alpha = if (sampled) { if (light) 0.73f else 0.8f } else 1f))
+                    }
+                    shapes.forEach {
+                        drawRoundRect(Color.White.copy(alpha = 0.10f), topLeft = it.topLeft, size = it.size,
+                            cornerRadius = CornerRadius(it.height / 2f), style = border)
+                    }
+                }
+                drawContent()
+            }
         }
 }
 
@@ -262,7 +296,7 @@ private fun DrawScope.drawMovingCapsules(capsules: FrostedCapsules, surface: Nat
 }
 
 @RequiresApi(31)
-private class NativeFrostedSurface {
+internal class NativeFrostedSurface {
     val node = RenderNode("Frosted surface")
     private var effectWidth = 0
     private var effectHeight = 0
@@ -271,6 +305,9 @@ private class NativeFrostedSurface {
     // How the last recording maps back onto the surface (see drawRecorded).
     private var recordedPadding = 0f
     private var recordedScale = 1f
+    private var recordedSource: NativeFrostedSource? = null
+    private var recordedPosition = Offset.Unspecified
+    private var recordedBackground = Color.Unspecified
 
     fun hasRecording(): Boolean = node.hasDisplayList()
 
@@ -296,8 +333,9 @@ private class NativeFrostedSurface {
         val padding = FrostedBlurRadius.toPx() * 1.5f
         val width = ceil((size.width + padding * 2) * scale).toInt().coerceAtLeast(1)
         val height = ceil((size.height + padding * 2) * scale).toInt().coerceAtLeast(1)
-        node.setPosition(0, 0, width, height)
-        if (width != effectWidth || height != effectHeight || density != effectDensity) {
+        val geometryChanged = width != effectWidth || height != effectHeight || density != effectDensity
+        if (geometryChanged) {
+            node.setPosition(0, 0, width, height)
             if (blurEffect == null || density != effectDensity) {
                 val radius = FrostedBlurRadius.toPx() * scale
                 blurEffect = RenderEffect.createBlurEffect(radius, radius, Shader.TileMode.CLAMP)
@@ -307,21 +345,28 @@ private class NativeFrostedSurface {
             effectHeight = height
             effectDensity = density
         }
-        val recording = node.beginRecording(width, height)
-        try {
-            recording.drawColor(source.background.toArgb())
-            recording.scale(scale, scale)
-            recording.translate(padding - position.x, padding - position.y)
-            // Only the part of the page this surface blurs: the rest of the page (a whole feed of
-            // shelves and artwork) is skipped instead of being replayed for every surface, every frame.
-            recording.clipRect(position.x - padding, position.y - padding,
-                position.x + size.width + padding, position.y + size.height + padding)
-            recording.drawRenderNode(source.node)
-        } finally {
-            node.endRecording()
+        // A display list holds a live reference to its child RenderNode. Scrolling updates the
+        // page node; the sampling commands stay the same until this surface moves or resizes.
+        // Check hasDisplayList too: Android can discard a layer while it is off screen.
+        if (geometryChanged || recordedSource !== source || recordedPosition != position ||
+            recordedBackground != source.background || !node.hasDisplayList()) {
+            val recording = node.beginRecording(width, height)
+            try {
+                recording.drawColor(source.background.toArgb())
+                recording.scale(scale, scale)
+                recording.translate(padding - position.x, padding - position.y)
+                recording.clipRect(position.x - padding, position.y - padding,
+                    position.x + size.width + padding, position.y + size.height + padding)
+                recording.drawRenderNode(source.node)
+            } finally {
+                node.endRecording()
+            }
+            recordedSource = source
+            recordedPosition = position
+            recordedBackground = source.background
+            recordedPadding = padding
+            recordedScale = scale
         }
-        recordedPadding = padding
-        recordedScale = scale
         drawRecorded(this)
     }
 }

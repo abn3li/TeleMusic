@@ -5,6 +5,7 @@ import com.abn3li.telemusic.ui.download.heroTopInset
 import com.abn3li.telemusic.ui.navigation.FrostedHeaderBackground
 import com.abn3li.telemusic.ui.navigation.frostedBackdropSource
 import com.abn3li.telemusic.ui.navigation.rememberFrostedBackdrop
+import com.abn3li.telemusic.ui.navigation.LocalFrostedDockVisible
 import com.abn3li.telemusic.ui.navigation.FrostedBackdrop
 import com.abn3li.telemusic.ui.theme.SystemBarsState
 import androidx.compose.ui.unit.Dp
@@ -636,6 +637,7 @@ internal fun <T> DetailPageScaffold(
     val configuration = LocalConfiguration.current
     val statusBar = heroTopInset()
     val backdrop = rememberFrostedBackdrop()
+    val captureForDock = LocalFrostedDockVisible.current
     val heroHeight = (configuration.screenHeightDp.dp * 0.6f).coerceIn(380.dp, 560.dp) + statusBar
     val heroHeightPx = with(LocalDensity.current) { heroHeight.toPx() }
     var searching by rememberSaveable { mutableStateOf(false) }
@@ -709,7 +711,7 @@ internal fun <T> DetailPageScaffold(
             .background(paper)
     ) {
         LazyColumn(state = listState, modifier = Modifier.fillMaxSize().then(
-            if (showFrostedHeader && !SystemBarsState.playerOpen) Modifier.frostedBackdropSource(backdrop, paper) else Modifier
+            if ((captureForDock || showFrostedHeader) && !SystemBarsState.playerOpen) Modifier.frostedBackdropSource(backdrop, paper) else Modifier
         )) {
             if (!searching) {
                 item("hero") {

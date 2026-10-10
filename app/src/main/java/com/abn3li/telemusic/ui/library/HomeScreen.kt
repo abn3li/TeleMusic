@@ -81,6 +81,8 @@ import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -129,6 +131,9 @@ fun HomeScreen(
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
     val homeFeeds by app.settingsStore.homeFeeds.collectAsState()
+    val waitingForFeed = homeFeeds.youtube && newReleases.isLoading &&
+        if (newReleases.account.signedIn) newReleases.personal.isNullOrEmpty()
+        else newReleases.section?.items.isNullOrEmpty() && newReleases.community?.items.isNullOrEmpty()
     val canRefresh by rememberUpdatedState(homeFeeds.youtube)
     val refresh = rememberPullToRefreshState(enabled = { canRefresh })
     LaunchedEffect(refresh.isRefreshing) {
@@ -191,6 +196,16 @@ fun HomeScreen(
                 ShortcutButton("Shuffle", Icons.Rounded.Shuffle, Modifier.weight(1f)) {
                     if (home.allIds.isNotEmpty()) callbacks.onPlayCollection(home.allIds, true)
                 }
+            }
+        }
+
+        // Cached shelves stay visible during refresh; animate only while the feed is missing.
+        if (waitingForFeed && !refresh.isRefreshing) item("feed_loading") {
+            Box(
+                Modifier.fillMaxWidth().height(144.dp).semantics { contentDescription = "Loading feed" },
+                contentAlignment = Alignment.Center
+            ) {
+                CalmSpinner(Modifier.size(28.dp), strokeWidth = 2.dp)
             }
         }
 
@@ -310,7 +325,7 @@ private fun homeSongActions(song: SongEntity, onClick: () -> Unit): Modifier {
 }
 
 @Composable
-private fun HomeSectionHeader(
+internal fun HomeSectionHeader(
     title: String,
     onSeeAll: (() -> Unit)? = null,
     strapline: String? = null,
@@ -349,7 +364,8 @@ private fun HomeSectionHeader(
                     seeAllLabel,
                     color = AppAccent,
                     fontSize = 15.sp,
-                    modifier = Modifier.clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onSeeAll)
+                    modifier = Modifier.semantics { contentDescription = "$seeAllLabel $title" }
+                        .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onSeeAll)
                 )
             }
         }
@@ -632,7 +648,7 @@ private fun QuickPicks(tracks: List<BrowseTrack>, onPlay: (List<BrowseTrack>, In
  * or down right after a flick shook the shelf instead of moving the page.)
  */
 @Composable
-private fun Modifier.shelfDrag(row: androidx.compose.foundation.lazy.LazyListState,
+internal fun Modifier.shelfDrag(row: androidx.compose.foundation.lazy.LazyListState,
     fling: androidx.compose.foundation.gestures.FlingBehavior, maxFling: Dp = SHELF_MAX_FLING,
     snapToItem: Boolean = true): Modifier {
     val scope = rememberCoroutineScope()
@@ -650,12 +666,15 @@ private fun Modifier.shelfDrag(row: androidx.compose.foundation.lazy.LazyListSta
             } ?: return@awaitEachGesture
             row.dispatchRawDelta(-start)
             var dragged = start
-            horizontalDrag(drag.id) { change ->
+            val released = horizontalDrag(drag.id) { change ->
                 tracker.addPosition(change.uptimeMillis, change.position)
                 row.dispatchRawDelta(-change.positionChange().x)
                 dragged += change.positionChange().x
                 change.consume()
             }
+            // A cancelled touch (another gesture took over, or the page went away) is not a
+            // release. Starting a fling here moved the shelf after the finger had stopped.
+            if (!released) return@awaitEachGesture
             // A shelf goes about one screen of covers per flick, like YouTube Music's - full
             // long-list momentum threw it 5 to 20 covers, so only a slow drag moved it by one.
             val limit = maxFling.toPx()
@@ -686,7 +705,7 @@ private val SHELF_SLOW_RELEASE = 350.dp
 /** Lines up song tables and grids at the left edge instead of centring a column. */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun rememberStartSnap(row: androidx.compose.foundation.lazy.LazyListState): androidx.compose.foundation.gestures.FlingBehavior {
+internal fun rememberStartSnap(row: androidx.compose.foundation.lazy.LazyListState): androidx.compose.foundation.gestures.FlingBehavior {
     val layout = remember(row) {
         androidx.compose.foundation.gestures.snapping.SnapLayoutInfoProvider(row,
             positionInLayout = androidx.compose.foundation.gestures.snapping.SnapPositionInLayout { _, _, _, _, _ -> 0 })

@@ -291,7 +291,8 @@ class DiscoveryRepository(
             val raw = client.browse(browseId, params)
             // An artist's page is its own shape: top songs plus shelves, no track list to page.
             BrowseParser.parseArtistPage(raw)?.let { artist -> return@runCatching BrowseContent(artist = artist) }
-            var content = BrowseParser.parseBrowseContent(raw)
+            val isCategory = browseId.startsWith(InnertubeBrowseClient.GENRES_BROWSE_ID)
+            var content = BrowseParser.parseBrowseContent(raw, includeSongCards = isCategory)
             if (content.tracks.isEmpty() && content.collections.isEmpty()) {
                 // A real HTTP 200 with a page shape the parser doesn't recognize looks identical
                 // to a genuinely empty page from the outside - this cheap summary (booleans only,
@@ -313,7 +314,9 @@ class DiscoveryRepository(
             // following it, a long playlist silently only ever showed its first page. Capped at
             // 25 extra pages (~2500+ tracks) as a sanity limit against a malformed response
             // looping forever, not a real-world playlist length concern.
-            if (content.tracks.isNotEmpty()) {
+            // A category's continuation can belong to just one carousel. Its other shelves
+            // must stay alongside the songs; their own cards open the full playlists/pages.
+            if (content.tracks.isNotEmpty() && !isCategory) {
                 val allTracks = LinkedHashMap<String, com.abn3li.telemusic.data.browse.BrowseTrack>()
                 content.tracks.forEach { allTracks[it.videoId] = it }
                 var page = raw

@@ -6,6 +6,9 @@ import com.abn3li.telemusic.ui.theme.ink
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
+import androidx.activity.compose.BackHandler
 import com.abn3li.telemusic.ui.library.AppAlert
 import com.abn3li.telemusic.ui.library.AlertAction
 import androidx.compose.ui.platform.LocalDensity
@@ -24,6 +27,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.grid.itemsIndexed
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
@@ -44,6 +48,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -63,8 +68,9 @@ import com.abn3li.telemusic.data.local.SongEntity
 import com.abn3li.telemusic.ui.library.CoverTile
 import com.abn3li.telemusic.ui.library.feedArtworkBorder
 import com.abn3li.telemusic.ui.library.LargeTitleGrid
+import com.abn3li.telemusic.ui.library.LargeTitleList
+import com.abn3li.telemusic.ui.library.HomeSectionHeader
 import com.abn3li.telemusic.ui.library.LibraryDivider
-import com.abn3li.telemusic.ui.library.SectionHeader
 
 /**
  * One YouTube page - an album, playlist, chart or artist opened from Discovery or search, laid
@@ -114,10 +120,18 @@ fun BrowseCollectionScreen(
         return
     }
 
+    // Categories can return songs beside playlists, albums and artists. Keep all of them
+    // visible; a playlist/album with its own header keeps the existing track-list layout.
+    val isCategory = browseId.startsWith(com.abn3li.telemusic.data.browse.InnertubeBrowseClient.GENRES_BROWSE_ID)
+    if (state.collections.isNotEmpty() && state.tracks.isNotEmpty() && (isCategory || state.header == null)) {
+        MixedBrowsePage(state, onBack, onOpenCollection, onPlayTracks, onDownload)
+        return
+    }
+
     // A page of cards and no songs (a genre's playlists, say): a grid, like the library's.
     if (state.collections.isNotEmpty() && state.tracks.isEmpty()) {
         LargeTitleGrid(title = state.title, onBack = onBack) {
-            items(state.collections, key = { it.browseId }) { collection ->
+            items(state.collections, key = { it.browseId + ":" + it.params.orEmpty() }) { collection ->
                 Column(Modifier.fillMaxWidth().youtubeCollectionActions(collection) { onOpenCollection(collection) }) {
                     Thumbnail(collection.thumbnailUrl, Modifier.fillMaxWidth().aspectRatio(1f), corner = 7, requestPx = 300)
                     Spacer(Modifier.height(5.dp))
@@ -217,6 +231,94 @@ fun BrowseCollectionScreen(
     )
 }
 
+@Composable
+internal fun MixedBrowsePage(
+    state: BrowseCollectionUiState,
+    onBack: () -> Unit,
+    onOpenCollection: (BrowseCollection) -> Unit,
+    onPlayTracks: (List<BrowseTrack>, Int, Boolean) -> Unit,
+    onDownload: (BrowseTrack) -> Unit
+) {
+    val groups = remember(state.collections) { state.collections.groupBy { it.kind } }
+    var expandedSection by rememberSaveable { mutableStateOf<BrowseSection?>(null) }
+    val section = expandedSection
+    val pageStates = rememberSaveableStateHolder()
+    BackHandler(section != null) { expandedSection = null }
+    // Opening the complete section uses the content already loaded. Keep each page's scroll
+    // position so returning to the preview does not jump back to the top.
+    pageStates.SaveableStateProvider(section?.name ?: "overview") {
+        if (section != null) {
+            LargeTitleGrid(title = section.title, onBack = { expandedSection = null }) {
+                if (section == BrowseSection.SONGS) {
+                    itemsIndexed(state.tracks, key = { _, track -> track.videoId }) { index, track ->
+                        BrowseSongCard(track, Modifier.fillMaxWidth(), { onDownload(track) }) {
+                            onPlayTracks(state.tracks, index, false)
+                        }
+                    }
+                } else {
+                    items(section.kind?.let { groups[it] }.orEmpty(), key = { it.browseId + ":" + it.params.orEmpty() }) { card ->
+                        CollectionCard(card, artworkBorder = true, modifier = Modifier.fillMaxWidth()) { onOpenCollection(card) }
+                    }
+                }
+            }
+        } else {
+            LargeTitleList(title = state.title, onBack = onBack) {
+                for (group in BrowseSection.entries) {
+                    val kind = group.kind ?: continue
+                    val cards = groups[kind].orEmpty()
+                    if (cards.isEmpty()) continue
+                    item("collections_header_$kind") {
+                        HomeSectionHeader(group.title,
+                            onSeeAll = if (cards.size > BROWSE_PREVIEW_SIZE) { { expandedSection = group } } else null,
+                            seeAllLabel = "Show all")
+                    }
+                    item("collections_$kind") {
+                        LazyRow(
+                            Modifier.graphicsLayer(),
+                            horizontalArrangement = Arrangement.spacedBy(14.dp),
+                            contentPadding = PaddingValues(horizontal = 18.dp)
+                        ) {
+                            items(cards.take(BROWSE_PREVIEW_SIZE), key = { it.browseId + ":" + it.params.orEmpty() }) { card ->
+                                CollectionCard(card, artworkBorder = true) { onOpenCollection(card) }
+                            }
+                        }
+                    }
+                }
+                if (state.tracks.isNotEmpty()) {
+                    item("songs_header") {
+                        HomeSectionHeader("Songs",
+                            onSeeAll = if (state.tracks.size > BROWSE_PREVIEW_SIZE) { { expandedSection = BrowseSection.SONGS } } else null,
+                            seeAllLabel = "Show all")
+                    }
+                    item("songs") {
+                        LazyRow(
+                            Modifier.graphicsLayer(),
+                            horizontalArrangement = Arrangement.spacedBy(14.dp),
+                            contentPadding = PaddingValues(horizontal = 18.dp)
+                        ) {
+                            itemsIndexed(state.tracks.take(BROWSE_PREVIEW_SIZE), key = { _, track -> track.videoId }) { index, track ->
+                                BrowseSongCard(track, onDownload = { onDownload(track) }) {
+                                    onPlayTracks(state.tracks, index, false)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+private const val BROWSE_PREVIEW_SIZE = 6
+
+private enum class BrowseSection(val title: String, val kind: BrowseKind? = null) {
+    PLAYLISTS("Playlists", BrowseKind.PLAYLIST),
+    ARTISTS("Artists", BrowseKind.ARTIST),
+    ALBUMS("Albums", BrowseKind.ALBUM),
+    MORE("More", BrowseKind.OTHER),
+    SONGS("Songs")
+}
+
 internal fun LazyListScope.trackRows(
     tracks: List<BrowseTrack>,
     state: BrowseCollectionUiState,
@@ -244,10 +346,11 @@ internal fun LazyListScope.trackRows(
 /** An album / playlist / artist card in a shelf, sized like the library artist page's album
  * cards; an artist's picture is round. */
 @Composable
-internal fun CollectionCard(item: BrowseCollection, artworkBorder: Boolean = false, onClick: () -> Unit) {
+internal fun CollectionCard(item: BrowseCollection, artworkBorder: Boolean = false,
+    modifier: Modifier = Modifier.width(142.dp), onClick: () -> Unit) {
     val round = item.kind == BrowseKind.ARTIST
     Column(
-        Modifier.width(142.dp).youtubeCollectionActions(item, onClick),
+        modifier.youtubeCollectionActions(item, onClick),
         horizontalAlignment = if (round) Alignment.CenterHorizontally else Alignment.Start
     ) {
         val artworkShape = if (round) CircleShape else androidx.compose.foundation.shape.RoundedCornerShape(8.dp)
@@ -261,34 +364,50 @@ internal fun CollectionCard(item: BrowseCollection, artworkBorder: Boolean = fal
                 placeholder = if (round) Icons.Rounded.Person else Icons.Rounded.Album
             )
         }
-        // Every card's text takes the same height - room for a two-line title and a subtitle
-        // line - so a sideways row of them never changes height as cards with longer or shorter
-        // titles scroll in (that made everything below the row jump). Short titles sit at the top.
-        val textHeight = with(LocalDensity.current) { CardTitleLineHeight.toDp() * 2 + CardSubtitleLineHeight.toDp() } + 8.dp
-        Column(
-            Modifier.fillMaxWidth().height(textHeight).padding(top = 8.dp),
-            horizontalAlignment = if (round) Alignment.CenterHorizontally else Alignment.Start
-        ) {
+        BrowseCardLabels(item.title, item.subtitle, centered = round)
+    }
+}
+
+@Composable
+private fun BrowseSongCard(track: BrowseTrack, modifier: Modifier = Modifier.width(142.dp),
+    onDownload: () -> Unit, onClick: () -> Unit) {
+    Column(modifier.youtubeTrackActions(track, onClick, onDownload)) {
+        CoverTile(track.thumbnailUrl,
+            Modifier.fillMaxWidth().aspectRatio(1f)
+                .feedArtworkBorder(androidx.compose.foundation.shape.RoundedCornerShape(8.dp)),
+            corner = 8, placeholder = Icons.Rounded.Album)
+        BrowseCardLabels(track.title, track.artist)
+    }
+}
+
+@Composable
+private fun BrowseCardLabels(title: String, subtitle: String?, centered: Boolean = false) {
+    // Reserve the same text height for songs and collections so a long title does not move
+    // the following shelf when it scrolls into view.
+    val textHeight = with(LocalDensity.current) { CardTitleLineHeight.toDp() * 2 + CardSubtitleLineHeight.toDp() } + 8.dp
+    Column(
+        Modifier.fillMaxWidth().height(textHeight).padding(top = 8.dp),
+        horizontalAlignment = if (centered) Alignment.CenterHorizontally else Alignment.Start
+    ) {
+        Text(
+            title,
+            color = ink.copy(alpha = 0.94f),
+            fontSize = 15.sp,
+            lineHeight = CardTitleLineHeight,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+            textAlign = if (centered) TextAlign.Center else TextAlign.Start
+        )
+        subtitle?.let {
             Text(
-                item.title,
-                color = ink.copy(alpha = 0.94f),
-                fontSize = 15.sp,
-                lineHeight = CardTitleLineHeight,
-                maxLines = 2,
+                it,
+                color = ink.copy(alpha = 0.6f),
+                fontSize = 13.sp,
+                lineHeight = CardSubtitleLineHeight,
+                maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
-                textAlign = if (round) TextAlign.Center else TextAlign.Start
+                textAlign = if (centered) TextAlign.Center else TextAlign.Start
             )
-            item.subtitle?.let {
-                Text(
-                    it,
-                    color = ink.copy(alpha = 0.6f),
-                    fontSize = 13.sp,
-                    lineHeight = CardSubtitleLineHeight,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    textAlign = if (round) TextAlign.Center else TextAlign.Start
-                )
-            }
         }
     }
 }

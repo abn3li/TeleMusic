@@ -96,6 +96,7 @@ import com.abn3li.telemusic.ui.theme.LocalPalette
 import com.abn3li.telemusic.ui.navigation.FrostedHeaderBackground
 import com.abn3li.telemusic.ui.navigation.frostedBackdropSource
 import com.abn3li.telemusic.ui.navigation.rememberFrostedBackdrop
+import com.abn3li.telemusic.ui.navigation.LocalFrostedDockVisible
 import com.abn3li.telemusic.ui.theme.SystemBarsState
 import com.abn3li.telemusic.ui.theme.ink
 import com.abn3li.telemusic.ui.theme.paper
@@ -215,6 +216,7 @@ internal fun ArtistHeroLayout(
 
     val statusBar = heroTopInset()
     val backdrop = rememberFrostedBackdrop()
+    val captureForDock = LocalFrostedDockVisible.current
     val heroHeight = (LocalConfiguration.current.screenHeightDp.dp * 0.6f).coerceIn(380.dp, 560.dp) + statusBar
     val heroPx = with(density) { heroHeight.toPx() }
     val listState = rememberLazyListState()
@@ -256,7 +258,7 @@ internal fun ArtistHeroLayout(
             .background(tint)
     ) {
         LazyColumn(state = listState, modifier = Modifier.fillMaxSize().then(
-            if (showFrostedHeader && !SystemBarsState.playerOpen) Modifier.frostedBackdropSource(backdrop, tint) else Modifier
+            if ((captureForDock || showFrostedHeader) && !SystemBarsState.playerOpen) Modifier.frostedBackdropSource(backdrop, tint) else Modifier
         )) {
             if (searching) item("search") {
                 Box(Modifier.fillMaxWidth().padding(top = 64.dp + statusBar)) {

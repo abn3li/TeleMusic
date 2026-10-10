@@ -43,9 +43,8 @@ data class HomeShelf(
     val moreParams: String? = null
 )
 
-/** One browse page's worth of content: either a track list (a playlist/chart/artist's own
- * songs) or more collection cards (a chart page linking to sub-charts, say) - never
- * meaningfully both at once in practice, same tradeoff the search-side parser makes.
+/** One browse page's worth of content. Categories can mix songs with playlists, albums and
+ * artists, so neither list excludes the other.
  * [header] is an album's or playlist's own title block, [artist] an artist page's sections. */
 data class BrowseContent(
     val tracks: List<BrowseTrack> = emptyList(),

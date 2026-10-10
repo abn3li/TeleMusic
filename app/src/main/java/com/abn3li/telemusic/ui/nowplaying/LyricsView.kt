@@ -121,6 +121,7 @@ internal fun LyricsPage(
     state: NowPlayingUiState,
     viewModel: NowPlayingViewModel,
     effects: PlayerEffects,
+    active: Boolean,
     onOpenManualSearch: () -> Unit,
     onOpenLyricsSource: () -> Unit,
     onUserInteraction: () -> Unit,
@@ -134,7 +135,8 @@ internal fun LyricsPage(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.Center
             ) {
-                CalmSpinner(color = Color.White.copy(alpha = 0.8f), strokeWidth = 2.5.dp)
+                if (active) CalmSpinner(color = Color.White.copy(alpha = 0.8f), strokeWidth = 2.5.dp)
+                else Spacer(Modifier.size(48.dp))
                 Spacer(Modifier.height(14.dp))
                 Text("Searching lyrics…", color = Color.White.copy(alpha = 0.6f), fontSize = 15.sp)
             }
@@ -143,6 +145,7 @@ internal fun LyricsPage(
                 lines = state.lyricLines,
                 viewModel = viewModel,
                 effects = effects,
+                active = active,
                 onOpenLyricsSource = onOpenLyricsSource,
                 onUserInteraction = onUserInteraction
             )
@@ -241,14 +244,15 @@ private fun SyncedLyrics(
     lines: List<LyricLine>,
     viewModel: NowPlayingViewModel,
     effects: PlayerEffects,
+    active: Boolean,
     onOpenLyricsSource: () -> Unit,
     onUserInteraction: () -> Unit
 ) {
-    val progressState = viewModel.playbackProgress.collectAsState()
+    val progressState = viewModel.playbackProgress.collectAsStateWhileActive(active)
     // The letter-by-letter sweep runs smoothly between the player's position updates only while
-    // the music plays; paused, it holds still.
-    val isPlaying = viewModel.stableUiState.collectAsState().value.isPlaying
-    val activeIndex by remember(lines) {
+    // the music plays and the lyrics are visible; covered or paused, it holds still.
+    val isPlaying = viewModel.stableUiState.collectAsState().value.isPlaying && active
+    val activeIndex by remember(lines, progressState) {
         derivedStateOf {
             val position = progressState.value.currentPositionMs
             lines.indexOfLast { it.timeMs <= position }
@@ -278,7 +282,8 @@ private fun SyncedLyrics(
     }
 
     // Drives cascade frames only while a step is still settling, then stops.
-    LaunchedEffect(cascade) {
+    LaunchedEffect(cascade, active) {
+        if (!active) return@LaunchedEffect
         snapshotFlow { cascade.steps.size }.collectLatest { count ->
             if (count == 0) return@collectLatest
             while (cascade.steps.isNotEmpty()) {
@@ -295,8 +300,8 @@ private fun SyncedLyrics(
         val anchorPx = with(density) { (maxHeight * 0.14f).toPx() }
         val topSpacer = maxHeight * 0.14f
 
-        LaunchedEffect(activeIndex, autoFollow) {
-            if (!autoFollow || activeIndex < 0) return@LaunchedEffect
+        LaunchedEffect(activeIndex, autoFollow, active) {
+            if (!active || !autoFollow || activeIndex < 0) return@LaunchedEffect
             val itemIndex = activeIndex + 1
             val target = listState.layoutInfo.visibleItemsInfo.firstOrNull { it.index == itemIndex }
             if (target == null) {
@@ -572,13 +577,7 @@ internal fun CurrentLyricLine(
     onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val progressState = if (active) {
-        viewModel.playbackProgress.collectAsState()
-    } else {
-        remember { mutableStateOf(viewModel.playbackProgress.value) }
-    }
-    // Keyed on the state too: it's a different one once the player opens (the live position)
-    // than while closed (a still copy) - following the old one left the line stuck.
+    val progressState = viewModel.playbackProgress.collectAsStateWhileActive(active)
     val index by remember(lines, progressState) {
         derivedStateOf {
             val position = progressState.value.currentPositionMs

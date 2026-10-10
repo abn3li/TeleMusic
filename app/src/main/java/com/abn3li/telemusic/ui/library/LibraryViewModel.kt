@@ -93,6 +93,7 @@ class LibraryViewModel(private val repository: MusicRepository) : ViewModel() {
                 }
             }
         }
+        .flowOn(kotlinx.coroutines.Dispatchers.Default)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     /**

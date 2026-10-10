@@ -159,13 +159,8 @@ internal fun PlayerScrubber(
     qualityStatus: @Composable () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    // The player stays composed while collapsed; following the 300ms position tick there would
-    // redraw an off-screen scrubber for nothing.
-    val progress by if (active) {
-        viewModel.playbackProgress.collectAsState()
-    } else {
-        remember { mutableStateOf(viewModel.playbackProgress.value) }
-    }
+    // The player stays composed while collapsed or covered by Related.
+    val progress by viewModel.playbackProgress.collectAsStateWhileActive(active)
     var dragging by remember { mutableStateOf(false) }
     var dragFraction by remember { mutableFloatStateOf(0f) }
     val durationMs = progress.durationMs.coerceAtLeast(1L)
@@ -208,6 +203,7 @@ internal fun PlayerScrubber(
 @Composable
 internal fun TransportRow(
     state: NowPlayingUiState,
+    visualsActive: Boolean,
     onPrevious: () -> Unit,
     onPlayPause: () -> Unit,
     onNext: () -> Unit,
@@ -220,7 +216,7 @@ internal fun TransportRow(
     ) {
         TransportButton(Icons.Rounded.FastRewind, "Previous", 44.dp, state.hasPrevious, onPrevious)
         Spacer(Modifier.width(34.dp))
-        val loading = state.isBuffering || state.loadingSongId != null
+        val loading = visualsActive && (state.isBuffering || state.loadingSongId != null)
         TransportButton(
             icon = if (state.isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
             contentDescription = if (state.isPlaying) "Pause" else "Play",

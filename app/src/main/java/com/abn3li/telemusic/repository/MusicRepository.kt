@@ -37,6 +37,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.emitAll
 import kotlinx.coroutines.sync.withLock
@@ -138,7 +139,14 @@ class MusicRepository(
     }
     // ---- Tracks / Favourites, metadata-driven sort ----
     fun observeLibrary(sortField: SortField, ascending: Boolean): Flow<List<SongEntity>> =
-        songDao.observeAll().map { it.sortedByField(sortField, ascending) }
+        songDao.observeAll().map { it.sortedForLibrary(sortField, ascending) }
+            .flowOn(Dispatchers.Default)
+
+    // Playback needs an ID lookup, not an alphabetically sorted library. Both indexing and
+    // library sorting stay off the UI thread when a like, play or download updates Room.
+    fun observeLibraryIndex(): Flow<Map<Long, SongEntity>> = songDao.observeAll()
+        .map { songs -> songs.associateBy { it.telegramMessageId } }
+        .flowOn(Dispatchers.Default)
 
     suspend fun getSongById(id: Long): SongEntity? =
         songDao.getById(id) ?: streamOnlySongs[id] ?: recentStreams().firstOrNull { it.telegramMessageId == id }
@@ -331,7 +339,8 @@ class MusicRepository(
             .sortedByDescending { it.lastPlayedAtMillis }.distinctBy { it.telegramMessageId }.take(limit)
 
     fun observeFavorites(sortField: SortField, ascending: Boolean): Flow<List<SongEntity>> =
-        songDao.observeFavorites().map { it.sortedByField(sortField, ascending) }
+        songDao.observeFavorites().map { it.sortedForLibrary(sortField, ascending) }
+            .flowOn(Dispatchers.Default)
 
     suspend fun setFavorite(song: SongEntity, isFavorite: Boolean) {
         if (isFavorite) saveIfStreamOnly(song.telegramMessageId)
@@ -343,10 +352,12 @@ class MusicRepository(
     // ---- Smart (built-in) playlists: Liked/Telegram/Downloaded - not real rows in the
     // playlists table, just a different filter over the same songs table. ----
     fun observeTelegramSongs(sortField: SortField, ascending: Boolean): Flow<List<SongEntity>> =
-        songDao.observeTelegramSongs().map { it.sortedByField(sortField, ascending) }
+        songDao.observeTelegramSongs().map { it.sortedForLibrary(sortField, ascending) }
+            .flowOn(Dispatchers.Default)
 
     fun observeDownloadedSongs(sortField: SortField, ascending: Boolean): Flow<List<SongEntity>> =
-        songDao.observeDownloaded().map { it.sortedByField(sortField, ascending) }
+        songDao.observeDownloaded().map { it.sortedForLibrary(sortField, ascending) }
+            .flowOn(Dispatchers.Default)
 
     // ---- Import from local storage ----
     /** [treeUri] is a folder the user picked via the system file explorer (SAF) - no storage
@@ -642,7 +653,8 @@ class MusicRepository(
     // ---- Albums / Artists - grouped straight from real metadata ----
     fun observeAlbums(): Flow<List<AlbumSummary>> = songDao.observeAlbums()
     fun observeSongsByAlbum(album: String, sortField: SortField, ascending: Boolean) =
-        songDao.observeSongsByAlbum(album).map { it.sortedByField(sortField, ascending) }
+        songDao.observeSongsByAlbum(album).map { it.sortedForLibrary(sortField, ascending) }
+            .flowOn(Dispatchers.Default)
 
     /** Deletes [album]: its songs (YouTube and Telegram) leave the library, except Liked or
      * downloaded ones, ones in a playlist, and files imported from the phone. */
@@ -655,7 +667,8 @@ class MusicRepository(
 
     fun observeArtists(): Flow<List<ArtistSummary>> = songDao.observeArtists()
     fun observeSongsByArtist(artist: String, sortField: SortField, ascending: Boolean) =
-        songDao.observeSongsByArtist(artist).map { it.sortedByField(sortField, ascending) }
+        songDao.observeSongsByArtist(artist).map { it.sortedForLibrary(sortField, ascending) }
+            .flowOn(Dispatchers.Default)
 
     suspend fun clearStaleLocalPath(songId: Long) {
         songDao.getById(songId)?.let { song ->
@@ -724,17 +737,6 @@ class MusicRepository(
     // Every song id belonging to a playlist that's had its own "Hide from tracks" turned on -
     // see PlaylistDao.observeSongIdsInHiddenPlaylists' own doc.
     fun observeHiddenPlaylistSongIds(): Flow<List<Long>> = playlistDao.observeSongIdsInHiddenPlaylists()
-
-    private fun List<SongEntity>.sortedByField(field: SortField, ascending: Boolean): List<SongEntity> {
-        val comparator = when (field) {
-            SortField.TITLE -> compareBy<SongEntity> { it.title.lowercase() }
-            SortField.ARTIST -> compareBy { it.artist.lowercase() }
-            SortField.ALBUM -> compareBy { (it.album ?: "Unknown Album").lowercase() }
-            SortField.DATE_ADDED -> compareBy { it.addedAtMillis }
-        }
-        val sorted = sortedWith(comparator)
-        return if (ascending) sorted else sorted.reversed()
-    }
 
     // ---- Sync from Telegram ----
     suspend fun syncFromChannel(chatId: Long) {

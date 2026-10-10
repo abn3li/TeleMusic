@@ -19,7 +19,6 @@ import com.abn3li.telemusic.repository.LyricsProvider
 import com.abn3li.telemusic.repository.LyricsResult
 import com.abn3li.telemusic.repository.MusicRepository
 import com.abn3li.telemusic.repository.PlaybackResolution
-import com.abn3li.telemusic.repository.SortField
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -300,8 +299,7 @@ class NowPlayingViewModel(
     // songs without a database query each. Eagerly, not WhileSubscribed: nothing collects this
     // flow (callers only read .value), so WhileSubscribed never started it and it stayed empty -
     // every lookup silently fell through to one getSongById() per song.
-    val allSongsMap: StateFlow<Map<Long, SongEntity>> = repository.observeLibrary(SortField.TITLE, true)
-        .map { list -> list.associateBy { it.telegramMessageId } }
+    val allSongsMap: StateFlow<Map<Long, SongEntity>> = repository.observeLibraryIndex()
         .stateIn(viewModelScope, SharingStarted.Eagerly, emptyMap())
 
     // A property (not an anonymous object in init) so onCleared() can unregister it:

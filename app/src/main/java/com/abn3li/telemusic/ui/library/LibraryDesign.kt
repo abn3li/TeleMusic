@@ -99,6 +99,7 @@ import androidx.compose.ui.window.Popup
 import androidx.compose.ui.window.PopupProperties
 import com.abn3li.telemusic.ui.nowplaying.LocalMiniPlayerInset
 import com.abn3li.telemusic.ui.navigation.FrostedBackdrop
+import com.abn3li.telemusic.ui.navigation.LocalFrostedDockVisible
 import com.abn3li.telemusic.ui.navigation.frostedBackdropSource
 import com.abn3li.telemusic.ui.navigation.frostedSurface
 import com.abn3li.telemusic.ui.navigation.rememberFrostedBackdrop
@@ -180,6 +181,7 @@ private fun LargeTitleListBody(
 ) {
     var barHeightPx by remember { mutableIntStateOf(0) }
     val backdrop = rememberFrostedBackdrop()
+    val captureForDock = LocalFrostedDockVisible.current
     val statusBar = frostedHeaderTopInset()
     val titleAlpha by remember(listState) {
         derivedStateOf {
@@ -204,7 +206,7 @@ private fun LargeTitleListBody(
         LazyColumn(
             state = listState,
             modifier = Modifier.fillMaxSize().then(
-                if (showSmallTitle && !SystemBarsState.playerOpen) Modifier.frostedBackdropSource(backdrop, paper)
+                if ((captureForDock || showSmallTitle) && !SystemBarsState.playerOpen) Modifier.frostedBackdropSource(backdrop, paper)
                 else Modifier
             ),
             contentPadding = PaddingValues(top = statusBar + if (showTopBar) LibraryBarHeight else 0.dp)
@@ -254,6 +256,7 @@ internal fun LargeTitleGrid(
 ) {
     var barHeightPx by remember { mutableIntStateOf(0) }
     val backdrop = rememberFrostedBackdrop()
+    val captureForDock = LocalFrostedDockVisible.current
     val statusBar = frostedHeaderTopInset()
     val titleAlpha by remember(gridState) {
         derivedStateOf {
@@ -279,7 +282,7 @@ internal fun LargeTitleGrid(
             state = gridState,
             columns = GridCells.Fixed(2),
             modifier = Modifier.fillMaxSize().then(
-                if (showSmallTitle && !SystemBarsState.playerOpen) Modifier.frostedBackdropSource(backdrop, paper)
+                if ((captureForDock || showSmallTitle) && !SystemBarsState.playerOpen) Modifier.frostedBackdropSource(backdrop, paper)
                 else Modifier
             ),
             horizontalArrangement = Arrangement.spacedBy(15.dp),
