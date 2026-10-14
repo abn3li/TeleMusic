@@ -26,11 +26,13 @@ import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.layout.onPlaced
 import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.abn3li.telemusic.data.local.SongEntity
+import com.abn3li.telemusic.TgMusicApp
 import com.abn3li.telemusic.ui.theme.ink
 
 @Composable
@@ -46,8 +48,17 @@ fun LibraryHomeScreen(
     onOpenSmartPlaylist: (SmartPlaylistKind) -> Unit,
     onOpenDownloads: () -> Unit,
     onOpenLocalMusic: () -> Unit,
-    onOpenRecentlyAdded: () -> Unit
+    onOpenRecentlyAdded: () -> Unit,
+    onOpenYouTubePlaylist: (String, String, String?) -> Unit
 ) {
+    val app = LocalContext.current.applicationContext as TgMusicApp
+    val account by app.youtubeAccount.state.collectAsState()
+    var followedPlaylists by remember(account.sessionId) {
+        mutableStateOf(emptyList<com.abn3li.telemusic.data.browse.BrowseCollection>())
+    }
+    LaunchedEffect(account.sessionId, account.signedIn) {
+        followedPlaylists = if (account.signedIn) app.discoveryRepository.accountPlaylists().orEmpty() else emptyList()
+    }
     val home by viewModel.home.collectAsState()
     val playlists by viewModel.playlists.collectAsState()
     val artists by viewModel.artists.collectAsState()
@@ -106,6 +117,27 @@ fun LibraryHomeScreen(
                 LazyRow(Modifier.graphicsLayer(), contentPadding = PaddingValues(horizontal = 18.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     itemsIndexed(songs, key = { _, song -> song.telegramMessageId }, contentType = { _, _ -> "recent_song" }) { index, song ->
                         RecentlyAddedCard(song, actions) { callbacks.onPlay(ids, index) }
+                    }
+                }
+            }
+        }
+        if (followedPlaylists.isNotEmpty()) {
+            item("youtube_header", contentType = "section_header") { LibraryShelfHeader("YouTube Playlists") }
+            item("youtube_shelf", contentType = "playlist_shelf") {
+                LazyRow(Modifier.graphicsLayer(), contentPadding = PaddingValues(horizontal = 18.dp),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    itemsIndexed(followedPlaylists, key = { _, playlist -> playlist.browseId }) { _, playlist ->
+                        Column(Modifier.width(156.dp).clickable { onOpenYouTubePlaylist(playlist.browseId, playlist.title, playlist.params) }) {
+                            CoverTile(playlist.thumbnailUrl, Modifier.fillMaxWidth().aspectRatio(1f)
+                                .feedArtworkBorder(RoundedCornerShape(9.dp)), corner = 9,
+                                placeholder = if (playlist.browseId == "VLLM") Icons.Rounded.Star else Icons.AutoMirrored.Rounded.QueueMusic)
+                            Spacer(Modifier.height(7.dp))
+                            Text(playlist.title, color = ink, fontSize = 14.sp, fontWeight = FontWeight.Medium,
+                                maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Spacer(Modifier.height(2.dp))
+                            Text(playlist.subtitle ?: "YouTube Music", color = ink.copy(alpha = 0.5f),
+                                fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        }
                     }
                 }
             }

@@ -246,7 +246,8 @@ object BrowseParser {
             title = title,
             subtitle = subtitle?.takeIf { it.isNotBlank() },
             thumbnailUrl = thumbnails.best(),
-            kind = kind
+            kind = kind,
+            isPodcast = "PODCAST" in pageType || "EPISODE" in pageType
         )
     }
 
@@ -332,7 +333,10 @@ object BrowseParser {
                     title = title,
                     subtitle = subtitle,
                     thumbnailUrl = thumbnails.best(),
-                    kind = kind
+                    kind = kind,
+                    isPodcast = endpoint.optJSONObject("browseEndpointContextSupportedConfigs")
+                        ?.optJSONObject("browseEndpointContextMusicConfig")?.optString("pageType")
+                        ?.let { "PODCAST" in it || "EPISODE" in it } == true
                 )
             )
         }

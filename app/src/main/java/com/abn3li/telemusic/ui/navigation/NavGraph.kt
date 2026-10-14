@@ -370,7 +370,8 @@ fun TgMusicNavGraph(navController: NavHostController = rememberNavController()) 
                         onOpenSmartPlaylist = { kind -> navController.navigate(Routes.smartPlaylist(kind)) },
                         onOpenDownloads = { navController.navigate(Routes.smartPlaylist(SmartPlaylistKind.DOWNLOADED)) },
                         onOpenLocalMusic = { navController.navigate(Routes.LIBRARY_LOCAL_MUSIC) },
-                        onOpenRecentlyAdded = { navController.navigate(Routes.LIBRARY_RECENTLY_ADDED) }
+                        onOpenRecentlyAdded = { navController.navigate(Routes.LIBRARY_RECENTLY_ADDED) },
+                        onOpenYouTubePlaylist = { browseId, title, params -> navController.navigate(Routes.youtubeBrowse(browseId, title, params)) }
                     )
                 }
                 composable(Routes.LIBRARY_LOCAL_MUSIC) {

@@ -3,10 +3,12 @@ package com.abn3li.telemusic.ui.theme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.LocalOverscrollConfiguration
+import androidx.compose.foundation.LocalIndication
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.graphics.Color
 
 private val Accent = Color(0xFFE64366)
@@ -71,12 +73,14 @@ private val LightColorScheme = lightColorScheme(
 @Composable
 @OptIn(ExperimentalFoundationApi::class)
 fun TgMusicTheme(light: Boolean = false, content: @Composable () -> Unit) {
+    val pressFeedback = remember(light) { SoftPressIndication(if (light) Color.Black else Color.White) }
     MaterialTheme(colorScheme = if (light) LightColorScheme else AppColorScheme, shapes = AppShapes) {
         // No Android 12+ stretch overscroll: Samsung's renderer can segfault in
         // StretchEffect::getShader when a stretched list changes size mid-stretch (seen when
         // switching Sync filters), killing the whole process.
         CompositionLocalProvider(
             LocalOverscrollConfiguration provides null,
+            LocalIndication provides pressFeedback,
             LocalPalette provides if (light) LightPalette else DarkPalette,
             content = content
         )
@@ -87,7 +91,8 @@ fun TgMusicTheme(light: Boolean = false, content: @Composable () -> Unit) {
  * rest of the app uses - it sits on the cover's own colours with white text, as Apple Music's does. */
 @Composable
 fun DarkPlayerTheme(content: @Composable () -> Unit) {
+    val pressFeedback = remember { SoftPressIndication(Color.White) }
     MaterialTheme(colorScheme = AppColorScheme, shapes = AppShapes) {
-        CompositionLocalProvider(LocalPalette provides DarkPalette, content = content)
+        CompositionLocalProvider(LocalPalette provides DarkPalette, LocalIndication provides pressFeedback, content = content)
     }
 }

@@ -6,6 +6,8 @@ import com.abn3li.telemusic.ui.theme.ink
 import com.abn3li.telemusic.data.local.listArtwork
 import com.abn3li.telemusic.data.local.displayArtwork
 import android.widget.Toast
+import android.view.View
+import android.view.WindowManager
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.animateFloatAsState
@@ -38,6 +40,10 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.ime
+import androidx.compose.foundation.layout.union
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
@@ -49,6 +55,7 @@ import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Album
 import androidx.compose.material.icons.rounded.ArrowCircleDown
 import androidx.compose.material.icons.rounded.CloudDone
+import androidx.compose.material.icons.rounded.CheckCircleOutline
 import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material.icons.rounded.DeleteForever
 import androidx.compose.material.icons.rounded.Download
@@ -71,6 +78,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -91,6 +100,7 @@ import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -122,9 +132,11 @@ internal class LibrarySongActions(
     val onClearSong: (SongEntity) -> Unit,
     val onAddToPlaylist: (Long, SongEntity) -> Unit,
     val onCreatePlaylistAndAdd: (String, SongEntity) -> Unit,
+    val onCreatePlaylistAndAddSongs: (String, List<SongEntity>) -> Unit,
     val onFindArtwork: suspend (SongEntity, String, String) -> Boolean,
     val onGoToArtist: (String) -> Unit,
-    val onGoToAlbum: (String) -> Unit
+    val onGoToAlbum: (String) -> Unit,
+    val onDownloadSongs: (List<SongEntity>) -> Unit = { songs -> songs.forEach(onDownload) }
 )
 
 internal sealed interface SongRowLeading {
@@ -148,6 +160,22 @@ internal fun LibrarySongRow(
     subtitle: String? = song.artist,
     horizontalPadding: Dp = 22.dp
 ) {
+    val editing = LocalLibraryEditing.current
+    if (editing != null) {
+        // Keep artwork and gesture state at one composition location across mode changes.
+        EditingSongRow(song, editing, horizontalPadding) {
+            LibrarySongRowContent(song, actions,
+                onClick = { if (editing.selecting) editing.toggle(song.telegramMessageId) else if (!editing.reordering) onClick() },
+                leading = leading, subtitle = subtitle, horizontalPadding = 0.dp,
+                editing = editing.active)
+        }
+    } else LibrarySongRowContent(song, actions, onClick, leading, subtitle, horizontalPadding, editing = false)
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun LibrarySongRowContent(song: SongEntity, actions: LibrarySongActions, onClick: () -> Unit,
+    leading: SongRowLeading, subtitle: String?, horizontalPadding: Dp, editing: Boolean) {
     val context = LocalContext.current
     val haptics = LocalHapticFeedback.current
     var rowTopInWindow by remember { mutableFloatStateOf(0f) }
@@ -156,6 +184,7 @@ internal fun LibrarySongRow(
     var menuOpen by remember { mutableStateOf(false) }
 
     SwipeToPlayNext(
+        enabled = !editing,
         onPlayNext = {
             actions.onPlayNext(song)
             Toast.makeText(context, "Playing next", Toast.LENGTH_SHORT).show()
@@ -169,6 +198,7 @@ internal fun LibrarySongRow(
                 .combinedClickable(
                     onClick = onClick,
                     onLongClick = {
+                        if (editing) return@combinedClickable
                         haptics.performHapticFeedback(HapticFeedbackType.LongPress)
                         rowTopInWindow = coordinates[0]?.takeIf { it.isAttached }?.positionInWindow()?.y ?: 0f
                         menuOpen = true
@@ -213,6 +243,7 @@ internal fun LibrarySongRow(
 internal fun SwipeToPlayNext(
     onPlayNext: () -> Unit,
     modifier: Modifier = Modifier,
+    enabled: Boolean = true,
     rowBackground: Color = paper,
     content: @Composable (Modifier) -> Unit
 ) {
@@ -221,6 +252,7 @@ internal fun SwipeToPlayNext(
     var rowWidth by remember { mutableIntStateOf(0) }
     val swipe = remember { Animatable(0f) }
     val playNext by rememberUpdatedState(onPlayNext)
+    LaunchedEffect(enabled) { if (!enabled) swipe.snapTo(0f) }
     // Read inside the gesture, never captured: the row's width can change after it starts.
     fun trigger() = rowWidth * 0.2f
     fun dragBy(delta: Float) {
@@ -255,10 +287,11 @@ internal fun SwipeToPlayNext(
         content(
             Modifier
                 .graphicsLayer { translationX = swipe.value }
-                .background(rowBackground)
+                .background(if (enabled) rowBackground else Color.Transparent)
                 // Claims only a rightward swipe: a leftward one is left to whatever holds the
                 // row (the Search pager flips back to YouTube Music with it).
-                .pointerInput(Unit) {
+                .pointerInput(enabled) {
+                    if (!enabled) return@pointerInput
                     awaitEachGesture {
                         val down = awaitFirstDown(requireUnconsumed = false)
                         var start = 0f
@@ -338,7 +371,7 @@ internal fun SongContextMenu(song: SongEntity, actions: LibrarySongActions, anch
 
 /** Shared anchor and animation so remote items use the same card as library songs. */
 @Composable
-internal fun LibraryContextMenu(anchorTopPx: Float, onDismiss: () -> Unit,
+internal fun LibraryContextMenu(anchorTopPx: Float, onDismiss: () -> Unit, centered: Boolean = false,
     content: @Composable (maxHeight: Dp, onAction: (() -> Unit) -> Unit) -> Unit) {
     var show by remember { mutableStateOf(false) }
     var closing by remember { mutableStateOf(false) }
@@ -357,15 +390,31 @@ internal fun LibraryContextMenu(anchorTopPx: Float, onDismiss: () -> Unit,
     }
 
     // The dim behind the card fades with it (it used to appear and vanish in one frame).
-    val scrim = animateFloatAsState(if (show) 0.18f else 0f,
+    val scrim = animateFloatAsState(if (show) 0.10f else 0f,
         androidx.compose.animation.core.tween(180), label = "menuScrim")
-    val scrimColor = paper
     Popup(popupPositionProvider = WindowOriginPosition, onDismissRequest = { close() }, properties = PopupProperties(focusable = true)) {
+        val popupView = LocalView.current
+        LaunchedEffect(popupView) {
+            // Let Android dim the entire window behind this popup, including the status bar.
+            // A Compose scrim is confined to the popup's content frame below the system icons.
+            while (!popupView.isAttachedToWindow) withFrameNanos { }
+            val windowView = generateSequence(popupView as View?) { it.parent as? View }
+                .firstOrNull { it.layoutParams is WindowManager.LayoutParams } ?: return@LaunchedEffect
+            val windowManager = popupView.context.getSystemService(WindowManager::class.java)
+            snapshotFlow { scrim.value }.collect { alpha ->
+                val params = windowView.layoutParams as WindowManager.LayoutParams
+                params.flags = params.flags or WindowManager.LayoutParams.FLAG_DIM_BEHIND
+                params.dimAmount = alpha
+                windowManager.updateViewLayout(windowView, params)
+            }
+        }
         BoxWithConstraints(
             Modifier
                 .fillMaxSize()
-                .drawBehind { drawRect(scrimColor.copy(alpha = scrim.value)) }
                 .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) { close() }
+                .then(if (centered) Modifier.windowInsetsPadding(
+                    androidx.compose.foundation.layout.WindowInsets.safeDrawing.union(androidx.compose.foundation.layout.WindowInsets.ime)
+                ) else Modifier)
         ) {
             val density = LocalDensity.current
             val anchorTop = with(density) { anchorTopPx.toDp() }
@@ -376,19 +425,33 @@ internal fun LibraryContextMenu(anchorTopPx: Float, onDismiss: () -> Unit,
                 visible = show,
                 // Opacity eases (a bouncy spring overshoots and dips - a flicker); only the scale bounces.
                 enter = fadeIn(androidx.compose.animation.core.tween(140)) +
-                    scaleIn(spec, initialScale = 0.82f, transformOrigin = TransformOrigin(0.5f, 0f)),
+                    scaleIn(if (centered) androidx.compose.animation.core.tween(140) else spec,
+                        initialScale = if (centered) 0.96f else 0.82f,
+                        transformOrigin = if (centered) TransformOrigin.Center else TransformOrigin(0.5f, 0f)),
                 exit = fadeOut(androidx.compose.animation.core.tween(160)) +
-                    scaleOut(spring(dampingRatio = 0.86f, stiffness = 520f), targetScale = 0.88f, transformOrigin = TransformOrigin(0.5f, 0f)),
+                    scaleOut(if (centered) androidx.compose.animation.core.tween(120) else spring(dampingRatio = 0.86f, stiffness = 520f),
+                        targetScale = if (centered) 0.98f else 0.88f,
+                        transformOrigin = if (centered) TransformOrigin.Center else TransformOrigin(0.5f, 0f)),
                 modifier = Modifier
-                    .align(Alignment.TopCenter)
-                    .padding(top = top)
+                    .align(if (centered) Alignment.Center else Alignment.TopCenter)
+                    .then(if (centered) Modifier.padding(vertical = 16.dp) else Modifier.padding(top = top))
                     .fillMaxWidth(0.72f)
             ) {
-                content((maxHeight - top - 16.dp).coerceAtLeast(120.dp)) { action -> close(action) }
+                val availableHeight = if (centered) maxHeight - 32.dp else maxHeight - top - 16.dp
+                content(availableHeight.coerceAtLeast(0.dp)) { action -> close(action) }
             }
         }
     }
 
+}
+
+/** All song-action surfaces share the context card's exact material and edge treatment. */
+@Composable
+internal fun Modifier.libraryContextCardSurface(): Modifier {
+    val shape = RoundedCornerShape(18.dp)
+    return graphicsLayer { this.shape = shape; clip = true }
+        .background(LibraryCardColor)
+        .border(0.5.dp, ink.copy(alpha = 0.12f), shape)
 }
 
 @Composable
@@ -401,10 +464,10 @@ private fun SongContextCard(
     onToast: (String) -> Unit
 ) {
     var playlistsOpen by remember { mutableStateOf(false) }
-    val shape = RoundedCornerShape(18.dp)
     val isRealLocalImport = song.isLocalImport && song.localFilePath != null
     val hasArtwork = song.listArtwork != null
     val album = song.album?.takeIf { it.isNotBlank() }
+    val editing = LocalLibraryEditing.current
 
     Column(
         Modifier
@@ -412,9 +475,7 @@ private fun SongContextCard(
             .heightIn(max = maxHeight)
             // A hairline edge instead of an elevation shadow, which redrew every frame of the
             // open animation and flashed.
-            .graphicsLayer { this.shape = shape; clip = true }
-            .background(LibraryCardColor)
-            .border(0.5.dp, ink.copy(alpha = 0.12f), shape)
+            .libraryContextCardSurface()
             .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = {})
     ) {
         Row(Modifier.fillMaxWidth().height(64.dp).padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -432,6 +493,14 @@ private fun SongContextCard(
         }
         CardDivider()
         Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState())) {
+            if (editing != null) {
+                CardItem("Select", Icons.Rounded.CheckCircleOutline) {
+                    // Start the mode change as the context card closes, rather than after a pause.
+                    editing.select(song.telegramMessageId)
+                    onAction {}
+                }
+                CardDivider()
+            }
             CardItem("Play Next", Icons.Rounded.QueuePlayNext) {
                 onAction { actions.onPlayNext(song); onToast("Playing next") }
             }

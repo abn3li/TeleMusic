@@ -145,6 +145,7 @@ class CollectionPlayback(val sourceIds: List<Long>, val isPlaying: Boolean, val 
 val LocalCollectionPlayback = compositionLocalOf { CollectionPlayback(emptyList(), isPlaying = false, isShuffled = false) }
 
 @Composable
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 fun AlbumDetailScreen(album: String, viewModel: LibraryViewModel, callbacks: LibraryCallbacks) {
     val repository = (LocalContext.current.applicationContext as TgMusicApp).musicRepository
     var sortField by rememberSaveable { mutableStateOf(SortField.TITLE) }
@@ -159,6 +160,10 @@ fun AlbumDetailScreen(album: String, viewModel: LibraryViewModel, callbacks: Lib
 
     CollectionDetailPage(
         title = album,
+        actions = actions,
+        collectionKey = "album:$album",
+        customSortIncluded = true,
+        sortToken = "$sortField:$ascending",
         subtitle = albumArtist,
         onSubtitleClick = albumArtist?.let { artist -> { callbacks.onOpenArtist(artist) } },
         detailLine = songCountLine(list),
@@ -171,21 +176,26 @@ fun AlbumDetailScreen(album: String, viewModel: LibraryViewModel, callbacks: Lib
             list.filter { it.isFavorite == allFavorite }.forEach { viewModel.toggleFavorite(it) }
         },
         menu = { close ->
+            val editing = LocalLibraryEditing.current
             LibraryMenuItem("Play Next", Icons.Rounded.QueuePlayNext) { list.forEach { callbacks.onPlayNext(it.telegramMessageId) }; close() }
             LibraryMenuGroupGap()
-            LibraryMenuItem("Title", Icons.Rounded.SortByAlpha, selected = sortField == SortField.TITLE) { sortField = SortField.TITLE; close() }
+            LibraryMenuItem("Title", if (sortField == SortField.TITLE && editing?.isCustom != true) Icons.Rounded.Check else Icons.Rounded.SortByAlpha,
+                selected = sortField == SortField.TITLE && editing?.isCustom != true) { editing?.resetOrder(); sortField = SortField.TITLE; close() }
             LibraryMenuDivider()
-            LibraryMenuItem("Recently Added", Icons.Rounded.Schedule, selected = sortField == SortField.DATE_ADDED) { sortField = SortField.DATE_ADDED; close() }
+            LibraryMenuItem("Recently Added", if (sortField == SortField.DATE_ADDED && editing?.isCustom != true) Icons.Rounded.Check else Icons.Rounded.Schedule,
+                selected = sortField == SortField.DATE_ADDED && editing?.isCustom != true) { editing?.resetOrder(); sortField = SortField.DATE_ADDED; close() }
+            CustomSortMenuItem(close)
             LibraryMenuGroupGap()
-            LibraryMenuItem("Ascending", Icons.Rounded.ArrowUpward, selected = ascending) { ascending = true; close() }
+            LibraryMenuItem("Ascending", Icons.Rounded.ArrowUpward, selected = ascending && editing?.isCustom != true) { editing?.resetOrder(); ascending = true; close() }
             LibraryMenuDivider()
-            LibraryMenuItem("Descending", Icons.Rounded.ArrowDownward, selected = !ascending) { ascending = false; close() }
+            LibraryMenuItem("Descending", Icons.Rounded.ArrowDownward, selected = !ascending && editing?.isCustom != true) { editing?.resetOrder(); ascending = false; close() }
             LibraryMenuGroupGap()
             LibraryMenuItem("Delete Album", Icons.Rounded.Delete, destructive = true) { confirmDelete = true; close() }
         }
     ) { shown, _ ->
         val ids = shown.map { it.telegramMessageId }
         itemsIndexed(shown, key = { _, s -> s.telegramMessageId }, contentType = { _, _ -> "track" }) { index, song ->
+            Column(librarySongPlacement(song.telegramMessageId)) {
             LibrarySongRow(
                 song = song,
                 actions = actions,
@@ -195,6 +205,7 @@ fun AlbumDetailScreen(album: String, viewModel: LibraryViewModel, callbacks: Lib
                 horizontalPadding = 18.dp
             )
             if (index < shown.lastIndex) LibraryDivider(start = 54.dp, end = 18.dp)
+            }
         }
     }
 
@@ -314,6 +325,7 @@ fun PlaylistDetailScreen(playlistId: Long, playlistName: String, viewModel: Libr
 
     PlaylistLikePage(
         title = playlistName,
+        collectionKey = "playlist:$playlistId",
         songs = songs,
         placeholder = Icons.AutoMirrored.Rounded.QueueMusic,
         viewModel = viewModel,
@@ -401,6 +413,7 @@ fun SmartPlaylistDetailScreen(kind: SmartPlaylistKind, viewModel: LibraryViewMod
 
     PlaylistLikePage(
         title = kind.label,
+        collectionKey = "smart:${kind.name}",
         songs = songs,
         placeholder = kind.icon(),
         viewModel = viewModel,
@@ -435,8 +448,10 @@ fun SmartPlaylistDetailScreen(kind: SmartPlaylistKind, viewModel: LibraryViewMod
  * only while sorted by title.
  */
 @Composable
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 private fun PlaylistLikePage(
     title: String,
+    collectionKey: String,
     songs: List<SongEntity>?,
     placeholder: ImageVector,
     viewModel: LibraryViewModel,
@@ -457,6 +472,10 @@ private fun PlaylistLikePage(
     val actions = rememberLibrarySongActions(viewModel, callbacks.onPlayNext, callbacks.onOpenArtist, callbacks.onOpenAlbum)
     CollectionDetailPage(
         title = title,
+        actions = actions,
+        collectionKey = collectionKey,
+        customSortIncluded = true,
+        sortToken = byTitle.toString(),
         subtitle = null,
         onSubtitleClick = null,
         detailLine = songCountLine(list),
@@ -467,10 +486,14 @@ private fun PlaylistLikePage(
         indexKey = if (showIndex && byTitle) { song -> song.title } else null,
         menu = { close ->
             menu(close)
+            val editing = LocalLibraryEditing.current
             LibraryMenuGroupGap()
-            LibraryMenuItem("Title", Icons.Rounded.SortByAlpha, selected = byTitle) { byTitle = true; close() }
+            LibraryMenuItem("Title", if (byTitle && editing?.isCustom != true) Icons.Rounded.Check else Icons.Rounded.SortByAlpha,
+                selected = byTitle && editing?.isCustom != true) { editing?.resetOrder(); byTitle = true; close() }
             LibraryMenuDivider()
-            LibraryMenuItem("Recently Added", Icons.Rounded.Schedule, selected = !byTitle) { byTitle = false; close() }
+            LibraryMenuItem("Recently Added", if (!byTitle && editing?.isCustom != true) Icons.Rounded.Check else Icons.Rounded.Schedule,
+                selected = !byTitle && editing?.isCustom != true) { editing?.resetOrder(); byTitle = false; close() }
+            CustomSortMenuItem(close)
             LibraryMenuGroupGap()
             LibraryMenuItem(
                 label = "Alphabet Index",
@@ -481,8 +504,10 @@ private fun PlaylistLikePage(
     ) { shown, _ ->
         val ids = shown.map { it.telegramMessageId }
         itemsIndexed(shown, key = { _, s -> s.telegramMessageId }, contentType = { _, _ -> "song" }) { index, song ->
+            Column(librarySongPlacement(song.telegramMessageId)) {
             LibrarySongRow(song = song, actions = actions, onClick = { callbacks.onPlay(ids, index) })
             if (index < shown.lastIndex) LibraryDivider(start = 88.dp)
+            }
         }
     }
 }
@@ -531,8 +556,12 @@ internal fun SectionHeader(title: String, onMore: (() -> Unit)?) {
  * gain a solid bar as the hero scrolls away. Search swaps the hero for a search field.
  */
 @Composable
-private fun CollectionDetailPage(
+internal fun CollectionDetailPage(
     title: String,
+    actions: LibrarySongActions,
+    collectionKey: String,
+    sortToken: String = "",
+    customSortIncluded: Boolean = false,
     subtitle: String?,
     onSubtitleClick: (() -> Unit)?,
     detailLine: String,
@@ -546,20 +575,30 @@ private fun CollectionDetailPage(
     // Set to show the A–Z strip (only for a title-sorted list): which text of a song it indexes.
     indexKey: ((SongEntity) -> String)? = null,
     body: LazyListScope.(shown: List<SongEntity>, searching: Boolean) -> Unit
-) = DetailPageScaffold(
+) {
+    val editing = rememberLibraryEditing(collectionKey, sortToken)
+    val ordered = remember(songs, editing.order, editing.isCustom, editing.draft, editing.reordering) { editing.ordered(songs) }
+    val listState = rememberLazyListState()
+    LaunchedEffect(editing.active) {
+        if (editing.selecting && listState.firstVisibleItemIndex == 0) listState.scrollToItem(0)
+    }
+    androidx.compose.runtime.CompositionLocalProvider(LocalLibraryEditing provides editing, LocalEditingListState provides listState, LocalEditingSongs provides songs) {
+    Box(Modifier.fillMaxSize()) {
+    DetailPageScaffold(
     title = title,
     subtitle = subtitle,
     onSubtitleClick = onSubtitleClick,
     detailLine = detailLine,
     hero = hero,
-    items = songs,
+    items = ordered,
+    listState = listState,
     loaded = loaded,
-    onBack = callbacks.onBack,
+    onBack = { if (editing.active) editing.cancel() else callbacks.onBack() },
     matches = { song, query -> song.title.contains(query, true) || song.artist.contains(query, true) || song.album.orEmpty().contains(query, true) },
     favorite = favorite,
     onFavorite = onFavorite,
-    menu = menu,
-    indexKey = indexKey,
+    menu = { close -> EditingMenuItem(editing, songs, close); menu?.invoke(this, close); if (!customSortIncluded) CustomSortMenuItem(close) },
+    indexKey = if (editing.active || editing.isCustom) null else indexKey,
     heroActions = { shown, openSearch ->
         val ids = remember(shown) { shown.map { it.telegramMessageId } }
         // This page's own list is the one playing (in any order - the page may be sorted
@@ -572,26 +611,33 @@ private fun CollectionDetailPage(
         val shuffleOn = isThisPlaying && playback.isShuffled
         val playingNow = isThisPlaying && playback.isPlaying
         HeroButtonRow {
-            HeroButton(Icons.Rounded.Shuffle, if (shuffleOn) "Shuffle on" else "Shuffle", enabled = songs.isNotEmpty(), active = shuffleOn) {
+            HeroButton(Icons.Rounded.Shuffle, if (shuffleOn) "Shuffle on" else "Shuffle", enabled = songs.isNotEmpty() && !editing.active, active = shuffleOn) {
                 if (isThisPlaying) callbacks.onToggleShuffle() else callbacks.onPlayCollection(ids, true)
             }
             HeroButton(
                 if (playingNow) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
                 if (playingNow) "Pause" else "Play",
-                enabled = songs.isNotEmpty(),
+                enabled = songs.isNotEmpty() && !editing.active,
                 primary = true
             ) {
                 if (isThisPlaying) callbacks.onTogglePlayPause() else callbacks.onPlayCollection(ids, false)
             }
-            HeroButton(Icons.Rounded.Search, "Search", enabled = songs.isNotEmpty(), onClick = openSearch)
+            HeroButton(Icons.Rounded.Search, "Search", enabled = songs.isNotEmpty() && !editing.active, onClick = openSearch)
         }
         // Always takes its room, so the title doesn't jump when it appears.
         Box(Modifier.fillMaxWidth().height(30.dp), contentAlignment = Alignment.BottomCenter) {
             if (isThisPlaying) PlaybackStatusLine(playing = playingNow, shuffled = shuffleOn)
         }
     },
-    body = body
+    body = { shown, searching ->
+        body(shown, searching)
+        if (editing.selecting) item("editing_space") { Spacer(Modifier.height(80.dp)) }
+    }
 )
+    LibraryEditingBar(editing, ordered, actions, callbacks.onPlayCollection)
+    }
+    }
+}
 
 /** The Shuffle / Play / Search row under a detail page's title. */
 @Composable
@@ -630,9 +676,9 @@ internal fun <T> DetailPageScaffold(
     // False when the page has other content below (an artist's album shelves): no empty-list
     // message over it. An in-page search with no matches still says "No results".
     showEmptyText: Boolean = true,
+    listState: androidx.compose.foundation.lazy.LazyListState = rememberLazyListState(),
     body: LazyListScope.(shown: List<T>, searching: Boolean) -> Unit
 ) {
-    val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
     val configuration = LocalConfiguration.current
     val statusBar = heroTopInset()
@@ -642,6 +688,8 @@ internal fun <T> DetailPageScaffold(
     val heroHeightPx = with(LocalDensity.current) { heroHeight.toPx() }
     var searching by rememberSaveable { mutableStateOf(false) }
     var searchText by rememberSaveable { mutableStateOf("") }
+    val editing = LocalLibraryEditing.current
+    LaunchedEffect(editing?.active) { if (editing?.active == true) { searchText = ""; searching = false } }
     val query by produceState(searchText, searchText) {
         if (searchText.isNotBlank()) delay(150)
         value = searchText
@@ -652,7 +700,7 @@ internal fun <T> DetailPageScaffold(
     val collapse by remember(searching) {
         derivedStateOf {
             when {
-                searching -> 1f
+                searching || editing?.active == true -> 1f
                 listState.firstVisibleItemIndex > 0 -> 1f
                 else -> ((listState.firstVisibleItemScrollOffset - heroHeightPx * 0.55f) / (heroHeightPx * 0.2f)).coerceIn(0f, 1f)
             }
@@ -710,10 +758,12 @@ internal fun <T> DetailPageScaffold(
             }
             .background(paper)
     ) {
-        LazyColumn(state = listState, modifier = Modifier.fillMaxSize().then(
+        LazyColumn(state = listState, modifier = Modifier.fillMaxSize().libraryReorderGestures(editing, listState).then(
             if ((captureForDock || showFrostedHeader) && !SystemBarsState.playerOpen) Modifier.frostedBackdropSource(backdrop, paper) else Modifier
         )) {
-            if (!searching) {
+            if (editing?.active == true) {
+                item("editing_header_space") { Spacer(Modifier.height(statusBar + LibraryBarHeight)) }
+            } else if (!searching) {
                 item("hero") {
                     Box(Modifier.fillMaxWidth().height(heroHeight).clipToBounds()) {
                         Box(
@@ -930,8 +980,13 @@ private fun DetailTopBar(
     val surface = lerp(Color.Black.copy(alpha = 0.34f), ink.copy(alpha = 0.08f), progress)
     val barInk = lerp(Color.White, ink, progress)
     var menuOpen by remember { mutableStateOf(false) }
+    val editing = LocalLibraryEditing.current
     Box(modifier.fillMaxWidth()) {
         FrostedHeaderBackground(backdrop, collapse)
+        if (editing?.active == true) {
+            LibraryEditingTopBar(editing, Modifier.padding(top = statusBar))
+            return@Box
+        }
         Box(
             Modifier.fillMaxWidth()
                 .padding(top = statusBar)

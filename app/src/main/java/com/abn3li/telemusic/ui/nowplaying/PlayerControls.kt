@@ -1,5 +1,7 @@
 package com.abn3li.telemusic.ui.nowplaying
 
+import androidx.compose.animation.core.tween
+
 import com.abn3li.telemusic.ui.library.CalmSpinner
 import android.content.BroadcastReceiver
 import android.content.Context
@@ -249,7 +251,8 @@ private fun TransportButton(
         animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessMedium),
         label = "transportScale"
     )
-    val pressGlow by animateFloatAsState(if (pressed) 0.14f else 0f, label = "transportGlow")
+    val pressGlow by animateFloatAsState(if (pressed) 0.04f else 0f,
+        animationSpec = tween(if (pressed) 60 else 140), label = "transportGlow")
     val alpha by animateFloatAsState(if (enabled) 1f else 0.3f, label = "transportAlpha")
 
     Box(

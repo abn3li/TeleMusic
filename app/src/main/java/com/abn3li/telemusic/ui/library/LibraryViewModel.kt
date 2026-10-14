@@ -183,6 +183,10 @@ class LibraryViewModel(private val repository: MusicRepository) : ViewModel() {
         val id = repository.createPlaylist(name); repository.addSongToPlaylist(id, song)
     }
     fun createPlaylist(name: String) = viewModelScope.launch { repository.createPlaylist(name) }
+    fun createPlaylistAndAddSongs(name: String, songs: List<SongEntity>) = viewModelScope.launch {
+        val id = repository.createPlaylist(name)
+        songs.forEach { repository.addSongToPlaylist(id, it) }
+    }
     fun deletePlaylist(playlistId: Long, removeSongs: Boolean) = viewModelScope.launch {
         if (playlistPinKey(playlistId) in _pinnedKeys.value) togglePin(playlistPinKey(playlistId))
         repository.deletePlaylist(playlistId, removeSongs)
@@ -193,6 +197,20 @@ class LibraryViewModel(private val repository: MusicRepository) : ViewModel() {
         _downloadingIds.value = _downloadingIds.value + song.telegramMessageId
         runCatching { repository.downloadExplicitly(song) }
         _downloadingIds.value = _downloadingIds.value - song.telegramMessageId
+    }
+
+    fun downloadSongs(songs: List<SongEntity>) = viewModelScope.launch {
+        val pending = songs.filter { !it.isExplicitDownload && !it.isLocalImport && it.telegramMessageId !in _downloadingIds.value }
+        val ids = pending.map { it.telegramMessageId }.toSet()
+        _downloadingIds.value = _downloadingIds.value + ids
+        try {
+            pending.forEach { song ->
+                runCatching { repository.downloadExplicitly(song) }
+                _downloadingIds.value = _downloadingIds.value - song.telegramMessageId
+            }
+        } finally {
+            _downloadingIds.value = _downloadingIds.value - ids
+        }
     }
 
     // "Download All" for a YouTube-imported playlist: playlistId -> (done, total), and the job

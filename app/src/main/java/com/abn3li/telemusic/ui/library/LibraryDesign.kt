@@ -1,5 +1,7 @@
 package com.abn3li.telemusic.ui.library
 
+import androidx.compose.foundation.border
+
 import com.abn3li.telemusic.ui.theme.SystemBarsState
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.CompositionLocalProvider
@@ -186,7 +188,7 @@ private fun LargeTitleListBody(
     val titleAlpha by remember(listState) {
         derivedStateOf {
             val first = listState.layoutInfo.visibleItemsInfo.firstOrNull { it.index == 0 }
-            if (first == null) 0f else (1f + first.offset.toFloat() / first.size * 1.8f).coerceIn(0f, 1f)
+            if (first == null || first.size == 0) 0f else (1f + first.offset.toFloat() / first.size * 1.8f).coerceIn(0f, 1f)
         }
     }
     val showSmallTitle by remember(listState) {
@@ -205,13 +207,13 @@ private fun LargeTitleListBody(
     Box(Modifier.fillMaxSize().extendBehindStatusBar(statusBar).background(paper)) {
         LazyColumn(
             state = listState,
-            modifier = Modifier.fillMaxSize().then(
+            modifier = Modifier.fillMaxSize().libraryReorderGestures(LocalLibraryEditing.current, listState).then(
                 if ((captureForDock || showSmallTitle) && !SystemBarsState.playerOpen) Modifier.frostedBackdropSource(backdrop, paper)
                 else Modifier
             ),
             contentPadding = PaddingValues(top = statusBar + if (showTopBar) LibraryBarHeight else 0.dp)
         ) {
-            item("large_title") { LargeTitle(title, titleTrailing, { titleAlpha }) }
+            item("large_title") { if (LocalLibraryEditing.current?.active != true) LargeTitle(title, titleTrailing, { titleAlpha }) }
             if (stickyContent != null) item("sticky_space") { Spacer(Modifier.height(stickyHeight)) }
             content()
             item("bottom_inset") { Spacer(Modifier.height(bottomInset)) }
@@ -355,15 +357,20 @@ private fun LibraryTitleBar(
     showToolbar: Boolean = true,
     modifier: Modifier = Modifier
 ) {
+    val editing = LocalLibraryEditing.current
     // Sample only the list, so the bar never blurs its own title or buttons into the background.
     // Before the large title scrolls away, keep the original page-colour header.
-    val background = if (showSmallTitle) {
+    val background = if (showSmallTitle || editing?.active == true) {
         Modifier.frostedSurface(backdrop, shape = RectangleShape, drawBorder = false)
     } else Modifier.background(paper)
     val toolbarHeight = if (showToolbar) LibraryBarHeight else 0.dp
     Box(modifier.fillMaxWidth().height(toolbarHeight + statusBar).then(background).padding(top = statusBar)) {
         // Home keeps the system status area readable without covering the feed with a toolbar.
         if (!showToolbar) return@Box
+        if (editing?.active == true) {
+            LibraryEditingTopBar(editing)
+            return@Box
+        }
         if (onBack != null) {
             Icon(
                 Icons.AutoMirrored.Rounded.ArrowBackIos,
@@ -595,10 +602,10 @@ internal fun LibraryFloatingMenu(
                     .width(250.dp)
                     .graphicsLayer {
                         shape = RoundedCornerShape(12.dp)
-                        shadowElevation = 40f
                         clip = true
                     }
-                    .background(LocalPalette.current.alert),
+                    .background(LocalPalette.current.alert)
+                    .border(0.5.dp, ink.copy(alpha = 0.12f), RoundedCornerShape(12.dp)),
                 content = content
             )
         }

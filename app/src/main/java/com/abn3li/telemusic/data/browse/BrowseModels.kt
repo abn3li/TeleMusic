@@ -19,7 +19,8 @@ data class BrowseCollection(
     val title: String,
     val subtitle: String?,
     val thumbnailUrl: String?,
-    val kind: BrowseKind
+    val kind: BrowseKind,
+    val isPodcast: Boolean = false
 )
 
 enum class BrowseKind { PLAYLIST, ARTIST, ALBUM, OTHER }

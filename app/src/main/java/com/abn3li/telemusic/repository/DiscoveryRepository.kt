@@ -36,6 +36,7 @@ class DiscoveryRepository(
     private val accountGeneration = java.util.concurrent.atomic.AtomicLong()
     private val accountCacheLock = Any()
     private val personalCache = HomeFeedCache<List<com.abn3li.telemusic.data.browse.HomeShelf>>(android.os.SystemClock::elapsedRealtime)
+    private val accountPlaylistsCache = HomeFeedCache<List<BrowseCollection>>(android.os.SystemClock::elapsedRealtime)
     private val cachedPersonal get() = personalCache.value
 
     fun personalHomeIsStale(): Boolean = personalCache.isStale()
@@ -83,9 +84,38 @@ class DiscoveryRepository(
         synchronized(accountCacheLock) {
             accountGeneration.incrementAndGet()
             personalCache.clear()
+            accountPlaylistsCache.clear()
             cachedNewReleases = null
             cachedCommunity = null
             relatedCache.clear()
+        }
+    }
+
+    /** Saved/followed playlists from the signed-in YouTube Music library, not URL imports. */
+    suspend fun accountPlaylists(): List<BrowseCollection>? = accountPlaylistsCache.getOrLoad(false) {
+        withContext(Dispatchers.IO) {
+            try {
+                val playlists = LinkedHashMap<String, BrowseCollection>()
+                val seenTokens = HashSet<String>()
+                var page = client.browse("FEmusic_liked_playlists")
+                while (true) {
+                    BrowseParser.parseBrowseContent(page).collections
+                        .filter { it.browseId.startsWith("VL") && it.browseId != "VLSE" && !it.isPodcast }
+                        .forEach { playlists.putIfAbsent(it.browseId, it) }
+                    val token = BrowseParser.findContinuationToken(page) ?: break
+                    if (!seenTokens.add(token)) break
+                    page = client.browseContinuation(token)
+                }
+                // YouTube sometimes omits its built-in Liked Songs tile from this grid.
+                val liked = playlists.remove("VLLM") ?: BrowseCollection(
+                    "VLLM", null, "Liked Songs", "YouTube Music", null, BrowseKind.PLAYLIST)
+                listOf(liked) + playlists.values
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                android.util.Log.w("DiscoveryRepo", "Account playlists could not be loaded", error)
+                null
+            }
         }
     }
 

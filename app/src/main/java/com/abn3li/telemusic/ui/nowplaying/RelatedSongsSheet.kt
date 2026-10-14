@@ -1,5 +1,8 @@
 package com.abn3li.telemusic.ui.nowplaying
 
+import com.abn3li.telemusic.ui.theme.SoftIconButton as IconButton
+import com.abn3li.telemusic.ui.theme.SoftTextButton as TextButton
+
 import com.abn3li.telemusic.ui.download.youtubeTrackActions
 import com.abn3li.telemusic.ui.download.LocalYouTubeMenus
 import com.abn3li.telemusic.ui.download.YouTubeContextHost

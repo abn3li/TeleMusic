@@ -48,9 +48,9 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.rounded.SwapHoriz
-import androidx.compose.material3.Button
+import com.abn3li.telemusic.ui.theme.SoftButton as Button
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.FilledTonalButton
+import com.abn3li.telemusic.ui.theme.SoftTonalButton as FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable

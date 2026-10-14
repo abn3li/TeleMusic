@@ -60,6 +60,7 @@ import androidx.compose.material.icons.rounded.Star
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -105,9 +106,11 @@ internal fun rememberLibrarySongActions(
             onClearSong = { viewModel.clearSong(it) },
             onAddToPlaylist = { id, song -> viewModel.addSongToPlaylist(id, song) },
             onCreatePlaylistAndAdd = { name, song -> viewModel.createPlaylistAndAddSong(name, song) },
+            onCreatePlaylistAndAddSongs = { name, songs -> viewModel.createPlaylistAndAddSongs(name, songs) },
             onFindArtwork = { song, title, artist -> viewModel.editSongAndFetchArtwork(song, title, artist) },
             onGoToArtist = onGoToArtist,
-            onGoToAlbum = onGoToAlbum
+            onGoToAlbum = onGoToAlbum,
+            onDownloadSongs = { songs -> app.downloadGate.run { viewModel.downloadSongs(songs) } }
         )
     }
 }
@@ -184,6 +187,7 @@ internal fun PinnedTile(item: PinnedPlaylist, onOpen: () -> Unit, onUnpin: () ->
  * Play/Shuffle, rows. [menu] fills the title bar's "⋯" menu when given.
  */
 @Composable
+@OptIn(ExperimentalFoundationApi::class)
 internal fun SongListPage(
     title: String,
     songs: List<SongEntity>,
@@ -195,13 +199,19 @@ internal fun SongListPage(
     // Set to show the A–Z strip: which text of a song it indexes (title/artist/album), and
     // whether the list runs Z→A.
     indexKey: ((SongEntity) -> String)? = null,
-    indexDescending: Boolean = false
+    indexDescending: Boolean = false,
+    collectionKey: String = "list:$title",
+    sortToken: String = "",
+    customSortIncluded: Boolean = false
 ) {
+    val editing = rememberLibraryEditing(collectionKey, sortToken)
+    val orderedSongs = remember(songs, editing.order, editing.isCustom, editing.draft, editing.reordering) { editing.ordered(songs) }
     var searchText by rememberSaveable { mutableStateOf("") }
+    LaunchedEffect(editing.active) { if (editing.active) searchText = "" }
     val query = debounced(searchText)
-    val shown = remember(songs, query) {
-        if (query.isBlank()) songs
-        else songs.filter {
+    val shown = remember(orderedSongs, query) {
+        if (query.isBlank()) orderedSongs
+        else orderedSongs.filter {
             it.title.contains(query, true) || it.artist.contains(query, true) || it.album.orEmpty().contains(query, true)
         }
     }
@@ -212,7 +222,7 @@ internal fun SongListPage(
 
     // Letter -> position of the first song under it. One pass over the list, only redone when the
     // list or sort changes - never while scrolling.
-    val indexActive = indexKey != null && query.isBlank() && shown.isNotEmpty()
+    val indexActive = indexKey != null && query.isBlank() && shown.isNotEmpty() && !editing.active && !editing.isCustom
     val barLetters = remember(indexDescending) { if (indexDescending) IndexLetters.dropLast(1).reversed() + "#" else IndexLetters }
     val firstIndexOf = remember(shown, indexKey) {
         if (indexKey == null) emptyMap()
@@ -239,9 +249,11 @@ internal fun SongListPage(
         jumpRequest = JumpRequest(index)
     }
 
+    CompositionLocalProvider(LocalLibraryEditing provides editing, LocalEditingListState provides listState, LocalEditingSongs provides songs) {
+    Box(Modifier.fillMaxSize()) {
     LargeTitleList(
         title = title,
-        onBack = onBack,
+        onBack = { if (editing.active) editing.cancel() else onBack() },
         listState = listState,
         overlay = if (!indexActive) null else {
             {
@@ -254,21 +266,21 @@ internal fun SongListPage(
                 )
             }
         },
-        barActions = if (menu == null) null else {
-            {
+        barActions = {
                 Box {
                     TitleBarCircleButton(contentDescription = "More", onClick = { menuOpen = true })
                     LibraryFloatingMenu(expanded = menuOpen, onDismiss = { menuOpen = false }) {
-                        menu { menuOpen = false }
+                        EditingMenuItem(editing, songs) { menuOpen = false }
+                        menu?.invoke { menuOpen = false }
+                        if (!customSortIncluded) CustomSortMenuItem { menuOpen = false }
                     }
                 }
-            }
         },
-        stickyContent = { LibrarySearchField(searchText, "Search in $title", { searchText = it }) }
+        stickyContent = if (editing.active) null else { { LibrarySearchField(searchText, "Search in $title", { searchText = it }) } }
     ) {
         item("play_shuffle") {
-            PlayShuffleButtons(
-                enabled = shown.isNotEmpty(),
+            if (!editing.active) PlayShuffleButtons(
+                enabled = shown.isNotEmpty() && !editing.active,
                 onPlay = { onPlayCollection(shownIds, false) },
                 onShuffle = { onPlayCollection(shownIds, true) }
             )
@@ -284,9 +296,15 @@ internal fun SongListPage(
             }
         }
         itemsIndexed(shown, key = { _, song -> song.telegramMessageId }, contentType = { _, _ -> "song" }) { index, song ->
+            Column(librarySongPlacement(song.telegramMessageId)) {
             LibrarySongRow(song = song, actions = actions, onClick = { onPlay(shownIds, index) })
             if (index < shown.lastIndex) LibraryDivider(start = 88.dp)
+            }
         }
+        if (editing.selecting) item("editing_space") { Spacer(Modifier.height(80.dp)) }
+    }
+    LibraryEditingBar(editing, shown, actions, onPlayCollection)
+    }
     }
 }
 
@@ -324,6 +342,8 @@ fun LibrarySongsScreen(
         onPlayCollection = onPlayCollection,
         indexKey = indexKey,
         indexDescending = !ascending,
+        sortToken = "$sortField:$ascending",
+        customSortIncluded = true,
         menu = { close ->
             SortMenuItem("Title", Icons.Rounded.SortByAlpha, sortField == SortField.TITLE) { viewModel.selectSortField(SortField.TITLE); close() }
             LibraryMenuDivider()
@@ -332,6 +352,7 @@ fun LibrarySongsScreen(
             SortMenuItem("Album", Icons.Rounded.Album, sortField == SortField.ALBUM) { viewModel.selectSortField(SortField.ALBUM); close() }
             LibraryMenuDivider()
             SortMenuItem("Recently Added", Icons.Rounded.Schedule, sortField == SortField.DATE_ADDED) { viewModel.selectSortField(SortField.DATE_ADDED); close() }
+            CustomSortMenuItem(close)
             LibraryMenuGroupGap()
             SortMenuItem("Ascending", Icons.Rounded.ArrowUpward, ascending) { viewModel.setAscending(true); close() }
             LibraryMenuDivider()
@@ -348,7 +369,9 @@ fun LibrarySongsScreen(
 
 @Composable
 private fun SortMenuItem(label: String, icon: ImageVector, selected: Boolean, onClick: () -> Unit) {
-    LibraryMenuItem(label = label, icon = icon, selected = selected, onClick = onClick)
+    val editing = LocalLibraryEditing.current
+    LibraryMenuItem(label = label, icon = if (selected && editing?.isCustom != true) Icons.Rounded.Check else icon,
+        selected = selected && editing?.isCustom != true) { editing?.resetOrder(); onClick() }
 }
 
 @Composable

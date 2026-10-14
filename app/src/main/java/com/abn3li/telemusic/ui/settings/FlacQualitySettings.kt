@@ -84,7 +84,7 @@ internal fun FlacQualitySettingsGroup() {
             if (error != null) AlertNote(error!!)
             if (preferences.hasAccount) {
                 Spacer(Modifier.height(8.dp))
-                androidx.compose.material3.TextButton(enabled = !saving, onClick = {
+                com.abn3li.telemusic.ui.theme.SoftTextButton(enabled = !saving, onClick = {
                     scope.launch { withContext(Dispatchers.IO) { app.flacUpgradeStore.clear() } }
                     password = ""
                     accountOpen = false
