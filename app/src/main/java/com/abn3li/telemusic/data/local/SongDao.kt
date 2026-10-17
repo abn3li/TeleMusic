@@ -5,6 +5,9 @@ import kotlinx.coroutines.flow.Flow
 
 @Dao
 interface SongDao {
+    @Query("UPDATE songs SET trackNumber = :track, discNumber = :disc WHERE telegramMessageId = :id AND (trackNumber IS NULL OR trackNumber != :track OR discNumber IS NULL OR discNumber != :disc)")
+    suspend fun setAlbumPosition(id: Long, disc: Int, track: Int)
+
 
     @Query("SELECT * FROM songs ORDER BY addedAtMillis DESC")
     fun observeAll(): Flow<List<SongEntity>>

@@ -72,7 +72,9 @@ data class SongEntity(
     // A Telegram song's file size and type (from the message), for choosing the better copy
     // when the same song is also in the library from YouTube. 0 / null until a sync records them.
     val sourceSizeBytes: Long = 0L,
-    val sourceMime: String? = null
+    val sourceMime: String? = null,
+    val trackNumber: Int? = null,
+    val discNumber: Int? = null
 )
 
 /**

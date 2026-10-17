@@ -19,6 +19,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.CloudDone
 import androidx.compose.material.icons.rounded.CloudDownload
+import androidx.compose.material.icons.rounded.ThumbUp
 import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.Lyrics
 import androidx.compose.material.icons.rounded.MusicNote
@@ -74,6 +75,7 @@ internal fun NowPlayingOverflowSheet(
     onOpenAlbum: (String) -> Unit
 ) {
     val app = LocalContext.current.applicationContext as com.abn3li.telemusic.TgMusicApp
+    val youtubeLike = com.abn3li.telemusic.ui.library.rememberYouTubeLikeAction(song.youtubeVideoId)
     val flac by app.flacUpgradeStore.activeFlac.collectAsState()
     val hasActiveFlac = flac?.songId == song.telegramMessageId.toString()
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
@@ -166,6 +168,12 @@ internal fun NowPlayingOverflowSheet(
                     .clip(RoundedCornerShape(14.dp))
                     .background(Color.White.copy(alpha = 0.07f))
             ) {
+                if (youtubeLike != null) {
+                    SheetAction(icon = androidx.compose.material.icons.Icons.Rounded.ThumbUp,
+                        label = youtubeLike.label,
+                        onClick = { closeThen(youtubeLike.perform) })
+                    HorizontalDivider(color = Color.White.copy(alpha = 0.08f), modifier = Modifier.padding(start = 52.dp))
+                }
                 // A real local import is already on the device; a YouTube "Play" stream (local
                 // import flag but no file yet) can still be downloaded for real.
                 val isRealLocalImport = song.isLocalImport && song.localFilePath != null && !song.isExplicitDownload && !hasActiveFlac

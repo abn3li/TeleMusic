@@ -28,12 +28,12 @@ class InnertubeBrowseClient(
     private val auth: () -> Map<String, String>? = { null },
     // What music.youtube.com said about that session (live version, its own visitor id, a brand
     // account's id), once read - see YouTubeWebSession. Null until then: the defaults below.
-    private val webScope: () -> YouTubeWebScope? = { null }
-) {
-    private val client = OkHttpClient.Builder()
+    private val webScope: () -> YouTubeWebScope? = { null },
+    private val client: OkHttpClient = OkHttpClient.Builder()
         .connectTimeout(15, TimeUnit.SECONDS)
         .readTimeout(15, TimeUnit.SECONDS)
         .build()
+) {
 
     // A user-facing region picker used to sit in front of this (Settings > YouTube region), but
     // was removed: verified on-device that neither the context.client.gl field below nor a
@@ -42,6 +42,21 @@ class InnertubeBrowseClient(
     // request's real IP geolocation instead, which this app has no way to override. `gl`/`hl`
     // stay hardcoded to a real value (still needed - they affect response language/labels) rather
     // than exposing a setting that looked functional but couldn't actually do what it claimed.
+    fun likeSong(videoId: String) = setSongLiked(videoId, true)
+
+    fun setSongLiked(videoId: String, liked: Boolean) {
+        require(videoId.isNotBlank())
+        val headers = checkNotNull(auth()) { "Sign in to YouTube first" }
+        val endpoint = if (liked) "like/like" else "like/removelike"
+        val response = post(endpoint, JSONObject().put("target", JSONObject().put("videoId", videoId)), headers)
+        check(!response.has("error")) { "YouTube rejected the rating" }
+    }
+
+    fun isSongLiked(videoId: String): Boolean {
+        checkNotNull(auth()) { "Sign in to YouTube first" }
+        return checkNotNull(parseYouTubeSongLiked(next(videoId), videoId)) { "YouTube like status unavailable" }
+    }
+
     fun browse(browseId: String, params: String? = null): JSONObject =
         post("browse", JSONObject().apply {
             put("browseId", browseId)

@@ -149,8 +149,9 @@ val LocalCollectionPlayback = compositionLocalOf { CollectionPlayback(emptyList(
 fun AlbumDetailScreen(album: String, viewModel: LibraryViewModel, callbacks: LibraryCallbacks) {
     val repository = (LocalContext.current.applicationContext as TgMusicApp).musicRepository
     var sortField by rememberSaveable { mutableStateOf(SortField.TITLE) }
+    var trackOrder by rememberSaveable(album) { mutableStateOf(true) }
     var ascending by rememberSaveable { mutableStateOf(true) }
-    val songs by remember(album, sortField, ascending) { repository.observeSongsByAlbum(album, sortField, ascending) }
+    val songs by remember(album, sortField, ascending, trackOrder) { repository.observeSongsByAlbum(album, sortField, ascending, trackOrder) }
         .collectAsState(initial = null)
     val list = songs.orEmpty()
     val actions = rememberLibrarySongActions(viewModel, callbacks.onPlayNext, callbacks.onOpenArtist, callbacks.onOpenAlbum)
@@ -163,7 +164,7 @@ fun AlbumDetailScreen(album: String, viewModel: LibraryViewModel, callbacks: Lib
         actions = actions,
         collectionKey = "album:$album",
         customSortIncluded = true,
-        sortToken = "$sortField:$ascending",
+        sortToken = "$trackOrder:$sortField:$ascending",
         subtitle = albumArtist,
         onSubtitleClick = albumArtist?.let { artist -> { callbacks.onOpenArtist(artist) } },
         detailLine = songCountLine(list),
@@ -179,11 +180,14 @@ fun AlbumDetailScreen(album: String, viewModel: LibraryViewModel, callbacks: Lib
             val editing = LocalLibraryEditing.current
             LibraryMenuItem("Play Next", Icons.Rounded.QueuePlayNext) { list.forEach { callbacks.onPlayNext(it.telegramMessageId) }; close() }
             LibraryMenuGroupGap()
-            LibraryMenuItem("Title", if (sortField == SortField.TITLE && editing?.isCustom != true) Icons.Rounded.Check else Icons.Rounded.SortByAlpha,
-                selected = sortField == SortField.TITLE && editing?.isCustom != true) { editing?.resetOrder(); sortField = SortField.TITLE; close() }
+            LibraryMenuItem("Track order", if (trackOrder && editing?.isCustom != true) Icons.Rounded.Check else Icons.Rounded.Album,
+                selected = trackOrder && editing?.isCustom != true) { editing?.resetOrder(); trackOrder = true; close() }
             LibraryMenuDivider()
-            LibraryMenuItem("Recently Added", if (sortField == SortField.DATE_ADDED && editing?.isCustom != true) Icons.Rounded.Check else Icons.Rounded.Schedule,
-                selected = sortField == SortField.DATE_ADDED && editing?.isCustom != true) { editing?.resetOrder(); sortField = SortField.DATE_ADDED; close() }
+            LibraryMenuItem("Title", if (!trackOrder && sortField == SortField.TITLE && editing?.isCustom != true) Icons.Rounded.Check else Icons.Rounded.SortByAlpha,
+                selected = !trackOrder && sortField == SortField.TITLE && editing?.isCustom != true) { editing?.resetOrder(); trackOrder = false; sortField = SortField.TITLE; close() }
+            LibraryMenuDivider()
+            LibraryMenuItem("Recently Added", if (!trackOrder && sortField == SortField.DATE_ADDED && editing?.isCustom != true) Icons.Rounded.Check else Icons.Rounded.Schedule,
+                selected = !trackOrder && sortField == SortField.DATE_ADDED && editing?.isCustom != true) { editing?.resetOrder(); trackOrder = false; sortField = SortField.DATE_ADDED; close() }
             CustomSortMenuItem(close)
             LibraryMenuGroupGap()
             LibraryMenuItem("Ascending", Icons.Rounded.ArrowUpward, selected = ascending && editing?.isCustom != true) { editing?.resetOrder(); ascending = true; close() }
@@ -192,7 +196,15 @@ fun AlbumDetailScreen(album: String, viewModel: LibraryViewModel, callbacks: Lib
             LibraryMenuGroupGap()
             LibraryMenuItem("Delete Album", Icons.Rounded.Delete, destructive = true) { confirmDelete = true; close() }
         }
-    ) { shown, _ ->
+    ) { shown, searching ->
+        if (!searching && shown.isNotEmpty()) {
+            item("album_songs_heading") {
+                if (LocalLibraryEditing.current?.active != true) {
+                    Text("Songs", color = ink, fontSize = 22.sp, fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(start = 22.dp, end = 22.dp, top = 8.dp, bottom = 12.dp))
+                }
+            }
+        }
         val ids = shown.map { it.telegramMessageId }
         itemsIndexed(shown, key = { _, s -> s.telegramMessageId }, contentType = { _, _ -> "track" }) { index, song ->
             Column(librarySongPlacement(song.telegramMessageId)) {
@@ -202,9 +214,9 @@ fun AlbumDetailScreen(album: String, viewModel: LibraryViewModel, callbacks: Lib
                 onClick = { callbacks.onPlay(ids, index) },
                 leading = SongRowLeading.TrackNumber(index + 1),
                 subtitle = song.artist.takeIf { it != albumArtist },
-                horizontalPadding = 18.dp
+                horizontalPadding = 22.dp
             )
-            if (index < shown.lastIndex) LibraryDivider(start = 54.dp, end = 18.dp)
+            if (index < shown.lastIndex) LibraryDivider(start = 62.dp, end = 22.dp)
             }
         }
     }

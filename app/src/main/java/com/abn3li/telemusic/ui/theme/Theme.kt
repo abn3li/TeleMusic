@@ -10,6 +10,7 @@ import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.graphics.Color
+import com.abn3li.telemusic.ui.library.ContextMenuHost
 
 private val Accent = Color(0xFFE64366)
 private val Card = Color(0xFF1C1C1E)
@@ -82,7 +83,7 @@ fun TgMusicTheme(light: Boolean = false, content: @Composable () -> Unit) {
             LocalOverscrollConfiguration provides null,
             LocalIndication provides pressFeedback,
             LocalPalette provides if (light) LightPalette else DarkPalette,
-            content = content
+            content = { ContextMenuHost(content) }
         )
     }
 }

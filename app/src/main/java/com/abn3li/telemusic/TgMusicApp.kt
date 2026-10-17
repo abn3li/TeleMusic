@@ -60,6 +60,46 @@ class TgMusicApp : Application(), ImageLoaderFactory {
      * or a playlist Import to Library. (Main thread, like a ViewModel's own scope.) */
     val workScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
 
+    private val youtubeLikeCache = com.abn3li.telemusic.data.youtube.YouTubeLikeCache(android.os.SystemClock::elapsedRealtime)
+
+    internal val youtubeLikeStates get() = youtubeLikeCache.states
+
+    fun cachedYouTubeSongLiked(videoId: String, session: String): Boolean? =
+        if (youtubeAccount.state.value.sessionId == session) youtubeLikeCache.peek(session, videoId) else null
+
+    private val youtubeLikesHttpClient by lazy { okhttp3.OkHttpClient.Builder()
+        .connectTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
+        .readTimeout(15, java.util.concurrent.TimeUnit.SECONDS).build() }
+
+    private fun youtubeLikeClient(session: String) = com.abn3li.telemusic.data.browse.InnertubeBrowseClient(
+        auth = { youtubeAccount.authHeadersForSession(session) },
+        webScope = { youtubeWebSession.cached(session) },
+        client = youtubeLikesHttpClient
+    )
+
+    suspend fun youtubeSongLiked(videoId: String, session: String): Boolean = withContext(Dispatchers.IO) {
+        check(youtubeAccount.state.value.sessionId == session)
+        youtubeLikeCache.get(session, videoId) { youtubeLikeClient(session).isSongLiked(videoId) }
+    }
+
+    fun setYouTubeSongLiked(videoId: String, liked: Boolean, session: String) {
+        if (!youtubeAccount.state.value.signedIn || youtubeAccount.state.value.sessionId != session) return
+        val change = youtubeLikeCache.beginUpdate(session, videoId, liked)
+        appScope.launch(Dispatchers.IO) {
+            val result = runCatching {
+                youtubeLikeCache.finishUpdate(change) { youtubeLikeClient(session).setSongLiked(videoId, liked) }
+            }
+            withContext(Dispatchers.Main) {
+                if (youtubeAccount.state.value.sessionId == session) {
+                    val message = if (result.isSuccess) {
+                        if (liked) "Added to YouTube Liked Songs" else "Removed from YouTube Liked Songs"
+                    } else "Couldn't update YouTube Liked Songs"
+                    android.widget.Toast.makeText(this@TgMusicApp, message, android.widget.Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+    }
+
     override fun onCreate() {
         super.onCreate()
         val db = AppDatabase.get(this)
@@ -76,7 +116,10 @@ class TgMusicApp : Application(), ImageLoaderFactory {
             com.abn3li.telemusic.data.browse.InnertubeBrowseClient(
                 auth = { youtubeAccount.authHeaders() },
                 webScope = { youtubeWebSession.cached(youtubeAccount.state.value.sessionId) }
-            )
+            ),
+            onLikedSongsLoaded = { ids ->
+                youtubeAccount.state.value.sessionId?.let { youtubeLikeCache.seedLikes(it, ids) }
+            }
         )
         appScope.launch(Dispatchers.IO) { youtubeAccount.load() }
 

@@ -39,6 +39,7 @@ import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.filterNotNull
+import kotlinx.coroutines.flow.transform
 import kotlinx.coroutines.flow.emitAll
 import kotlinx.coroutines.sync.withLock
 import java.io.File
@@ -652,9 +653,13 @@ class MusicRepository(
 
     // ---- Albums / Artists - grouped straight from real metadata ----
     fun observeAlbums(): Flow<List<AlbumSummary>> = songDao.observeAlbums()
-    fun observeSongsByAlbum(album: String, sortField: SortField, ascending: Boolean) =
-        songDao.observeSongsByAlbum(album).map { it.sortedForLibrary(sortField, ascending) }
-            .flowOn(Dispatchers.Default)
+    fun observeSongsByAlbum(album: String, sortField: SortField, ascending: Boolean, trackOrder: Boolean = false): Flow<List<SongEntity>> {
+        val tags = AlbumTrackOrder(appContext, songDao)
+        return songDao.observeSongsByAlbum(album).transform { songs ->
+            emit(if (trackOrder) tags.sort(songs, ascending) else songs.sortedForLibrary(sortField, ascending))
+            if (trackOrder) tags.resolveCatalog(songs)
+        }.flowOn(Dispatchers.IO)
+    }
 
     /** Deletes [album]: its songs (YouTube and Telegram) leave the library, except Liked or
      * downloaded ones, ones in a playlist, and files imported from the phone. */

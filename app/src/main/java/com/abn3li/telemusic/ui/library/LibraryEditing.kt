@@ -220,9 +220,9 @@ internal fun BoxScope.LibraryEditingBar(edit: LibraryEditing, songs: List<SongEn
                         actions.onDownloadSongs(selectedSongs.filter { !it.isLocalImport && !it.isExplicitDownload && it.telegramMessageId !in actions.downloadingIds })
                     }
                     SelectionActionDivider()
-                    SelectionAction("Favorite", if (allFavorite) Icons.Rounded.Star else Icons.Rounded.StarBorder,
-                        displayedSongs.any { !it.isFavorite }, interactive = edit.selecting, active = allFavorite) {
-                        selectedSongs.filter { !it.isFavorite }.forEach(actions.onToggleFavorite)
+                    SelectionAction(if (allFavorite) "Remove from Favorites" else "Add to Favorites", if (allFavorite) Icons.Rounded.Star else Icons.Rounded.StarBorder,
+                        displayedSongs.isNotEmpty(), interactive = edit.selecting, active = allFavorite) {
+                        selectedSongs.filter { it.isFavorite == allFavorite }.forEach(actions.onToggleFavorite)
                     }
                 }
                 Spacer(Modifier.width(16.dp))
@@ -237,15 +237,22 @@ internal fun BoxScope.LibraryEditingBar(edit: LibraryEditing, songs: List<SongEn
         }
     }
     if (pickPlaylist) LibraryContextMenu(0f, onDismiss = { pickPlaylist = false }, centered = true) { maxHeight, onAction ->
-        Column(Modifier.fillMaxWidth().heightIn(max = maxHeight).libraryContextCardSurface()
+        Column(Modifier.fillMaxWidth().heightIn(max = maxHeight).libraryContextCardSurface(opaque = true)
             .semantics { paneTitle = "Add to Playlist" }
             .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = {})) {
-            Text("Add to Playlist", color = ink, fontSize = 14.5.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(18.dp))
+            Column(Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 16.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                Text("Add to Playlist", color = ink, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
+                Text("${selectedSongs.size} ${if (selectedSongs.size == 1) "song" else "songs"} selected",
+                    color = ink.copy(alpha = 0.5f), fontSize = 12.sp)
+            }
             CardDivider()
             Column(Modifier.verticalScroll(rememberScrollState())) {
                 PlaylistPicker(actions.playlists,
                     onPick = { playlist -> onAction { selectedSongs.forEach { actions.onAddToPlaylist(playlist.id, it) } } },
-                    onCreate = { name -> onAction { actions.onCreatePlaylistAndAddSongs(name, selectedSongs) } })
+                    onCreate = { name -> onAction { actions.onCreatePlaylistAndAddSongs(name, selectedSongs) } },
+                    standalone = true)
             }
         }
     }

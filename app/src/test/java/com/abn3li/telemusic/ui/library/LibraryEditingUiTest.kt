@@ -9,6 +9,12 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.SideEffect
 import androidx.compose.ui.Modifier
+import androidx.compose.foundation.clickable
+import androidx.compose.material3.Text
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
+import com.abn3li.telemusic.ui.theme.TgMusicTheme
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.Alignment
@@ -35,6 +41,40 @@ import org.robolectric.annotation.GraphicsMode
 @Config(sdk = [34], application = Application::class)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 class LibraryEditingUiTest : LocalComposeTest() {
+    @Test fun sharedMenuWindowReopensWithDifferentContentAndRetainsOneNativeWindow() {
+        var open by mutableStateOf(false)
+        var number by mutableStateOf(0)
+        setContent {
+            TgMusicTheme {
+                Box(Modifier.fillMaxSize()) {
+                    Text("Open menu", Modifier.clickable { number++; open = true })
+                    if (open) LibraryContextMenu(0f, { open = false }) { _, onAction ->
+                        Text("Menu $number", Modifier.clickable { onAction {} })
+                    }
+                }
+            }
+        }
+        fun nativeWindow(): android.view.View {
+            val type = Class.forName("android.view.WindowManagerGlobal")
+            val global = type.getMethod("getInstance").invoke(null)
+            val field = type.getDeclaredField("mViews").apply { isAccessible = true }
+            @Suppress("UNCHECKED_CAST")
+            return (field.get(global) as List<android.view.View>).single { it.javaClass.simpleName == "PopupLayout" }
+        }
+        lateinit var initial: android.view.View
+        compose.runOnIdle { initial = nativeWindow() }
+        repeat(2) { index ->
+            compose.onNodeWithText("Open menu").performTouchInput { click() }
+            compose.onNodeWithText("Menu ${index + 1}").assertIsDisplayed().performClick()
+            compose.waitUntil(timeoutMillis = 1000) { !open }
+            compose.onNodeWithText("Menu ${index + 1}").assertDoesNotExist()
+            compose.runOnIdle {
+                assertSame(initial, nativeWindow())
+                val params = initial.layoutParams as android.view.WindowManager.LayoutParams
+                assertTrue(params.flags and android.view.WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE != 0)
+            }
+        }
+    }
     private val songs = (1L..3L).map { SongEntity(it, 0, "Song $it", "Artist") }
     private val queue = PlaybackQueue()
     private val downloaded = mutableListOf<Long>()
@@ -47,8 +87,10 @@ class LibraryEditingUiTest : LocalComposeTest() {
         queue.setQueue(listOf(99, 100), 0); queue.playNext(101)
         setContent {
             CompositionLocalProvider(LocalPalette provides DarkPalette) {
+                ContextMenuHost {
                 SongListPage("Telegram Songs", songs, actions, {}, { _, _ -> fail("Selection must not play a row") },
                     { ids, shuffle -> assertFalse(shuffle); queue.setQueue(ids, 0) }, collectionKey = "ui:telegram")
+                }
             }
         }
         val normalSongNode = compose.onNodeWithText("Song 1").fetchSemanticsNode().id
@@ -68,7 +110,7 @@ class LibraryEditingUiTest : LocalComposeTest() {
         compose.onNode(hasSetTextAction()).performTextInput("Selected Mix")
         compose.onNodeWithText("Create").performClick()
         compose.onNodeWithContentDescription("Download").performClick()
-        compose.onNodeWithContentDescription("Favorite").performClick()
+        compose.onNodeWithContentDescription("Add to Favorites").performClick()
         compose.onAllNodesWithText("Play").onLast().performClick()
         compose.runOnIdle {
             assertEquals(listOf(1L, 3L), downloaded)
@@ -176,6 +218,26 @@ class LibraryEditingUiTest : LocalComposeTest() {
         compose.runOnIdle { assertEquals(songs, edit.ordered(songs)) }
     }
 
+    @Test fun selectedFavoritesCanBeRemovedAndMixedSelectionOnlyAddsMissingOnes() {
+        lateinit var edit: LibraryEditing
+        var current by mutableStateOf(songs.map { it.copy(isFavorite = true) })
+        setContent {
+            edit = rememberLibraryEditing("ui:favorite-toggle")
+            CompositionLocalProvider(LocalPalette provides DarkPalette) {
+                Box(Modifier.fillMaxSize()) { LibraryEditingBar(edit, current, actions) { _, _ -> } }
+            }
+        }
+        compose.runOnIdle { edit.select(1); edit.selected = current.map { it.telegramMessageId }.toSet() }
+        compose.onNodeWithContentDescription("Remove from Favorites").assertIsEnabled().performClick()
+        compose.runOnIdle {
+            assertEquals(listOf(1L, 2L, 3L), liked)
+            liked.clear()
+            current = current.map { it.copy(isFavorite = it.telegramMessageId != 1L) }
+        }
+        compose.onNodeWithContentDescription("Add to Favorites").performClick()
+        compose.runOnIdle { assertEquals(listOf(1L), liked) }
+    }
+
     @Test fun longPlaylistPickerStaysInsideTheWindowAndCanReachLastPlaylist() {
         val added = mutableListOf<Long>()
         val pickerActions = LibrarySongActions(
@@ -194,6 +256,8 @@ class LibraryEditingUiTest : LocalComposeTest() {
         compose.onNodeWithContentDescription("Playlist").performClick()
         assertCenteredPlaylistCard()
         compose.onNodeWithText("Playlist 40").performScrollTo().performClick()
+        // The action runs after the popup's 200 ms close delay, independently of its dim layer.
+        compose.waitUntil(timeoutMillis = 1000) { added == listOf(40L) }
         compose.runOnIdle { assertEquals(listOf(40L), added) }
     }
 

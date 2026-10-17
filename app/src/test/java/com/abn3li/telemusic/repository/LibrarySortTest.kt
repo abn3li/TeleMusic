@@ -32,4 +32,28 @@ class LibrarySortTest {
         assertEquals(listOf(1L, 2L), songs.map { it.telegramMessageId })
         assertTrue(emptyList<SongEntity>().sortedForLibrary(SortField.TITLE, true).isEmpty())
     }
+    @Test fun albumUsesDiscThenTrackWithSourceOrderForMissingTags() {
+        val songs = listOf(SongEntity(30, 0, "A", "artist"), SongEntity(20, 0, "Z", "artist"),
+            SongEntity(10, 0, "B", "artist"), SongEntity(40, 0, "C", "artist"))
+        val positions = mapOf(30L to AlbumPosition(2, 1), 20L to AlbumPosition(1, 2))
+        assertEquals(listOf(20L, 30L, 10L, 40L), albumOrder(songs, positions, true).map { it.telegramMessageId })
+        assertEquals(listOf(40L, 10L, 30L, 20L), albumOrder(songs, positions, false).map { it.telegramMessageId })
+        assertEquals(listOf(10L, 20L, 30L, 40L), albumOrder(songs, emptyMap(), true).map { it.telegramMessageId })
+    }
+
+    @Test fun trackTagsAcceptTotalsAndRejectInvalidNumbers() {
+        assertEquals(3, trackTag("03/12"))
+        assertEquals(2, trackTag(" 2 "))
+        for (value in listOf(null, "", "0", "-2", "abc")) assertNull(trackTag(value))
+    }
+    @Test fun catalogRequiresMatchingEditionArtistTitleAndDuration() {
+        val song = SongEntity(1, 0, "Song", "Artist", album = "Album", durationSeconds = 180)
+        val track = com.abn3li.telemusic.data.remote.ITunesTrack("Song", "Artist", "Album", null, 180000, 100L, 4, 2)
+        assertEquals(AlbumPosition(2, 4), catalogPosition(song, listOf(track)))
+        for (other in listOf(track.copy(collectionName = "Album Deluxe"), track.copy(artistName = "Other"),
+            track.copy(trackTimeMillis = 200000), track.copy(trackName = "Song Live"), track.copy(trackNumber = null))) {
+            assertNull(catalogPosition(song, listOf(other)))
+        }
+        assertNull(catalogPosition(song, listOf(track, track.copy(trackNumber = 5))))
+    }
 }

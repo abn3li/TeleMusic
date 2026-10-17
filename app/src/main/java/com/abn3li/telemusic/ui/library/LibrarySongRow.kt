@@ -27,6 +27,7 @@ import androidx.compose.foundation.gestures.horizontalDrag
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
@@ -48,6 +49,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.rounded.MoreHoriz
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowForwardIos
 import androidx.compose.material.icons.automirrored.rounded.PlaylistAdd
@@ -78,7 +80,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -182,6 +183,11 @@ private fun LibrarySongRowContent(song: SongEntity, actions: LibrarySongActions,
     // Plain holder, not state: only read at the moment of a long-press.
     val coordinates = remember { arrayOfNulls<LayoutCoordinates>(1) }
     var menuOpen by remember { mutableStateOf(false) }
+    val albumTrack = leading is SongRowLeading.TrackNumber
+    fun openMenu() {
+        rowTopInWindow = coordinates[0]?.takeIf { it.isAttached }?.positionInWindow()?.y ?: 0f
+        menuOpen = true
+    }
 
     SwipeToPlayNext(
         enabled = !editing,
@@ -200,8 +206,7 @@ private fun LibrarySongRowContent(song: SongEntity, actions: LibrarySongActions,
                     onLongClick = {
                         if (editing) return@combinedClickable
                         haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                        rowTopInWindow = coordinates[0]?.takeIf { it.isAttached }?.positionInWindow()?.y ?: 0f
-                        menuOpen = true
+                        openMenu()
                     }
                 )
                 .padding(horizontal = horizontalPadding, vertical = 6.dp),
@@ -214,7 +219,10 @@ private fun LibrarySongRowContent(song: SongEntity, actions: LibrarySongActions,
                 }
             }
             Column(Modifier.weight(1f).padding(start = 16.dp, end = 8.dp)) {
-                Text(song.title, color = ink, fontSize = 16.sp, lineHeight = 16.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                Text(song.title, color = ink, fontSize = if (albumTrack) 17.sp else 16.sp,
+                    lineHeight = if (albumTrack) 22.sp else 16.sp,
+                    fontWeight = if (albumTrack) FontWeight.Medium else FontWeight.Normal,
+                    maxLines = 1, overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.padding(bottom = 1.dp))
                 if (subtitle != null) {
                     Text(subtitle, color = ink.copy(alpha = 0.5f), fontSize = 13.sp, lineHeight = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -225,6 +233,15 @@ private fun LibrarySongRowContent(song: SongEntity, actions: LibrarySongActions,
                     CalmSpinner(color = ink.copy(alpha = 0.5f), strokeWidth = 1.5.dp, modifier = Modifier.size(14.dp))
                 song.isExplicitDownload ->
                     Icon(Icons.Rounded.ArrowCircleDown, contentDescription = "Downloaded", tint = ink.copy(alpha = 0.35f), modifier = Modifier.size(16.dp))
+            }
+            if (albumTrack && !editing) {
+                Box(
+                    Modifier.size(44.dp).clickable(onClickLabel = "Options for ${song.title}") { openMenu() },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(Icons.Rounded.MoreHoriz, contentDescription = "Options for ${song.title}",
+                        tint = ink.copy(alpha = 0.5f), modifier = Modifier.size(22.dp))
+                }
             }
         }
     }
@@ -344,7 +361,7 @@ internal fun SongArtwork(song: SongEntity, size: Dp, corner: Dp, modifier: Modif
     }
 }
 
-private object WindowOriginPosition : PopupPositionProvider {
+internal object WindowOriginPosition : PopupPositionProvider {
     override fun calculatePosition(anchorBounds: IntRect, windowSize: IntSize, layoutDirection: LayoutDirection, popupContentSize: IntSize) =
         IntOffset.Zero
 }
@@ -389,22 +406,21 @@ internal fun LibraryContextMenu(anchorTopPx: Float, onDismiss: () -> Unit, cente
         }
     }
 
-    // The dim behind the card fades with it (it used to appear and vanish in one frame).
-    val scrim = animateFloatAsState(if (show) 0.10f else 0f,
-        androidx.compose.animation.core.tween(180), label = "menuScrim")
-    Popup(popupPositionProvider = WindowOriginPosition, onDismissRequest = { close() }, properties = PopupProperties(focusable = true)) {
+    ContextMenuWindow(onDismissRequest = { close() }) {
         val popupView = LocalView.current
-        LaunchedEffect(popupView) {
-            // Let Android dim the entire window behind this popup, including the status bar.
-            // A Compose scrim is confined to the popup's content frame below the system icons.
+        LaunchedEffect(popupView, show) {
+            // Android animates the dim layer, including the status bar. Update window
+            // attributes only on open/close instead of requesting a relayout every frame.
             while (!popupView.isAttachedToWindow) withFrameNanos { }
             val windowView = generateSequence(popupView as View?) { it.parent as? View }
                 .firstOrNull { it.layoutParams is WindowManager.LayoutParams } ?: return@LaunchedEffect
             val windowManager = popupView.context.getSystemService(WindowManager::class.java)
-            snapshotFlow { scrim.value }.collect { alpha ->
-                val params = windowView.layoutParams as WindowManager.LayoutParams
-                params.flags = params.flags or WindowManager.LayoutParams.FLAG_DIM_BEHIND
-                params.dimAmount = alpha
+            val params = windowView.layoutParams as WindowManager.LayoutParams
+            val flags = if (show) params.flags or WindowManager.LayoutParams.FLAG_DIM_BEHIND
+                else params.flags and WindowManager.LayoutParams.FLAG_DIM_BEHIND.inv()
+            if (params.flags != flags || (show && params.dimAmount != 0.10f)) {
+                params.flags = flags
+                params.dimAmount = 0.10f
                 windowManager.updateViewLayout(windowView, params)
             }
         }
@@ -447,10 +463,10 @@ internal fun LibraryContextMenu(anchorTopPx: Float, onDismiss: () -> Unit, cente
 
 /** All song-action surfaces share the context card's exact material and edge treatment. */
 @Composable
-internal fun Modifier.libraryContextCardSurface(): Modifier {
+internal fun Modifier.libraryContextCardSurface(opaque: Boolean = false): Modifier {
     val shape = RoundedCornerShape(18.dp)
     return graphicsLayer { this.shape = shape; clip = true }
-        .background(LibraryCardColor)
+        .background(if (opaque) LibraryCardColor.copy(alpha = 1f) else LibraryCardColor)
         .border(0.5.dp, ink.copy(alpha = 0.12f), shape)
 }
 
@@ -524,6 +540,7 @@ private fun SongContextCard(
                 if (song.isFavorite) "Remove from Favorites" else "Add to Favorites",
                 if (song.isFavorite) Icons.Rounded.Star else Icons.Rounded.StarBorder
             ) { onAction { actions.onToggleFavorite(song) } }
+            YouTubeLikeMenuItem(song.youtubeVideoId, onAction)
             if (!isRealLocalImport) {
                 CardDivider()
                 val downloading = song.telegramMessageId in actions.downloadingIds
@@ -603,17 +620,17 @@ internal fun CardDivider() {
 }
 
 @Composable
-internal fun PlaylistPicker(playlists: List<PlaylistEntity>, onPick: (PlaylistEntity) -> Unit, onCreate: (String) -> Unit) {
+internal fun PlaylistPicker(playlists: List<PlaylistEntity>, onPick: (PlaylistEntity) -> Unit, onCreate: (String) -> Unit, standalone: Boolean = false) {
     var creating by remember { mutableStateOf(false) }
     var name by remember { mutableStateOf("") }
-    Column(Modifier.fillMaxWidth().background(ink.copy(alpha = 0.04f))) {
+    Column(Modifier.fillMaxWidth().background(if (standalone) Color.Transparent else ink.copy(alpha = 0.04f))) {
         if (creating) {
             Row(
-                Modifier.fillMaxWidth().height(42.dp).padding(horizontal = 16.dp),
+                Modifier.fillMaxWidth().height(if (standalone) 50.dp else 42.dp).padding(horizontal = 16.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Box(
-                    Modifier.weight(1f).height(30.dp).clip(RoundedCornerShape(8.dp)).background(ink.copy(alpha = 0.08f)).padding(horizontal = 8.dp),
+                    Modifier.weight(1f).height(if (standalone) 36.dp else 30.dp).clip(RoundedCornerShape(8.dp)).background(ink.copy(alpha = 0.08f)).padding(horizontal = 8.dp),
                     contentAlignment = Alignment.CenterStart
                 ) {
                     if (name.isEmpty()) Text("Playlist name", color = ink.copy(alpha = 0.45f), fontSize = 12.sp)
@@ -637,22 +654,31 @@ internal fun PlaylistPicker(playlists: List<PlaylistEntity>, onPick: (PlaylistEn
             }
         } else {
             Row(
-                Modifier.fillMaxWidth().height(36.dp).clickable { creating = true }.padding(horizontal = 19.dp),
+                Modifier.fillMaxWidth().height(if (standalone) 50.dp else 36.dp).clickable { creating = true }.padding(horizontal = 19.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text("New Playlist…", color = AppAccent, fontSize = 13.sp, modifier = Modifier.weight(1f))
-                Icon(Icons.Rounded.Add, null, tint = AppAccent, modifier = Modifier.size(16.dp))
+                Text("New Playlist…", color = AppAccent, fontSize = if (standalone) 16.sp else 13.sp, modifier = Modifier.weight(1f))
+                Icon(Icons.Rounded.Add, null, tint = AppAccent, modifier = Modifier.size(if (standalone) 20.dp else 16.dp))
             }
         }
         if (playlists.isEmpty() && !creating) {
-            Text("No playlists yet", color = ink.copy(alpha = 0.4f), fontSize = 11.sp, modifier = Modifier.padding(horizontal = 19.dp, vertical = 6.dp))
+            if (standalone) {
+                Column(Modifier.fillMaxWidth().padding(horizontal = 19.dp, vertical = 16.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text("No playlists yet", color = ink.copy(alpha = 0.5f), fontSize = 13.sp)
+                    Text("Your playlists will appear here", color = ink.copy(alpha = 0.38f), fontSize = 11.sp)
+                }
+            } else {
+                Text("No playlists yet", color = ink.copy(alpha = 0.4f), fontSize = 11.sp, modifier = Modifier.padding(horizontal = 19.dp, vertical = 6.dp))
+            }
         }
         playlists.forEach { playlist ->
             Row(
-                Modifier.fillMaxWidth().height(36.dp).clickable { onPick(playlist) }.padding(horizontal = 19.dp),
+                Modifier.fillMaxWidth().height(if (standalone) 50.dp else 36.dp).clickable { onPick(playlist) }.padding(horizontal = 19.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text(playlist.name, color = ink, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(playlist.name, color = ink, fontSize = if (standalone) 15.sp else 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
         }
     }

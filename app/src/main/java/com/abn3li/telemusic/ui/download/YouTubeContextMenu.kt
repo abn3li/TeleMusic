@@ -215,6 +215,7 @@ private fun YouTubeOptions(request: YouTubeMenuRequest, onDismiss: () -> Unit,
                         if (song?.isFavorite == true) Icons.Rounded.Star else Icons.Rounded.StarBorder, enabled = loaded) {
                         onAction { work { val saved = savedSong(); repository.setFavorite(saved, !saved.isFavorite) } }
                     }
+                    com.abn3li.telemusic.ui.library.YouTubeLikeMenuItem(track.videoId, onAction)
                     CardDivider()
                     CardItem(when { track.videoId in downloads -> "Downloading…"; song?.isExplicitDownload == true -> "Downloaded"; else -> "Download" }, Icons.Rounded.Download,
                         enabled = loaded && song?.isExplicitDownload != true && track.videoId !in downloads) { onAction {

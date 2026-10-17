@@ -28,7 +28,8 @@ class DiscoveryRepository(
     private val importedPlaylistDao: ImportedPlaylistDao,
     // Where the Search tab's categories are kept between runs (see [genres]).
     private val genresFile: File,
-    private val client: InnertubeBrowseClient = InnertubeBrowseClient()
+    private val client: InnertubeBrowseClient = InnertubeBrowseClient(),
+    private val onLikedSongsLoaded: (List<String>) -> Unit = {}
 ) {
     @Volatile private var cachedNewReleases: HomeSection? = null
     @Volatile private var cachedGenres: List<BrowseCollection>? = null
@@ -301,6 +302,7 @@ class DiscoveryRepository(
     }
 
     suspend fun browse(browseId: String, params: String?): BrowseContent = withContext(Dispatchers.IO) {
+        val accountVersion = accountGeneration.get()
         // Home's "See All" for community playlists: the list already fetched, shown as a grid.
         if (browseId == COMMUNITY_BROWSE_ID) {
             return@withContext BrowseContent(collections = communityPlaylists()?.items.orEmpty())
@@ -367,6 +369,9 @@ class DiscoveryRepository(
                         thumbnailUrl = t.thumbnailUrl ?: header?.thumbnailUrl
                     )
                 })
+            }
+            if (browseId == "VLLM") synchronized(accountCacheLock) {
+                if (accountGeneration.get() == accountVersion) onLikedSongsLoaded(content.tracks.map { it.videoId })
             }
             content
         }
