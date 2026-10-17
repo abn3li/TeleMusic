@@ -78,6 +78,8 @@ internal class LibraryEditing(private val context: Context, private val key: Str
     var draggingId by mutableStateOf<Long?>(null)
     var reorderReady by mutableStateOf(false)
     var pendingReorder by mutableStateOf<List<SongEntity>?>(null)
+    // True for the frames right after Done/Cancel: rows snap back instead of sliding.
+    var returning by mutableStateOf(false)
     var dragPointerY by mutableFloatStateOf(0f)
     var dragCenterY by mutableFloatStateOf(0f)
     var dragRowHeight = 0
@@ -126,7 +128,7 @@ internal class LibraryEditing(private val context: Context, private val key: Str
         }
         cancel()
     }
-    fun cancel() { selecting = false; reordering = false; selected = emptySet(); draft = emptyList(); draggingId = null; reorderReady = false; pendingReorder = null }
+    fun cancel() { if (active) returning = true; selecting = false; reordering = false; selected = emptySet(); draft = emptyList(); draggingId = null; reorderReady = false; pendingReorder = null }
     fun resetOrder() { isCustom = false; preferences.edit().putBoolean("$key:custom", false).apply() }
     fun useCustomOrder() {
         if (order.isEmpty()) return
@@ -156,6 +158,12 @@ internal fun rememberLibraryEditing(key: String, sortToken: String = ""): Librar
     var previousSort by remember(key) { mutableStateOf(sortToken) }
     LaunchedEffect(sortToken) { if (previousSort != sortToken) { edit.cancel(); edit.resetOrder(); previousSort = sortToken } }
     BackHandler(edit.active) { edit.cancel() }
+    LaunchedEffect(edit.returning) {
+        if (!edit.returning) return@LaunchedEffect
+        withFrameNanos { }
+        withFrameNanos { }
+        edit.returning = false
+    }
     return edit
 }
 

@@ -10,6 +10,7 @@ import com.abn3li.telemusic.ui.navigation.FrostedBackdrop
 import com.abn3li.telemusic.ui.theme.SystemBarsState
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.layout.layout
+import kotlin.math.roundToInt
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.runtime.DisposableEffect
 import com.abn3li.telemusic.ui.download.ArtistHeroLayout
@@ -25,6 +26,8 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.AnimatedVisibility
@@ -773,11 +776,24 @@ internal fun <T> DetailPageScaffold(
         LazyColumn(state = listState, modifier = Modifier.fillMaxSize().libraryReorderGestures(editing, listState).then(
             if ((captureForDock || showFrostedHeader) && !SystemBarsState.playerOpen) Modifier.frostedBackdropSource(backdrop, paper) else Modifier
         )) {
-            if (editing?.active == true) {
-                item("editing_header_space") { Spacer(Modifier.height(statusBar + LibraryBarHeight)) }
-            } else if (!searching) {
+            if (editing?.active == true || !searching) {
                 item("hero") {
-                    Box(Modifier.fillMaxWidth().height(heroHeight).clipToBounds()) {
+                    val editingNow = editing?.active == true
+                    // Back from Select/Reorder: the songs snap into place and only the cover fades in.
+                    val heroAlpha = remember { Animatable(if (editingNow || editing?.returning == true) 0f else 1f) }
+                    LaunchedEffect(editingNow) {
+                        if (editingNow) heroAlpha.snapTo(0f)
+                        else if (heroAlpha.value < 1f) heroAlpha.animateTo(1f, tween(240, easing = FastOutSlowInEasing))
+                    }
+                    Box(Modifier.fillMaxWidth().layout { measurable, constraints ->
+                        val full = heroHeightPx.roundToInt()
+                        val placeable = measurable.measure(constraints.copy(minHeight = full, maxHeight = full))
+                        // Editing keeps the cover composed and measured but unplaced (nothing drawn or
+                        // tappable), so Done/Cancel only places it again instead of building it.
+                        layout(placeable.width, if (editingNow) (statusBar + LibraryBarHeight).roundToPx() else full) {
+                            if (!editingNow) placeable.place(0, 0)
+                        }
+                    }.clipToBounds().graphicsLayer { alpha = heroAlpha.value }) {
                         Box(
                             Modifier.matchParentSize().graphicsLayer {
                                 // Slower than the page: the cover lags behind as it scrolls away.

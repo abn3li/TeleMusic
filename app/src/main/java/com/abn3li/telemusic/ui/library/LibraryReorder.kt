@@ -170,7 +170,7 @@ internal fun Modifier.libraryReorderGestures(edit: LibraryEditing?, list: LazyLi
 internal fun LazyItemScope.librarySongPlacement(songId: Long): Modifier {
     val edit = LocalLibraryEditing.current
     val dragging = edit?.draggingId == songId
-    val placement = if (edit?.reordering == true && (!edit.reorderReady || dragging)) Modifier
+    val placement = if (edit?.returning == true || (edit?.reordering == true && (!edit.reorderReady || dragging))) Modifier
         else Modifier.animateItemPlacement(tween(if (edit?.active == true) 150 else SelectionExitMillis))
     return placement.zIndex(if (dragging) 1f else 0f)
 }
