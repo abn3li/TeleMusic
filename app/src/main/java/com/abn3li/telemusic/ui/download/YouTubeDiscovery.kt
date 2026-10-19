@@ -1,5 +1,8 @@
 package com.abn3li.telemusic.ui.download
 
+import com.abn3li.telemusic.ui.library.LocalCollectionPlayback
+import com.abn3li.telemusic.ui.library.PlayingMark
+import com.abn3li.telemusic.ui.library.AppAccent
 import com.abn3li.telemusic.ui.theme.LocalPalette
 import com.abn3li.telemusic.ui.theme.paper
 import com.abn3li.telemusic.ui.theme.ink
@@ -100,6 +103,8 @@ internal fun TrackResultRow(
     onPlayClick: () -> Unit,
     onPlayNext: () -> Unit
 ) {
+    val playback = LocalCollectionPlayback.current
+    val current = playback.isCurrent(null, track.videoId)
     // Swipe right to queue it next, like a library song row.
     SwipeToPlayNext(onPlayNext) { swipeModifier ->
     Row(
@@ -110,10 +115,13 @@ internal fun TrackResultRow(
             .padding(start = 22.dp, end = 10.dp, top = 6.dp, bottom = 6.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Thumbnail(thumbnailUrl, Modifier.size(52.dp), corner = 4, requestPx = 150)
+        Box {
+            Thumbnail(thumbnailUrl, Modifier.size(52.dp), corner = 4, requestPx = 150)
+            if (current) PlayingMark(playback.isPlaying, Color.White, RoundedCornerShape(4.dp))
+        }
         Column(Modifier.weight(1f).padding(start = 16.dp, end = 8.dp)) {
-            Text(title, color = ink, fontSize = 16.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Text(artist, color = ink.copy(alpha = 0.5f), fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(title, color = if (current) AppAccent else ink, fontSize = 16.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(artist, color = if (current) AppAccent.copy(alpha = 0.75f) else ink.copy(alpha = 0.5f), fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
         // Fixed 44dp slots so the row doesn't shift when a button turns into a spinner.
         Box(Modifier.size(44.dp), contentAlignment = Alignment.Center) {

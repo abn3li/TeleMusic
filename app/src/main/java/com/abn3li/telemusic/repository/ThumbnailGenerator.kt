@@ -8,6 +8,12 @@ import android.graphics.BitmapFactory
 import android.graphics.drawable.BitmapDrawable
 import coil.imageLoader
 import coil.request.ImageRequest
+import coil.request.CachePolicy
+import coil.request.ImageResult
+import kotlinx.coroutines.CancellationException
+import coil.size.Scale
+import android.net.Uri
+import com.abn3li.telemusic.data.local.playlistCoverThumbPath
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -30,6 +36,51 @@ class ThumbnailGenerator(private val context: Context) {
     // 160x160 `directory` above for everything.
     private val fullArtDirectory by lazy { File(context.filesDir, "artwork").apply { mkdirs() } }
 
+    private val playlistCoverDirectory by lazy { File(context.filesDir, "playlist_covers").apply { mkdirs() } }
+
+    /**
+     * Saves a picked photo as a playlist's cover, once: up to 1200 px for its page, plus the small
+     * copy rows and tiles use (playlistCoverThumbPath). A new name each time, so an image cache
+     * never shows the previous photo. Returns the large copy's path, or null.
+     */
+    suspend fun savePlaylistCover(playlistId: Long, photo: Uri): String? = withContext(Dispatchers.IO) {
+        val file = File(playlistCoverDirectory, "$playlistId-${System.currentTimeMillis()}.jpg")
+        var saved = false
+        try {
+            // Both copies or neither: a missing small copy would leave rows without a cover.
+            saved = saveScaled(photo, file, 1200, 88, Scale.FIT, memoryCache = false) == null &&
+                saveScaled(photo, File(playlistCoverThumbPath(file.absolutePath)), 240, 82, memoryCache = false) == null
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            // An unreadable photo: reported as null below.
+        } finally {
+            if (!saved) deletePlaylistCover(file.absolutePath)
+        }
+        if (saved) file.absolutePath else null
+    }
+
+    fun deletePlaylistCover(path: String) {
+        File(path).delete()
+        File(playlistCoverThumbPath(path)).delete()
+    }
+
+    /** Decodes [data] at [size] and writes it to [file] as a JPEG. Null once written, else
+     * Coil's result saying why not. */
+    private suspend fun saveScaled(data: Any, file: File, size: Int, quality: Int, scale: Scale = Scale.FILL, memoryCache: Boolean = true): ImageResult? {
+        val request = ImageRequest.Builder(context)
+            .data(data)
+            .size(size, size)
+            .scale(scale)
+            .allowHardware(false) // need software pixels to compress to a file below
+            .apply { if (!memoryCache) memoryCachePolicy(CachePolicy.DISABLED) }
+            .build()
+        val result = context.imageLoader.execute(request)
+        val bitmap = (result.drawable as? BitmapDrawable)?.bitmap ?: return result
+        FileOutputStream(file).use { out -> bitmap.compress(Bitmap.CompressFormat.JPEG, quality, out) }
+        return null
+    }
+
     /** [path] of the saved thumbnail, or null; [retryLater] when it failed only because the
      * network couldn't be reached (offline, timeout) - worth another try, unlike a dead link. */
     class Result(val path: String?, val retryLater: Boolean)
@@ -40,18 +91,11 @@ class ThumbnailGenerator(private val context: Context) {
             return@withContext Result(file.absolutePath, false)
         }
         runCatching {
-            val request = ImageRequest.Builder(context)
-                .data(sourceUrl)
-                .size(160, 160)
-                .allowHardware(false) // need software pixels to compress to a file below
-                .build()
-            val result = context.imageLoader.execute(request)
-            val bitmap = (result.drawable as? BitmapDrawable)?.bitmap
-                // A bad status (404...) is Coil's HttpException, not an IOException: only a
-                // connection that never got through counts as "try again later".
-                ?: return@withContext Result(null, (result as? ErrorResult)?.throwable is IOException)
-            FileOutputStream(file).use { out -> bitmap.compress(Bitmap.CompressFormat.JPEG, 82, out) }
-            Result(file.absolutePath, false)
+            val failure = saveScaled(sourceUrl, file, 160, 82)
+                ?: return@withContext Result(file.absolutePath, false)
+            // A bad status (404...) is Coil's HttpException, not an IOException: only a
+            // connection that never got through counts as "try again later".
+            Result(null, (failure as? ErrorResult)?.throwable is IOException)
         }.getOrElse { Result(null, false) }
     }
 

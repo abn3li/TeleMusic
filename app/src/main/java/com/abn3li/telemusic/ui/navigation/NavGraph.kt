@@ -196,7 +196,9 @@ fun TgMusicNavGraph(navController: NavHostController = rememberNavController()) 
         CollectionPlayback(
             sourceIds = if (playerState.song != null) playingFrom else emptyList(),
             isPlaying = playerState.isPlaying,
-            isShuffled = playerState.isShuffleEnabled
+            isShuffled = playerState.isShuffleEnabled,
+            currentSongId = playerState.song?.telegramMessageId,
+            currentVideoId = playerState.song?.youtubeVideoId
         )
     }
 

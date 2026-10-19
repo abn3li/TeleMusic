@@ -101,7 +101,7 @@ class AutoLibraryCallback(
                 folderItem(
                     PLAYLIST_PREFIX + summary.id,
                     summary.name,
-                    artUri = summary.albumArtUrl?.let(Uri::parse),
+                    artUri = summary.artworkUrl?.let(Uri::parse),
                     mediaType = MediaMetadata.MEDIA_TYPE_PLAYLIST
                 )
             }

@@ -184,6 +184,8 @@ private fun LibrarySongRowContent(song: SongEntity, actions: LibrarySongActions,
     val coordinates = remember { arrayOfNulls<LayoutCoordinates>(1) }
     var menuOpen by remember { mutableStateOf(false) }
     val albumTrack = leading is SongRowLeading.TrackNumber
+    val playback = LocalCollectionPlayback.current
+    val current = playback.isCurrent(song.telegramMessageId, song.youtubeVideoId)
     fun openMenu() {
         rowTopInWindow = coordinates[0]?.takeIf { it.isAttached }?.positionInWindow()?.y ?: 0f
         menuOpen = true
@@ -213,19 +215,23 @@ private fun LibrarySongRowContent(song: SongEntity, actions: LibrarySongActions,
             verticalAlignment = Alignment.CenterVertically
         ) {
             when (leading) {
-                SongRowLeading.Artwork -> SongArtwork(song, 52.dp, 3.5.dp)
+                SongRowLeading.Artwork -> Box {
+                    SongArtwork(song, 52.dp, 3.5.dp)
+                    if (current) PlayingMark(playback.isPlaying, Color.White, RoundedCornerShape(3.5.dp))
+                }
                 is SongRowLeading.TrackNumber -> Box(Modifier.width(24.dp).height(44.dp), contentAlignment = Alignment.Center) {
-                    Text("${leading.number}", color = ink.copy(alpha = 0.42f), fontSize = 15.sp, maxLines = 1)
+                    if (current) Box(Modifier.size(24.dp)) { PlayingMark(playback.isPlaying, AppAccent, scrim = null) }
+                    else Text("${leading.number}", color = ink.copy(alpha = 0.42f), fontSize = 15.sp, maxLines = 1)
                 }
             }
             Column(Modifier.weight(1f).padding(start = 16.dp, end = 8.dp)) {
-                Text(song.title, color = ink, fontSize = if (albumTrack) 17.sp else 16.sp,
+                Text(song.title, color = if (current) AppAccent else ink, fontSize = if (albumTrack) 17.sp else 16.sp,
                     lineHeight = if (albumTrack) 22.sp else 16.sp,
                     fontWeight = if (albumTrack) FontWeight.Medium else FontWeight.Normal,
                     maxLines = 1, overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.padding(bottom = 1.dp))
                 if (subtitle != null) {
-                    Text(subtitle, color = ink.copy(alpha = 0.5f), fontSize = 13.sp, lineHeight = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(subtitle, color = if (current) AppAccent.copy(alpha = 0.75f) else ink.copy(alpha = 0.5f), fontSize = 13.sp, lineHeight = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
             }
             when {

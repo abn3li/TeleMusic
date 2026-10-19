@@ -1,4 +1,10 @@
 package com.abn3li.telemusic.ui.search
+import androidx.compose.runtime.CompositionLocalProvider
+import com.abn3li.telemusic.ui.library.PlayingBarsLayer
+import com.abn3li.telemusic.ui.library.LocalPlayingBarsLayer
+import com.abn3li.telemusic.ui.library.playingBarsLayer
+import com.abn3li.telemusic.ui.library.LocalCollectionPlayback
+import com.abn3li.telemusic.ui.library.PlayingMark
 import com.abn3li.telemusic.ui.download.youtubeTrackActions
 import com.abn3li.telemusic.ui.download.youtubeCollectionActions
 
@@ -301,7 +307,9 @@ private fun ResultsScreen(
     val backdrop = rememberFrostedBackdrop()
     val statusBar = frostedHeaderTopInset()
     Box(Modifier.fillMaxSize().extendBehindStatusBar(statusBar).background(paper)) {
-        HorizontalPager(state = pagerState, modifier = Modifier.fillMaxSize().then(
+        val barsLayer = remember { PlayingBarsLayer() }
+        CompositionLocalProvider(LocalPlayingBarsLayer provides barsLayer) {
+        HorizontalPager(state = pagerState, modifier = Modifier.fillMaxSize().playingBarsLayer(barsLayer).then(
             if (!SystemBarsState.playerOpen) Modifier.frostedBackdropSource(backdrop, paper) else Modifier
         )) { page ->
             LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(top = ResultsHeaderHeight + statusBar, bottom = LocalMiniPlayerInset.current + 24.dp)) {
@@ -312,6 +320,7 @@ private fun ResultsScreen(
                 } else if (page == 0) youtubeResults(section, state, loading, onSection, openCollection, play, playNext, download)
                 else libraryResults(section, library, actions, callbacks, onSection, openPlaylist)
             }
+        }
         }
         ResultsHeader(state.query, pagerSource, onQuery, onSearch, onCancel, { selected ->
             scope.launch { pagerState.animateScrollToPage(selected.ordinal) }
@@ -449,7 +458,7 @@ private fun LazyListScope.libraryResults(section: ResultSection, data: LibraryMa
             ResultSection.SONGS -> librarySongs(data.songs, actions, callbacks)
             ResultSection.ALBUMS -> itemsIndexed(data.albums) { i, a -> CollectionRow(a.album, "Album · ${a.artist}", false, a.albumArtUrl) { callbacks.onOpenAlbum(a.album) }; if (i < data.albums.lastIndex) LibraryDivider(80.dp) }
             ResultSection.ARTISTS -> itemsIndexed(data.artists) { i, a -> CollectionRow(a.artist, "Artist · ${a.songCount} songs", true, a.albumArtUrl) { callbacks.onOpenArtist(a.artist) }; if (i < data.artists.lastIndex) LibraryDivider(80.dp) }
-            ResultSection.PLAYLISTS -> itemsIndexed(data.playlists) { i, p -> CollectionRow(p.name, "Playlist", false, p.albumArtUrl) { openPlaylist(p.id, p.name) }; if (i < data.playlists.lastIndex) LibraryDivider(80.dp) }
+            ResultSection.PLAYLISTS -> itemsIndexed(data.playlists) { i, p -> CollectionRow(p.name, "Playlist", false, null, covers = p.covers) { openPlaylist(p.id, p.name) }; if (i < data.playlists.lastIndex) LibraryDivider(80.dp) }
             else -> Unit
         }; return
     }
@@ -461,7 +470,7 @@ private fun LazyListScope.libraryResults(section: ResultSection, data: LibraryMa
                 subtitle = "Song · ${value.artist}", horizontalPadding = 18.dp)
             is AlbumSummary -> CollectionRow(value.album, "Album · ${value.artist}", false, value.albumArtUrl) { callbacks.onOpenAlbum(value.album) }
             is ArtistSummary -> CollectionRow(value.artist, "Artist · ${value.songCount} songs", true, value.albumArtUrl) { callbacks.onOpenArtist(value.artist) }
-            is PlaylistSummary -> CollectionRow(value.name, "Playlist", false, value.albumArtUrl) { openPlaylist(value.id, value.name) }
+            is PlaylistSummary -> CollectionRow(value.name, "Playlist", false, null, covers = value.covers) { openPlaylist(value.id, value.name) }
         }; if (index < top.lastIndex) LibraryDivider(80.dp)
     }
     if (data.songs.isNotEmpty()) {
@@ -474,7 +483,7 @@ private fun LazyListScope.libraryResults(section: ResultSection, data: LibraryMa
     }
     libraryShelf("Albums", ResultSection.ALBUMS, data.albums, show) { a -> MediaCard(a.album, a.artist, false, a.albumArtUrl) { callbacks.onOpenAlbum(a.album) } }
     libraryShelf("Artists", ResultSection.ARTISTS, data.artists, show) { a -> MediaCard(a.artist, "Artist", true, a.albumArtUrl) { callbacks.onOpenArtist(a.artist) } }
-    libraryShelf("Playlists", ResultSection.PLAYLISTS, data.playlists, show) { p -> MediaCard(p.name, "Playlist", false, p.albumArtUrl) { openPlaylist(p.id, p.name) } }
+    libraryShelf("Playlists", ResultSection.PLAYLISTS, data.playlists, show) { p -> MediaCard(p.name, "Playlist", false, null, covers = p.covers) { openPlaylist(p.id, p.name) } }
 }
 
 private fun LazyListScope.songRows(songs: List<YtDlpSearchResult>, state: YouTubeDownloadUiState,
@@ -520,14 +529,19 @@ private fun <T> LazyListScope.libraryShelf(title: String, section: ResultSection
 private fun YoutubeSongRow(result: YtDlpSearchResult, state: YouTubeDownloadUiState, showDownload: Boolean,
     prefix: String, play: (YtDlpSearchResult) -> Unit, playNext: (YtDlpSearchResult) -> Unit, download: (YtDlpSearchResult) -> Unit) {
     val downloading = result.videoId in state.downloadingIds; val downloaded = result.videoId in state.downloadedIds
+    val playback = LocalCollectionPlayback.current
+    val current = playback.isCurrent(null, result.videoId)
     // Tap plays, swipe right queues it next, hold opens the menu - like a library song row.
     SwipeToPlayNext({ playNext(result) }) { swipeModifier ->
     Row(swipeModifier.fillMaxWidth().heightIn(min = 60.dp).youtubeTrackActions(BrowseTrack(result.videoId, result.title,
         result.artist, result.thumbnailUrl, result.durationSeconds), { play(result) }, { download(result) }).padding(start = 18.dp, end = 8.dp, top = 5.dp, bottom = 5.dp), verticalAlignment = Alignment.CenterVertically) {
-        Thumbnail(result.thumbnailUrl, Modifier.size(50.dp), 5, 150)
+        Box {
+            Thumbnail(result.thumbnailUrl, Modifier.size(50.dp), 5, 150)
+            if (current) PlayingMark(playback.isPlaying, Color.White, RoundedCornerShape(5.dp))
+        }
         Column(Modifier.weight(1f).padding(start = 12.dp, end = 6.dp)) {
-            Text(result.title, color = ink, fontSize = 16.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Text(prefix + result.artist, color = ink.copy(.56f), fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(result.title, color = if (current) AppAccent else ink, fontSize = 16.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(prefix + result.artist, color = if (current) AppAccent.copy(alpha = 0.75f) else ink.copy(.56f), fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
         if (showDownload) Box(Modifier.size(44.dp), contentAlignment = Alignment.Center) {
             when { downloading -> CalmSpinner(Modifier.size(20.dp), AppAccent, 2.dp)
@@ -555,10 +569,10 @@ private fun YoutubeSongRow(result: YtDlpSearchResult, state: YouTubeDownloadUiSt
 }
 
 @Composable
-private fun CollectionRow(title: String, subtitle: String, round: Boolean, art: String?, remote: BrowseCollection? = null, onClick: () -> Unit) {
+private fun CollectionRow(title: String, subtitle: String, round: Boolean, art: String?, remote: BrowseCollection? = null, covers: List<String> = listOfNotNull(art), onClick: () -> Unit) {
     val actions = if (remote != null) Modifier.youtubeCollectionActions(remote, onClick) else Modifier.clickable(onClick = onClick)
     Row(Modifier.fillMaxWidth().heightIn(min = 60.dp).then(actions).padding(start = 18.dp, end = 16.dp, top = 5.dp, bottom = 5.dp), verticalAlignment = Alignment.CenterVertically) {
-        if (round) ArtistAvatar(art, 50) else CoverTile(art, Modifier.size(50.dp), 5, Icons.AutoMirrored.Rounded.QueueMusic)
+        if (round) ArtistAvatar(art, 50) else CoverTile(covers, Modifier.size(50.dp), 5, Icons.AutoMirrored.Rounded.QueueMusic)
         Column(Modifier.weight(1f).padding(start = 12.dp, end = 8.dp)) {
             Text(title, color = ink, fontSize = 16.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
             Text(subtitle, color = ink.copy(.56f), fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -568,9 +582,9 @@ private fun CollectionRow(title: String, subtitle: String, round: Boolean, art: 
 }
 
 @Composable
-private fun MediaCard(title: String, subtitle: String, round: Boolean, art: String?, onClick: () -> Unit) {
+private fun MediaCard(title: String, subtitle: String, round: Boolean, art: String?, covers: List<String> = listOfNotNull(art), onClick: () -> Unit) {
     Column(Modifier.width(142.dp).clickable(onClick = onClick), horizontalAlignment = if (round) Alignment.CenterHorizontally else Alignment.Start) {
-        if (round) ArtistAvatar(art, 142) else CoverTile(art, Modifier.fillMaxWidth().aspectRatio(1f), 8)
+        if (round) ArtistAvatar(art, 142) else CoverTile(covers, Modifier.fillMaxWidth().aspectRatio(1f), 8)
         Text(title, color = ink.copy(.94f), fontSize = 15.sp, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 8.dp))
         Text(subtitle, color = ink.copy(.56f), fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
     }

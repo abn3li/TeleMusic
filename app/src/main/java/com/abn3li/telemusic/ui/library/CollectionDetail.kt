@@ -1,5 +1,6 @@
 package com.abn3li.telemusic.ui.library
 
+import androidx.compose.runtime.CompositionLocalProvider
 import com.abn3li.telemusic.ui.download.NoResults
 import com.abn3li.telemusic.ui.download.heroTopInset
 import com.abn3li.telemusic.ui.navigation.FrostedHeaderBackground
@@ -36,6 +37,7 @@ import androidx.compose.material.icons.rounded.PushPin
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.border
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -70,6 +72,11 @@ import androidx.compose.material.icons.rounded.Album
 import androidx.compose.material.icons.rounded.ArrowDownward
 import androidx.compose.material.icons.rounded.ArrowUpward
 import androidx.compose.material.icons.rounded.Delete
+import androidx.compose.material.icons.rounded.Image
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
+import android.widget.Toast
 import androidx.compose.material.icons.rounded.MoreHoriz
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Pause
@@ -143,7 +150,18 @@ class LibraryCallbacks(
 
 /** What's playing, for a collection page's Shuffle and Play buttons: the list the queue was
  * started from (PlaybackQueue.sourceIds), and whether it's playing and shuffled. */
-class CollectionPlayback(val sourceIds: List<Long>, val isPlaying: Boolean, val isShuffled: Boolean)
+class CollectionPlayback(
+    val sourceIds: List<Long>,
+    val isPlaying: Boolean,
+    val isShuffled: Boolean,
+    // The song in the player (playing or paused), by library id and YouTube video id.
+    val currentSongId: Long? = null,
+    val currentVideoId: String? = null
+) {
+    /** Whether a row's song is the one in the player: same library song, or same YouTube video. */
+    fun isCurrent(songId: Long?, videoId: String?) =
+        (songId != null && songId == currentSongId) || (videoId != null && videoId == currentVideoId)
+}
 
 val LocalCollectionPlayback = compositionLocalOf { CollectionPlayback(emptyList(), isPlaying = false, isShuffled = false) }
 
@@ -327,10 +345,32 @@ fun PlaylistDetailScreen(playlistId: Long, playlistName: String, viewModel: Libr
     val repository = (LocalContext.current.applicationContext as TgMusicApp).musicRepository
     val scope = rememberCoroutineScope()
     val songs by remember(playlistId) { repository.observeSongsInPlaylist(playlistId) }.collectAsState(initial = null)
-    val hidden by remember(playlistId) { repository.observePlaylistById(playlistId).map { it?.hiddenFromTracks == true } }
-        .collectAsState(initial = false)
+    // Wrapped so "not loaded yet" (null) differs from a loaded row: the cover waits for it
+    // instead of flashing the automatic one before a picked photo.
+    val loadedPlaylist by remember(playlistId) { repository.observePlaylistById(playlistId).map { listOf(it) } }
+        .collectAsState(initial = null)
+    val playlist = loadedPlaylist?.firstOrNull()
+    val hidden = playlist?.hiddenFromTracks == true
     var confirmDelete by remember { mutableStateOf(false) }
+    var coverOptions by remember { mutableStateOf(false) }
+    var pickingCoverSong by remember { mutableStateOf(false) }
+    val context = LocalContext.current
     val list = songs.orEmpty()
+    val covers = remember(loadedPlaylist, songs) {
+        when {
+            loadedPlaylist == null || songs == null -> emptyList()
+            playlist?.coverImagePath != null -> listOf(playlist.coverImagePath)
+            else -> list.firstOrNull { it.telegramMessageId == playlist?.coverSongId }?.displayArtwork?.let(::listOf)
+                ?: autoPlaylistCovers(list)
+        }
+    }
+    val pickPhoto = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
+        val appContext = context.applicationContext
+        if (uri != null) viewModel.setPlaylistCoverPhoto(playlistId, uri) {
+            Toast.makeText(appContext, "Couldn't use that photo", Toast.LENGTH_SHORT).show()
+        }
+    }
+    BackHandler(pickingCoverSong) { pickingCoverSong = false }
     val pinnedKeys by viewModel.pinnedKeys.collectAsState()
     val pinned = playlistPinKey(playlistId) in pinnedKeys
     val downloadGate = (LocalContext.current.applicationContext as TgMusicApp).downloadGate
@@ -338,6 +378,7 @@ fun PlaylistDetailScreen(playlistId: Long, playlistName: String, viewModel: Libr
     val notDownloaded = remember(list) { list.count { it.youtubeVideoId != null && it.localFilePath == null && !it.isExplicitDownload } }
     val downloadProgress = viewModel.playlistDownloads.collectAsState().value[playlistId]
 
+    Box(Modifier.fillMaxSize()) {
     PlaylistLikePage(
         title = playlistName,
         collectionKey = "playlist:$playlistId",
@@ -346,6 +387,11 @@ fun PlaylistDetailScreen(playlistId: Long, playlistName: String, viewModel: Libr
         viewModel = viewModel,
         callbacks = callbacks,
         titleOrderByDefault = false,
+        covers = covers,
+        onPickSong = if (!pickingCoverSong) null else { song ->
+            pickingCoverSong = false
+            scope.launch { repository.setPlaylistCoverSong(playlistId, song.telegramMessageId) }
+        },
         menu = { close ->
             LibraryMenuItem("Play Next", Icons.Rounded.QueuePlayNext) { list.forEach { callbacks.onPlayNext(it.telegramMessageId) }; close() }
             LibraryMenuDivider()
@@ -355,6 +401,8 @@ fun PlaylistDetailScreen(playlistId: Long, playlistName: String, viewModel: Libr
             ) { scope.launch { repository.setPlaylistHiddenFromTracks(playlistId, !hidden) }; close() }
             LibraryMenuDivider()
             PinMenuItem(pinned) { viewModel.togglePin(playlistPinKey(playlistId)); close() }
+            LibraryMenuDivider()
+            LibraryMenuItem("Change Cover", Icons.Rounded.Image) { coverOptions = true; close() }
             if (downloadProgress != null) {
                 LibraryMenuDivider()
                 LibraryMenuItem(
@@ -372,6 +420,33 @@ fun PlaylistDetailScreen(playlistId: Long, playlistName: String, viewModel: Libr
             LibraryMenuItem("Delete Playlist", Icons.Rounded.Delete, destructive = true) { confirmDelete = true; close() }
         }
     )
+    if (pickingCoverSong) CoverPickBar { pickingCoverSong = false }
+    }
+
+    if (coverOptions) {
+        // A chosen song only counts while it's still here (the cover is automatic otherwise).
+        val custom = playlist?.coverImagePath != null || list.any { it.telegramMessageId == playlist?.coverSongId }
+        AppAlert(
+            title = "Playlist Cover",
+            message = "Automatic shows the artwork of the newest songs.",
+            onDismiss = { coverOptions = false },
+            actions = listOfNotNull(
+                AlertAction("Choose Photo") {
+                    coverOptions = false
+                    pickPhoto.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+                },
+                AlertAction("Choose a Song") {
+                    coverOptions = false
+                    pickingCoverSong = true
+                },
+                if (!custom) null else AlertAction("Use Automatic Cover") {
+                    coverOptions = false
+                    scope.launch { repository.clearPlaylistCover(playlistId) }
+                },
+                AlertAction("Cancel", bold = true) { coverOptions = false }
+            )
+        )
+    }
 
     if (confirmDelete) {
         AppAlert(
@@ -391,6 +466,30 @@ fun PlaylistDetailScreen(playlistId: Long, playlistName: String, viewModel: Libr
                 },
                 AlertAction("Cancel", bold = true) { confirmDelete = false }
             )
+        )
+    }
+}
+
+/** Stays up while choosing a cover song, so a tap that picks instead of plays is never a surprise. */
+@Composable
+private fun BoxScope.CoverPickBar(onCancel: () -> Unit) {
+    Row(
+        Modifier
+            .align(Alignment.BottomCenter)
+            .padding(horizontal = 16.dp)
+            .padding(bottom = LocalMiniPlayerInset.current + 8.dp)
+            .fillMaxWidth()
+            .height(52.dp)
+            .clip(CircleShape)
+            .background(LibraryCardColor)
+            .border(0.5.dp, ink.copy(alpha = 0.12f), CircleShape)
+            .padding(start = 20.dp, end = 6.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text("Tap a song to use its artwork", color = ink, fontSize = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+        Text(
+            "Cancel", color = AppAccent, fontSize = 16.sp, fontWeight = FontWeight.SemiBold,
+            modifier = Modifier.clip(CircleShape).clickable(onClick = onCancel).padding(horizontal = 14.dp, vertical = 10.dp)
         )
     }
 }
@@ -472,9 +571,14 @@ private fun PlaylistLikePage(
     viewModel: LibraryViewModel,
     callbacks: LibraryCallbacks,
     titleOrderByDefault: Boolean,
+    // Null: the automatic cover from the songs, newest-added first (see autoPlaylistCovers).
+    covers: List<String>? = null,
+    // Set while choosing a cover song: a tap picks the song instead of playing it.
+    onPickSong: ((SongEntity) -> Unit)? = null,
     menu: @Composable ColumnScope.(close: () -> Unit) -> Unit
 ) {
     val source = songs.orEmpty()
+    val heroCovers = covers ?: remember(source) { autoPlaylistCovers(source) }
     var byTitle by rememberSaveable { mutableStateOf(titleOrderByDefault) }
     val list = remember(source, byTitle) {
         when {
@@ -494,7 +598,7 @@ private fun PlaylistLikePage(
         subtitle = null,
         onSubtitleClick = null,
         detailLine = songCountLine(list),
-        hero = { HeroImage(list.firstNotNullOfOrNull { it.displayArtwork }, placeholder) },
+        hero = { HeroImage(heroCovers, placeholder) },
         songs = list,
         loaded = songs != null,
         callbacks = callbacks,
@@ -520,7 +624,7 @@ private fun PlaylistLikePage(
         val ids = shown.map { it.telegramMessageId }
         itemsIndexed(shown, key = { _, s -> s.telegramMessageId }, contentType = { _, _ -> "song" }) { index, song ->
             Column(librarySongPlacement(song.telegramMessageId)) {
-            LibrarySongRow(song = song, actions = actions, onClick = { callbacks.onPlay(ids, index) })
+            LibrarySongRow(song = song, actions = actions, onClick = { if (onPickSong != null) onPickSong(song) else callbacks.onPlay(ids, index) })
             if (index < shown.lastIndex) LibraryDivider(start = 88.dp)
             }
         }
@@ -534,13 +638,15 @@ private fun songCountLine(songs: List<SongEntity>): String {
 }
 
 @Composable
-internal fun BoxScope.HeroImage(url: String?, placeholder: ImageVector) {
+internal fun BoxScope.HeroImage(url: String?, placeholder: ImageVector) = HeroImage(listOfNotNull(url?.takeIf { it.isNotEmpty() }), placeholder)
+
+/** [HeroImage] for a playlist's [urls]: four make a 2x2 cover. */
+@Composable
+internal fun BoxScope.HeroImage(urls: List<String>, placeholder: ImageVector) {
     Box(Modifier.matchParentSize().background(LocalPalette.current.raised), contentAlignment = Alignment.Center) {
         Icon(placeholder, null, tint = ink.copy(alpha = 0.25f), modifier = Modifier.size(120.dp))
     }
-    if (!url.isNullOrEmpty()) {
-        AsyncImage(model = url, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.matchParentSize())
-    }
+    CoverImages(urls, Modifier.matchParentSize())
 }
 
 @Composable
@@ -773,7 +879,9 @@ internal fun <T> DetailPageScaffold(
             }
             .background(paper)
     ) {
-        LazyColumn(state = listState, modifier = Modifier.fillMaxSize().libraryReorderGestures(editing, listState).then(
+        val barsLayer = remember { PlayingBarsLayer() }
+        CompositionLocalProvider(LocalPlayingBarsLayer provides barsLayer) {
+        LazyColumn(state = listState, modifier = Modifier.fillMaxSize().playingBarsLayer(barsLayer).libraryReorderGestures(editing, listState).then(
             if ((captureForDock || showFrostedHeader) && !SystemBarsState.playerOpen) Modifier.frostedBackdropSource(backdrop, paper) else Modifier
         )) {
             if (editing?.active == true || !searching) {
@@ -885,6 +993,7 @@ internal fun <T> DetailPageScaffold(
             }
             body(shown, searching)
             item("bottom_inset") { Spacer(Modifier.height(LocalMiniPlayerInset.current + 24.dp)) }
+        }
         }
 
         // Fades in once the cover has scrolled away, so it never sits on top of the artwork.

@@ -1,5 +1,6 @@
 package com.abn3li.telemusic.repository
 
+import com.abn3li.telemusic.data.local.observeAllWithArt
 import kotlinx.coroutines.launch
 import coil.imageLoader
 import androidx.room.withTransaction
@@ -289,7 +290,7 @@ class MusicRepository(
         }
         val isSingle = youTube == null || LibraryAlbumMatcher.albumKey(youTube) == LibraryAlbumMatcher.albumKey(title)
         val lookup = if (isSingle) {
-            runCatching { metadataRepository.enrich("$title $artist".trim()) }.getOrNull()
+            runCatching { metadataRepository.enrich(title, artist) }.getOrNull()
                 ?.takeIf { LibraryAlbumMatcher.sameArtist(it.artist.orEmpty(), artist) }?.album
         } else null
         val candidates = listOfNotNull(youTube, lookup)
@@ -701,6 +702,7 @@ class MusicRepository(
      * playlist. Telegram songs and local imports always stay. A removed song still playing in
      * the queue keeps playing as a stream-only song. */
     suspend fun deletePlaylist(playlistId: Long, removeSongs: Boolean) {
+        playlistDao.coverImagePath(playlistId)?.let(thumbnailGenerator::deletePlaylistCover)
         val songIds = playlistDao.songIdsInPlaylist(playlistId)
         playlistDao.removeEntriesForPlaylist(playlistId)
         playlistDao.delete(playlistId)
@@ -739,6 +741,19 @@ class MusicRepository(
     suspend fun playlistExists(playlistId: Long): Boolean = playlistDao.countById(playlistId) > 0
     suspend fun songIdsInPlaylist(playlistId: Long): List<Long> = playlistDao.songIdsInPlaylist(playlistId)
     suspend fun setPlaylistHiddenFromTracks(playlistId: Long, hidden: Boolean) = playlistDao.setHiddenFromTracks(playlistId, hidden)
+    suspend fun setPlaylistCoverSong(playlistId: Long, songId: Long) = replacePlaylistCover(playlistId, songId, null)
+    /** False when the photo couldn't be read; the current cover stays. */
+    suspend fun setPlaylistCoverPhoto(playlistId: Long, photo: android.net.Uri): Boolean {
+        val path = thumbnailGenerator.savePlaylistCover(playlistId, photo) ?: return false
+        replacePlaylistCover(playlistId, null, path)
+        return true
+    }
+    suspend fun clearPlaylistCover(playlistId: Long) = replacePlaylistCover(playlistId, null, null)
+    private suspend fun replacePlaylistCover(playlistId: Long, songId: Long?, imagePath: String?) {
+        val previous = playlistDao.coverImagePath(playlistId)
+        playlistDao.setCover(playlistId, songId, imagePath)
+        if (previous != null && previous != imagePath) thumbnailGenerator.deletePlaylistCover(previous)
+    }
     // Every song id belonging to a playlist that's had its own "Hide from tracks" turned on -
     // see PlaylistDao.observeSongIdsInHiddenPlaylists' own doc.
     fun observeHiddenPlaylistSongIds(): Flow<List<Long>> = playlistDao.observeSongIdsInHiddenPlaylists()
@@ -917,6 +932,7 @@ class MusicRepository(
             playlistDao.addSong(entry.copy(songId = to.telegramMessageId))
         }
         playlistDao.removeEntriesForSong(from.telegramMessageId)
+        playlistDao.moveCoverSong(from.telegramMessageId, to.telegramMessageId)
         if (from.isFavorite && !to.isFavorite) songDao.setFavorite(to.telegramMessageId, true)
         if (from.lastPlayedAtMillis > to.lastPlayedAtMillis) songDao.stampLastPlayed(to.telegramMessageId, from.lastPlayedAtMillis)
         if (!from.album.isNullOrBlank()) songDao.setAlbumIfMissing(to.telegramMessageId, from.album)
@@ -1003,6 +1019,7 @@ class MusicRepository(
                     playlistDao.addSong(entry.copy(songId = best.telegramMessageId))
                 }
                 playlistDao.removeEntriesForSong(duplicate.telegramMessageId)
+                playlistDao.moveCoverSong(duplicate.telegramMessageId, best.telegramMessageId)
                 if (duplicate.isFavorite && !best.isFavorite) songDao.setFavorite(best.telegramMessageId, true)
                 songDao.delete(duplicate.telegramMessageId)
             }
@@ -1040,12 +1057,12 @@ class MusicRepository(
 
             // A local import/Telegram sync always has a real title/artist from its own tags, so
             // the first two checks rarely fire - but only needs a lookup for artwork when it
-            // truly has none of its own (see hasArtwork above; LocalAudioImporter and
-            // TdlibManager's sync path now extract embedded/Telegram-provided cover art directly
-            // into thumbnailPath before this ever runs).
+            // truly has none of its own (see hasArtwork above; LocalAudioImporter extracts a
+            // file's embedded cover first). Telegram's own covers are left out on purpose - too
+            // low quality - so Telegram songs get their art from this lookup.
             val needsMetadataGuess = originalTitle == "Unknown title" || song.album == null || !hasArtwork
             val enriched = if (needsMetadataGuess) {
-                metadataRepository.enrich("$originalTitle $originalArtist".trim())
+                metadataRepository.enrich(originalTitle, originalArtist, song.durationSeconds)
             } else null
 
             if (enriched != null) {
@@ -1086,7 +1103,7 @@ class MusicRepository(
      * correcting them is the whole point of this flow, not a fallback for "Unknown title". Returns
      * whether artwork was actually found; the title/artist correction is saved either way. */
     suspend fun editSongAndFetchArtwork(song: SongEntity, newTitle: String, newArtist: String): Boolean {
-        val enriched = metadataRepository.enrich("$newTitle $newArtist".trim())
+        val enriched = metadataRepository.enrich(newTitle, newArtist, song.durationSeconds)
         songDao.setSongInfo(song.telegramMessageId, newTitle, newArtist, enriched?.album ?: song.album, enriched?.artworkUrl ?: song.albumArtUrl)
         val artUrl = enriched?.artworkUrl ?: return false
         ensureThumbnail(song.telegramMessageId, artUrl)
@@ -1340,6 +1357,7 @@ class MusicRepository(
         song.localFilePath?.takeIf { it != song.exportedFileUri }?.let(::releaseLocalFile)
         song.exportedFileUri?.let { uri -> runCatching { mediaFolderExporter.delete(android.net.Uri.parse(uri)) } }
         songDao.delete(song.telegramMessageId)
+        playlistDao.clearCoverSong(song.telegramMessageId)
         forgetKeepBoth(song.telegramMessageId)
     }
 
@@ -1535,6 +1553,7 @@ class MusicRepository(
             songDao.delete(song.telegramMessageId)
         }
         settingsStore.keepBothSongIds = emptySet()
+        playlistDao.coverImagePaths().forEach(thumbnailGenerator::deletePlaylistCover)
         val playlists = playlistDao.observeAll().firstOrNull().orEmpty()
         for (pl in playlists) {
             playlistDao.delete(pl.id)

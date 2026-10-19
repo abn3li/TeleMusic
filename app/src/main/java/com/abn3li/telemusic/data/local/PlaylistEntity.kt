@@ -10,5 +10,9 @@ data class PlaylistEntity(
     val createdAtMillis: Long = System.currentTimeMillis(),
     // The playlist's own "Hide from tracks" button - when on, every song in this playlist is
     // excluded from the Songs page (they stay fully visible inside this playlist, untouched).
-    val hiddenFromTracks: Boolean = false
+    val hiddenFromTracks: Boolean = false,
+    // The cover the user picked: one of this playlist's songs (its artwork), or a photo saved by
+    // ThumbnailGenerator.savePlaylistCover. Both null = the automatic cover from its songs.
+    val coverSongId: Long? = null,
+    val coverImagePath: String? = null
 )

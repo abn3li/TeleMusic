@@ -8,24 +8,41 @@ interface PlaylistDao {
     @Query("SELECT * FROM playlists ORDER BY name ASC")
     fun observeAll(): Flow<List<PlaylistEntity>>
 
-    // Playlists have no cover art of their own - this pulls one real song's art (the most
-    // recently added track that actually has one) per playlist for the row icon, same
-    // MIN()/subquery-per-group trick observeArtists() uses in SongDao.
+    // What each playlist's cover was set to (see observeAllWithArt): the photo, or the chosen
+    // song's list artwork and link - only while that song is still in the playlist.
     @Query(
         """
         SELECT playlists.id AS id, playlists.name AS name, playlists.createdAtMillis AS createdAtMillis,
+            playlists.coverImagePath AS coverImagePath,
             (
-                SELECT songs.albumArtUrl FROM songs
-                INNER JOIN playlist_song_cross_ref ON songs.telegramMessageId = playlist_song_cross_ref.songId
-                WHERE playlist_song_cross_ref.playlistId = playlists.id
-                    AND songs.albumArtUrl IS NOT NULL AND songs.albumArtUrl != ''
-                ORDER BY playlist_song_cross_ref.addedAtMillis DESC
+                SELECT COALESCE(NULLIF(NULLIF(s.thumbnailPath, ''), 'none'), NULLIF(s.albumArtUrl, '')) FROM songs s
+                INNER JOIN playlist_song_cross_ref r ON s.telegramMessageId = r.songId
+                WHERE r.playlistId = playlists.id AND s.telegramMessageId = playlists.coverSongId
                 LIMIT 1
-            ) AS albumArtUrl
+            ) AS coverSongArt,
+            (
+                SELECT NULLIF(s.albumArtUrl, '') FROM songs s
+                INNER JOIN playlist_song_cross_ref r ON s.telegramMessageId = r.songId
+                WHERE r.playlistId = playlists.id AND s.telegramMessageId = playlists.coverSongId
+                LIMIT 1
+            ) AS coverSongArtUrl
         FROM playlists ORDER BY playlists.name ASC
         """
     )
-    fun observeAllWithArt(): Flow<List<PlaylistSummary>>
+    fun observeCoverChoices(): Flow<List<PlaylistCoverChoice>>
+
+    // Every distinct artwork in every playlist, with when its newest song was added - one scan
+    // of the playlist entries; observeAllWithArt keeps each playlist's newest four.
+    @Query(
+        """
+        SELECT r.playlistId AS playlistId, COALESCE(NULLIF(NULLIF(s.thumbnailPath, ''), 'none'), NULLIF(s.albumArtUrl, '')) AS art,
+            NULLIF(s.albumArtUrl, '') AS artUrl, MAX(r.addedAtMillis) AS addedAtMillis
+        FROM playlist_song_cross_ref r INNER JOIN songs s ON s.telegramMessageId = r.songId
+        GROUP BY r.playlistId, COALESCE(NULLIF(s.albumArtUrl, ''), NULLIF(NULLIF(s.thumbnailPath, ''), 'none'))
+        HAVING COALESCE(NULLIF(s.albumArtUrl, ''), NULLIF(NULLIF(s.thumbnailPath, ''), 'none')) IS NOT NULL
+        """
+    )
+    fun observePlaylistArtwork(): Flow<List<PlaylistArtwork>>
 
     @Query("SELECT * FROM playlists WHERE id = :id")
     fun observeById(id: Long): Flow<PlaylistEntity?>
@@ -35,6 +52,23 @@ interface PlaylistDao {
 
     @Query("DELETE FROM playlists WHERE id = :id")
     suspend fun delete(id: Long)
+
+    @Query("UPDATE playlists SET coverSongId = :songId, coverImagePath = :imagePath WHERE id = :id")
+    suspend fun setCover(id: Long, songId: Long?, imagePath: String?)
+
+    @Query("SELECT coverImagePath FROM playlists WHERE id = :id")
+    suspend fun coverImagePath(id: Long): String?
+
+    @Query("SELECT coverImagePath FROM playlists WHERE coverImagePath IS NOT NULL")
+    suspend fun coverImagePaths(): List<String>
+
+    /** A merged-away song's cover choice follows its playlist places to [to]. */
+    @Query("UPDATE playlists SET coverSongId = :to WHERE coverSongId = :from")
+    suspend fun moveCoverSong(from: Long, to: Long)
+
+    /** A song leaving the library stops being any playlist's cover. */
+    @Query("UPDATE playlists SET coverSongId = NULL WHERE coverSongId = :songId")
+    suspend fun clearCoverSong(songId: Long)
 
     @Query("UPDATE playlists SET hiddenFromTracks = :hidden WHERE id = :id")
     suspend fun setHiddenFromTracks(id: Long, hidden: Boolean)

@@ -49,7 +49,7 @@ data class HomeData(
 data class PinnedPlaylist(
     val key: String,
     val title: String,
-    val artworkUrl: String?,
+    val covers: List<String>,
     val playlistId: Long?,
     val smartKind: SmartPlaylistKind?
 )
@@ -160,9 +160,9 @@ class LibraryViewModel(private val repository: MusicRepository) : ViewModel() {
         keys.mapNotNull { key ->
             when {
                 key.startsWith("p:") -> key.removePrefix("p:").toLongOrNull()?.let(byId::get)
-                    ?.let { PinnedPlaylist(key, it.name, it.albumArtUrl, it.id, null) }
+                    ?.let { PinnedPlaylist(key, it.name, it.covers, it.id, null) }
                 key.startsWith("s:") -> SmartPlaylistKind.entries.firstOrNull { it.name == key.removePrefix("s:") }
-                    ?.let { PinnedPlaylist(key, it.label, null, null, it) }
+                    ?.let { PinnedPlaylist(key, it.label, emptyList(), null, it) }
                 else -> null
             }
         }
@@ -183,6 +183,10 @@ class LibraryViewModel(private val repository: MusicRepository) : ViewModel() {
         val id = repository.createPlaylist(name); repository.addSongToPlaylist(id, song)
     }
     fun createPlaylist(name: String) = viewModelScope.launch { repository.createPlaylist(name) }
+    /** In the view model's scope, so leaving the playlist doesn't stop the save halfway. */
+    fun setPlaylistCoverPhoto(playlistId: Long, photo: android.net.Uri, onFailed: () -> Unit) = viewModelScope.launch {
+        if (!repository.setPlaylistCoverPhoto(playlistId, photo)) onFailed()
+    }
     fun createPlaylistAndAddSongs(name: String, songs: List<SongEntity>) = viewModelScope.launch {
         val id = repository.createPlaylist(name)
         songs.forEach { repository.addSongToPlaylist(id, it) }

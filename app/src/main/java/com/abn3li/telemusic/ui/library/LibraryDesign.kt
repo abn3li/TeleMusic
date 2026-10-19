@@ -205,9 +205,11 @@ private fun LargeTitleListBody(
     val bottomInset = LocalMiniPlayerInset.current + 24.dp
 
     Box(Modifier.fillMaxSize().extendBehindStatusBar(statusBar).background(paper)) {
+        val barsLayer = remember { PlayingBarsLayer() }
+        CompositionLocalProvider(LocalPlayingBarsLayer provides barsLayer) {
         LazyColumn(
             state = listState,
-            modifier = Modifier.fillMaxSize().libraryReorderGestures(LocalLibraryEditing.current, listState).then(
+            modifier = Modifier.fillMaxSize().playingBarsLayer(barsLayer).libraryReorderGestures(LocalLibraryEditing.current, listState).then(
                 if ((captureForDock || showSmallTitle) && !SystemBarsState.playerOpen) Modifier.frostedBackdropSource(backdrop, paper)
                 else Modifier
             ),
@@ -217,6 +219,7 @@ private fun LargeTitleListBody(
             if (stickyContent != null) item("sticky_space") { Spacer(Modifier.height(stickyHeight)) }
             content()
             item("bottom_inset") { Spacer(Modifier.height(bottomInset)) }
+        }
         }
         if (stickyContent != null) {
             Box(

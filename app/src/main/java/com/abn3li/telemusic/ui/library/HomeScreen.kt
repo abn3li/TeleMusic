@@ -611,6 +611,7 @@ private fun QuickPicks(tracks: List<BrowseTrack>, onPlay: (List<BrowseTrack>, In
     // A column is most of the screen, so the next one shows at the edge.
     val columnWidth = LocalConfiguration.current.screenWidthDp.dp * 0.86f
     val shelfRow = LocalShelfRow.current!!
+    val playback = LocalCollectionPlayback.current
     LazyRow(state = shelfRow.state, modifier = Modifier.shelfDrag(shelfRow.state, shelfRow.fling).then(ShelfOwnLayer), flingBehavior = shelfRow.fling, userScrollEnabled = false,
         contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
         items(columns.size, key = { "qp_$it" }, contentType = { "qp_column" }) { column ->
@@ -618,15 +619,19 @@ private fun QuickPicks(tracks: List<BrowseTrack>, onPlay: (List<BrowseTrack>, In
                 .background(LibraryFieldColor).border(1.dp, ink.copy(alpha = 0.06f), RoundedCornerShape(20.dp))
                 .padding(horizontal = 12.dp, vertical = 4.dp).heightIn(min = 256.dp)) {
                 columns[column].forEachIndexed { rowIndex, (i, track) ->
+                    val current = playback.isCurrent(null, track.videoId)
                     Row(Modifier.fillMaxWidth().heightIn(min = 62.dp)
                         .youtubeTrackActions(track, onClick = { play(tracks, i) }),
                         verticalAlignment = Alignment.CenterVertically) {
-                        coil.compose.AsyncImage(model = track.thumbnailUrl, contentDescription = null,
-                            contentScale = androidx.compose.ui.layout.ContentScale.Crop,
-                            modifier = Modifier.size(46.dp).feedArtworkBorder(RoundedCornerShape(9.dp)).clip(RoundedCornerShape(9.dp)).background(LibraryFieldColor))
+                        Box {
+                            coil.compose.AsyncImage(model = track.thumbnailUrl, contentDescription = null,
+                                contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                                modifier = Modifier.size(46.dp).feedArtworkBorder(RoundedCornerShape(9.dp)).clip(RoundedCornerShape(9.dp)).background(LibraryFieldColor))
+                            if (current) PlayingMark(playback.isPlaying, Color.White, RoundedCornerShape(9.dp))
+                        }
                         Column(Modifier.weight(1f).padding(start = 12.dp)) {
-                            Text(track.title, color = ink, fontSize = 15.sp, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                            Text(track.artist, color = ink.copy(alpha = 0.55f), fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Text(track.title, color = if (current) AppAccent else ink, fontSize = 15.sp, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Text(track.artist, color = if (current) AppAccent.copy(alpha = 0.75f) else ink.copy(alpha = 0.55f), fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         }
                         Icon(Icons.Rounded.PlayArrow, contentDescription = null, tint = ink.copy(alpha = 0.45f),
                             modifier = Modifier.padding(start = 8.dp).size(20.dp))

@@ -1,5 +1,9 @@
 package com.abn3li.telemusic.ui.download
 
+import androidx.compose.runtime.CompositionLocalProvider
+import com.abn3li.telemusic.ui.library.PlayingBarsLayer
+import com.abn3li.telemusic.ui.library.LocalPlayingBarsLayer
+import com.abn3li.telemusic.ui.library.playingBarsLayer
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.delay
 import com.abn3li.telemusic.ui.library.LibrarySearchField
@@ -257,7 +261,9 @@ internal fun ArtistHeroLayout(
             }
             .background(tint)
     ) {
-        LazyColumn(state = listState, modifier = Modifier.fillMaxSize().then(
+        val barsLayer = remember { PlayingBarsLayer() }
+        CompositionLocalProvider(LocalPlayingBarsLayer provides barsLayer) {
+        LazyColumn(state = listState, modifier = Modifier.fillMaxSize().playingBarsLayer(barsLayer).then(
             if ((captureForDock || showFrostedHeader) && !SystemBarsState.playerOpen) Modifier.frostedBackdropSource(backdrop, tint) else Modifier
         )) {
             if (searching) item("search") {
@@ -365,6 +371,7 @@ internal fun ArtistHeroLayout(
             }
             body(searching, query)
             item("bottom_inset") { Spacer(Modifier.height(LocalMiniPlayerInset.current + 24.dp)) }
+        }
         }
 
         // The material fades in over the scrolling page while controls stay sharp.

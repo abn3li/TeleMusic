@@ -34,6 +34,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -81,6 +82,7 @@ import coil.compose.AsyncImage
 import com.abn3li.telemusic.data.local.AlbumSummary
 import com.abn3li.telemusic.data.local.ArtistSummary
 import com.abn3li.telemusic.data.local.SongEntity
+import com.abn3li.telemusic.data.local.displayArtwork
 import com.abn3li.telemusic.repository.SortField
 import kotlinx.coroutines.delay
 
@@ -163,7 +165,7 @@ internal fun PinnedTile(item: PinnedPlaylist, onOpen: () -> Unit, onUnpin: () ->
                     Icon(item.smartKind.icon(), contentDescription = null, tint = AppAccent, modifier = Modifier.fillMaxSize(0.42f))
                 }
             } else {
-                CoverTile(item.artworkUrl, Modifier.fillMaxWidth().aspectRatio(1f).feedArtworkBorder(RoundedCornerShape(9.dp)), corner = 9, placeholder = Icons.AutoMirrored.Rounded.QueueMusic)
+                CoverTile(item.covers, Modifier.fillMaxWidth().aspectRatio(1f).feedArtworkBorder(RoundedCornerShape(9.dp)), corner = 9, placeholder = Icons.AutoMirrored.Rounded.QueueMusic)
             }
             Spacer(Modifier.height(7.dp))
             Text(item.title, color = ink, fontSize = 14.sp, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -413,13 +415,40 @@ internal fun AlbumGridItem(album: AlbumSummary, onClick: () -> Unit) {
 
 /** Square artwork with a soft grey music-note placeholder behind it. */
 @Composable
-internal fun CoverTile(url: String?, modifier: Modifier, corner: Int, placeholder: ImageVector = Icons.Rounded.MusicNote) {
+internal fun CoverTile(url: String?, modifier: Modifier, corner: Int, placeholder: ImageVector = Icons.Rounded.MusicNote) =
+    CoverTile(listOfNotNull(url?.takeIf { it.isNotEmpty() }), modifier, corner, placeholder)
+
+/** [CoverTile] for a playlist's [urls]: four make a 2x2 cover. */
+@Composable
+internal fun CoverTile(urls: List<String>, modifier: Modifier, corner: Int, placeholder: ImageVector = Icons.Rounded.MusicNote) {
     Box(modifier.clip(RoundedCornerShape(corner.dp)).background(LibraryTileColor), contentAlignment = Alignment.Center) {
         Icon(placeholder, null, tint = Color(0xFFC7C7CC), modifier = Modifier.fillMaxSize(0.42f))
-        if (!url.isNullOrEmpty()) {
-            AsyncImage(model = url, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
-        }
+        CoverImages(urls, Modifier.fillMaxSize())
     }
+}
+
+/** Four images as a 2x2 grid, otherwise the first one filling [modifier]'s space. */
+@Composable
+internal fun CoverImages(urls: List<String>, modifier: Modifier) {
+    if (urls.size >= 4) {
+        Column(modifier) {
+            for (row in 0..1) Row(Modifier.weight(1f).fillMaxWidth()) {
+                for (column in 0..1) AsyncImage(
+                    model = urls[row * 2 + column], contentDescription = null, contentScale = ContentScale.Crop,
+                    modifier = Modifier.weight(1f).fillMaxHeight()
+                )
+            }
+        }
+    } else if (urls.isNotEmpty()) {
+        AsyncImage(model = urls[0], contentDescription = null, contentScale = ContentScale.Crop, modifier = modifier)
+    }
+}
+
+/** The automatic playlist cover from [songs], newest-added first: four different artworks make
+ * the 2x2 grid, fewer show just the newest. The rule PlaylistSummary.covers follows for rows. */
+internal fun autoPlaylistCovers(songs: List<SongEntity>): List<String> {
+    val distinct = songs.asSequence().mapNotNull { it.displayArtwork }.distinct().take(4).toList()
+    return if (distinct.size == 4) distinct else distinct.take(1)
 }
 
 @Composable
@@ -511,7 +540,7 @@ fun LibraryPlaylistsScreen(
         itemsIndexed(shown, key = { _, p -> p.id }) { index, playlist ->
             PlaylistRow(
                 label = playlist.name,
-                tile = { CoverTile(playlist.albumArtUrl, Modifier.size(60.dp), corner = 4, placeholder = Icons.AutoMirrored.Rounded.QueueMusic) }
+                tile = { CoverTile(playlist.covers, Modifier.size(60.dp), corner = 4, placeholder = Icons.AutoMirrored.Rounded.QueueMusic) }
             ) { onOpenPlaylist(playlist.id, playlist.name) }
             if (index < shown.lastIndex) LibraryDivider(start = 96.dp)
         }
