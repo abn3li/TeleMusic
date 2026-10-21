@@ -1,96 +1,58 @@
 package com.abn3li.telemusic.ui.library
 
-import android.view.View
-import android.view.WindowManager
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.*
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.window.Popup
 import androidx.compose.ui.window.PopupProperties
 
-private class MenuWindowRequest(
+private class MenuRequest(
     val owner: Any,
     val locals: CompositionLocalContext,
     val dismiss: () -> Unit,
     val content: @Composable () -> Unit
 )
 
-private class MenuWindowState {
-    var request by mutableStateOf<MenuWindowRequest?>(null)
+private class MenuHostState {
+    var request by mutableStateOf<MenuRequest?>(null)
     fun release(owner: Any) { if (request?.owner === owner) request = null }
 }
 
-private const val MENU_WINDOW_LINGER_MS = 3_000L
+private val LocalMenuHost = staticCompositionLocalOf<MenuHostState?> { null }
 
-private val LocalMenuWindow = staticCompositionLocalOf<MenuWindowState?> { null }
-
-/** Keep one native window; hidden windows neither intercept input nor retain menu content. */
+/** Long-press menus draw over the app inside its own window. A Popup window had to be built on
+ * the first long-press (a slow first open), and while one exists Compose checks where it is on
+ * screen every frame - ~120 wakeups a second with no menu up. */
 @Composable
 internal fun ContextMenuHost(content: @Composable () -> Unit) {
-    val state = remember { MenuWindowState() }
-    CompositionLocalProvider(LocalMenuWindow provides state) {
+    val state = remember { MenuHostState() }
+    CompositionLocalProvider(LocalMenuHost provides state) {
         content()
-        SharedMenuWindow(state)
+        MenuLayer(state)
     }
 }
 
 @Composable
-private fun SharedMenuWindow(state: MenuWindowState) {
-    val request = state.request
-    val active = request != null
-    // Compose's Popup checks where it is on screen every frame for as long as it exists, so a
-    // window kept for the whole session ran a frame on every vsync with no menu open (~120
-    // wakeups a second while idle). It exists only while a menu is up, and briefly after, so
-    // back-to-back menus still reuse it.
-    var keep by remember { mutableStateOf(false) }
-    LaunchedEffect(active) {
-        if (active) keep = true
-        else if (keep) { kotlinx.coroutines.delay(MENU_WINDOW_LINGER_MS); keep = false }
-    }
-    if (!active && !keep) return
-    Popup(popupPositionProvider = WindowOriginPosition,
-        onDismissRequest = { state.request?.dismiss?.invoke() },
-        properties = PopupProperties(focusable = active, dismissOnBackPress = active,
-            dismissOnClickOutside = active, excludeFromSystemGesture = active)) {
-        val view = LocalView.current
-        val focus = LocalFocusManager.current
-        val window = LocalWindowInfo.current
-        val input = LocalTextInputService.current
-        val keyboard = LocalSoftwareKeyboardController.current
-        val toolbar = LocalTextToolbar.current
-        val inputMode = LocalInputModeManager.current
-        LaunchedEffect(view, active) {
-            while (!view.isAttachedToWindow) withFrameNanos { }
-            val root = generateSequence(view as View?) { it.parent as? View }
-                .firstOrNull { it.layoutParams is WindowManager.LayoutParams } ?: return@LaunchedEffect
-            val params = root.layoutParams as WindowManager.LayoutParams
-            params.alpha = if (active) 1f else 0f
-            params.flags = if (active) params.flags and WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE.inv()
-                else (params.flags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE) and
-                    WindowManager.LayoutParams.FLAG_DIM_BEHIND.inv()
-            view.context.getSystemService(WindowManager::class.java).updateViewLayout(root, params)
-        }
-        Box(Modifier.fillMaxSize()) {
-            if (request != null) key(request.owner) {
-                // Preserve the originating page's palette, editing actions and player insets.
-                CompositionLocalProvider(request.locals) {
-                    // Page-specific locals move with the content; native input still belongs
-                    // to the popup's Compose view rather than the originating activity view.
-                    CompositionLocalProvider(LocalView provides view, LocalFocusManager provides focus,
-                        LocalWindowInfo provides window, LocalTextInputService provides input,
-                        LocalSoftwareKeyboardController provides keyboard, LocalTextToolbar provides toolbar,
-                        LocalInputModeManager provides inputMode) { request.content() }
-                }
-            }
+private fun MenuLayer(state: MenuHostState) {
+    val request = state.request ?: return
+    BackHandler { request.dismiss() }
+    // The menu covers the page: put away a keyboard left up by a search field under it.
+    val keyboard = LocalSoftwareKeyboardController.current
+    LaunchedEffect(request.owner) { keyboard?.hide() }
+    Box(Modifier.fillMaxSize()) {
+        key(request.owner) {
+            // Keep the originating page's palette, editing actions and player insets.
+            CompositionLocalProvider(request.locals) { request.content() }
         }
     }
 }
 
 @Composable
-internal fun ContextMenuWindow(onDismissRequest: () -> Unit, content: @Composable () -> Unit) {
-    val state = LocalMenuWindow.current
+internal fun ContextMenuLayer(onDismissRequest: () -> Unit, content: @Composable () -> Unit) {
+    val state = LocalMenuHost.current
     if (state == null) {
         Popup(popupPositionProvider = WindowOriginPosition, onDismissRequest = onDismissRequest,
             properties = PopupProperties(focusable = true), content = content)
@@ -101,7 +63,7 @@ internal fun ContextMenuWindow(onDismissRequest: () -> Unit, content: @Composabl
     val latestContent by rememberUpdatedState(content)
     val latestDismiss by rememberUpdatedState(onDismissRequest)
     SideEffect {
-        state.request = MenuWindowRequest(owner, locals, { latestDismiss() }, { latestContent() })
+        state.request = MenuRequest(owner, locals, { latestDismiss() }, { latestContent() })
     }
     DisposableEffect(state, owner) { onDispose { state.release(owner) } }
 }

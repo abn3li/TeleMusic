@@ -41,7 +41,7 @@ import org.robolectric.annotation.GraphicsMode
 @Config(sdk = [34], application = Application::class)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 class LibraryEditingUiTest : LocalComposeTest() {
-    @Test fun sharedMenuWindowExistsOnlyWhileMenusAreUsed() {
+    @Test fun menusDrawInTheAppWindowAndCloseOnBack() {
         var open by mutableStateOf(false)
         var number by mutableStateOf(0)
         setContent {
@@ -61,15 +61,20 @@ class LibraryEditingUiTest : LocalComposeTest() {
             @Suppress("UNCHECKED_CAST")
             return (field.get(global) as List<android.view.View>).count { it.javaClass.simpleName == "PopupLayout" }
         }
-        // No menu open: no window, so nothing polls the screen every frame while the app sits still.
-        compose.runOnIdle { assertEquals(0, popupWindows()) }
+        // No Popup window ever: nothing to build on the first long-press, and nothing polling the
+        // screen every frame while the app sits still.
         repeat(2) { index ->
             compose.onNodeWithText("Open menu").performTouchInput { click() }
-            compose.onNodeWithText("Menu ${index + 1}").assertIsDisplayed().performClick()
+            compose.onNodeWithText("Menu ${index + 1}").assertIsDisplayed()
+            compose.runOnIdle { assertEquals(0, popupWindows()) }
+            compose.onNodeWithText("Menu ${index + 1}").performClick()
             compose.waitUntil(timeoutMillis = 1000) { !open }
             compose.onNodeWithText("Menu ${index + 1}").assertDoesNotExist()
         }
-        compose.mainClock.advanceTimeBy(4_000)
+        compose.onNodeWithText("Open menu").performTouchInput { click() }
+        compose.onNodeWithText("Menu 3").assertIsDisplayed()
+        compose.runOnIdle { activity.onBackPressedDispatcher.onBackPressed() }
+        compose.waitUntil(timeoutMillis = 1000) { !open }
         compose.runOnIdle { assertEquals(0, popupWindows()) }
     }
     private val songs = (1L..3L).map { SongEntity(it, 0, "Song $it", "Artist") }
@@ -106,6 +111,8 @@ class LibraryEditingUiTest : LocalComposeTest() {
         compose.onNodeWithText("New Playlist…").performClick()
         compose.onNode(hasSetTextAction()).performTextInput("Selected Mix")
         compose.onNodeWithText("Create").performClick()
+        // The playlist is made once the card has closed; until then it covers the page, as on the phone.
+        compose.waitUntil(timeoutMillis = 1000) { created.isNotEmpty() }
         compose.onNodeWithContentDescription("Download").performClick()
         compose.onNodeWithContentDescription("Add to Favorites").performClick()
         compose.onAllNodesWithText("Play").onLast().performClick()

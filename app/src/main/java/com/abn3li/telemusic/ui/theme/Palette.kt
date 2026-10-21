@@ -83,8 +83,13 @@ internal val paper: Color
 /** What's on screen, for the system bars' colours (read by MainActivity). The full player and
  * the welcome pages are always dark, so the bars around them go dark too, whatever the app's
  * theme; a Settings-style page has its grey page colour behind the status bar. */
+/** How much an open long-press menu darkens everything behind it. */
+const val MENU_DIM = 0.10f
+
 object SystemBarsState {
     var playerOpen by mutableStateOf(false)
+    // A long-press menu is up: the bars darken with the page behind it.
+    var menuOpen by mutableStateOf(false)
     var onboardingOpen by mutableStateOf(false)
     // Settings-style pages on screen (a page fading out and the next fading in can overlap).
     var groupedPages by mutableIntStateOf(0)

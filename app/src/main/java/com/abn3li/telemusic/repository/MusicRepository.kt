@@ -624,8 +624,8 @@ class MusicRepository(
     }
 
     private suspend fun resolveYouTubePlayback(song: SongEntity): PlaybackResolution {
-        // No network at all: say so now. Asking yt-dlp anyway sat through its timeouts, the
-        // loading spinner going for a minute and more before the song quietly stopped.
+        // A network that can't reach the internet: say so now. With none at all (airplane mode)
+        // yt-dlp is still asked, as that's also a hand-over moment; offline it fails at once.
         if (appContext.internet() == Internet.NONE) return PlaybackResolution.Unplayable(NO_INTERNET, offline = true)
         resolveDirectPlaybackUri(song)?.let { return PlaybackResolution.Playable(it) }
         // Failed on a network Android couldn't confirm reaches the internet: that's the cause.

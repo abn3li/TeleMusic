@@ -2,6 +2,7 @@ package com.abn3li.telemusic
 
 import com.abn3li.telemusic.ui.theme.SystemBarsState
 import com.abn3li.telemusic.ui.theme.LightPalette
+import com.abn3li.telemusic.ui.theme.MENU_DIM
 import androidx.compose.ui.graphics.toArgb
 import com.abn3li.telemusic.data.settings.ThemeMode
 import androidx.core.view.WindowCompat
@@ -70,6 +71,7 @@ class MainActivity : ComponentActivity() {
             // Read here too (not only inside the effect), so opening the player re-runs it in
             // the dark theme as well.
             val playerBars = SystemBarsState.playerOpen
+            val menuOpen = SystemBarsState.menuOpen
             SideEffect {
                 WindowCompat.getInsetsController(window, view).apply {
                     isAppearanceLightStatusBars = lightStatusIcons
@@ -77,15 +79,18 @@ class MainActivity : ComponentActivity() {
                 }
                 val bar = if (lightBars) android.graphics.Color.WHITE else android.graphics.Color.BLACK
                 window.decorView.setBackgroundColor(bar)
+                // A see-through bar already shows the menu's dim drawn under it.
+                fun withMenuDim(color: Int) = if (menuOpen && color != android.graphics.Color.TRANSPARENT)
+                    androidx.core.graphics.ColorUtils.blendARGB(color, android.graphics.Color.BLACK, MENU_DIM) else color
                 // The open player shows through both bars: its cover at the top, its colours below.
                 @Suppress("DEPRECATION")
-                window.statusBarColor = when {
+                window.statusBarColor = withMenuDim(when {
                     playerBars || heroPage || frostedHeaderPage -> android.graphics.Color.TRANSPARENT
                     lightBars && groupedPage -> LightPalette.groupedBackground.toArgb()
                     else -> bar
-                }
+                })
                 @Suppress("DEPRECATION")
-                window.navigationBarColor = if (playerBars) android.graphics.Color.TRANSPARENT else bar
+                window.navigationBarColor = withMenuDim(if (playerBars) android.graphics.Color.TRANSPARENT else bar)
             }
             TgMusicTheme(light = light) {
                 Surface(modifier = Modifier.fillMaxSize()) {

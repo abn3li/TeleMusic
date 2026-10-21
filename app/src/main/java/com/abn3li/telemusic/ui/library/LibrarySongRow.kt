@@ -3,11 +3,11 @@ package com.abn3li.telemusic.ui.library
 import com.abn3li.telemusic.ui.theme.LocalPalette
 import com.abn3li.telemusic.ui.theme.paper
 import com.abn3li.telemusic.ui.theme.ink
+import com.abn3li.telemusic.ui.theme.MENU_DIM
+import com.abn3li.telemusic.ui.theme.SystemBarsState
 import com.abn3li.telemusic.data.local.listArtwork
 import com.abn3li.telemusic.data.local.displayArtwork
 import android.widget.Toast
-import android.view.View
-import android.view.WindowManager
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.animateFloatAsState
@@ -43,6 +43,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.systemBars
 import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.union
 import androidx.compose.foundation.rememberScrollState
@@ -70,6 +71,7 @@ import androidx.compose.material.icons.rounded.StarBorder
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
@@ -80,7 +82,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -101,7 +102,6 @@ import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
-import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -412,28 +412,27 @@ internal fun LibraryContextMenu(anchorTopPx: Float, onDismiss: () -> Unit, cente
         }
     }
 
-    ContextMenuWindow(onDismissRequest = { close() }) {
-        val popupView = LocalView.current
-        LaunchedEffect(popupView, show) {
-            // Android animates the dim layer, including the status bar. Update window
-            // attributes only on open/close instead of requesting a relayout every frame.
-            while (!popupView.isAttachedToWindow) withFrameNanos { }
-            val windowView = generateSequence(popupView as View?) { it.parent as? View }
-                .firstOrNull { it.layoutParams is WindowManager.LayoutParams } ?: return@LaunchedEffect
-            val windowManager = popupView.context.getSystemService(WindowManager::class.java)
-            val params = windowView.layoutParams as WindowManager.LayoutParams
-            val flags = if (show) params.flags or WindowManager.LayoutParams.FLAG_DIM_BEHIND
-                else params.flags and WindowManager.LayoutParams.FLAG_DIM_BEHIND.inv()
-            if (params.flags != flags || (show && params.dimAmount != 0.10f)) {
-                params.flags = flags
-                params.dimAmount = 0.10f
-                windowManager.updateViewLayout(windowView, params)
-            }
-        }
+    // The dim over the page fades with the card (drawn only - nothing recomposes). The system
+    // bars' own colours sit above it, so they're darkened with it (see MainActivity).
+    val dim by animateFloatAsState(if (show) MENU_DIM else 0f,
+        androidx.compose.animation.core.tween(if (show) 140 else 160), label = "menuDim")
+    DisposableEffect(show) {
+        SystemBarsState.menuOpen = show
+        onDispose { SystemBarsState.menuOpen = false }
+    }
+    ContextMenuLayer(onDismissRequest = { close() }) {
+      Box(
+          Modifier
+              .fillMaxSize()
+              .drawBehind { drawRect(Color.Black.copy(alpha = dim)) }
+              .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) { close() }
+      ) {
         BoxWithConstraints(
             Modifier
                 .fillMaxSize()
-                .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) { close() }
+                // Between the status and navigation bars, where the menu's own window used to sit:
+                // the card keeps its place against the pressed row and off the gesture bar.
+                .windowInsetsPadding(androidx.compose.foundation.layout.WindowInsets.systemBars)
                 .then(if (centered) Modifier.windowInsetsPadding(
                     androidx.compose.foundation.layout.WindowInsets.safeDrawing.union(androidx.compose.foundation.layout.WindowInsets.ime)
                 ) else Modifier)
@@ -463,6 +462,7 @@ internal fun LibraryContextMenu(anchorTopPx: Float, onDismiss: () -> Unit, cente
                 content(availableHeight.coerceAtLeast(0.dp)) { action -> close(action) }
             }
         }
+      }
     }
 
 }
