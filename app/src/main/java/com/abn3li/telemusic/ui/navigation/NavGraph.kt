@@ -191,6 +191,13 @@ fun TgMusicNavGraph(navController: NavHostController = rememberNavController()) 
     }
 
     val playerState by playerViewModel.stableUiState.collectAsState()
+    // The full player shows its own error line. With it closed, a song that can't play just
+    // stopped (offline it spun, then went quiet) - say why here instead.
+    val toastContext = LocalContext.current
+    LaunchedEffect(playerState.errorMessage) {
+        val message = playerState.errorMessage ?: return@LaunchedEffect
+        if (!SystemBarsState.playerOpen) Toast.makeText(toastContext, message, Toast.LENGTH_SHORT).show()
+    }
     val playingFrom by playerViewModel.playingFrom.collectAsState()
     val collectionPlayback = remember(playingFrom, playerState.song, playerState.isPlaying, playerState.isShuffleEnabled) {
         CollectionPlayback(
@@ -270,7 +277,7 @@ fun TgMusicNavGraph(navController: NavHostController = rememberNavController()) 
         onPlay = playStreams, onPlayNext = { ids -> playerViewModel.playNext(ids) }
     ) {
     // Black behind the page while it steps back under the opening player.
-    Box(Modifier.fillMaxSize().drawBehind { if (playerTransition.expansion.value > 0.001f) drawRect(Color.Black) }) {
+    Box(Modifier.fillMaxSize().drawBehind { if (playerTransition.expansion.value.isPartlyOpen()) drawRect(Color.Black) }) {
       // The status bar's gap is kept on the pages themselves (below), not here: the Scaffold clips
       // to its own bounds, and an artist / album / playlist page draws its artwork up behind
       // the status bar.
@@ -291,6 +298,9 @@ fun TgMusicNavGraph(navController: NavHostController = rememberNavController()) 
                   shape = RoundedCornerShape(pageCorner * progress)
                   clip = true
               } else clip = false
+              // Fully under the open (opaque) player: not drawn at all. Drawing it anyway, frosted
+              // glass and all, put ~9 ms of GPU work in every player frame - past a 120 Hz frame.
+              alpha = if (progress >= FULLY_OPEN) 0f else 1f
           }
           .windowInsetsPadding(barsInsets.only(WindowInsetsSides.Horizontal + WindowInsetsSides.Bottom))) {
         Scaffold(
@@ -480,7 +490,7 @@ fun TgMusicNavGraph(navController: NavHostController = rememberNavController()) 
         // ...and darkens.
         Box(Modifier.fillMaxSize().drawBehind {
             val progress = playerTransition.expansion.value
-            if (progress > 0.001f) drawRect(Color.Black.copy(alpha = 0.55f * progress))
+            if (progress.isPartlyOpen()) drawRect(Color.Black.copy(alpha = 0.55f * progress))
         })
 
         PlayerSheetOverlay(
@@ -547,3 +557,9 @@ private fun DownloadLocationPrompt(app: TgMusicApp) {
         )
     }
 }
+
+// The player's expansion at which it covers the whole screen (see the page layer above).
+private const val FULLY_OPEN = 0.999f
+
+/** Between closed and fully open: the page and its dimming behind the player are on screen. */
+private fun Float.isPartlyOpen() = this > 0.001f && this < FULLY_OPEN

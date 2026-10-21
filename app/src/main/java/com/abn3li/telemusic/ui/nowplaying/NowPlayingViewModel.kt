@@ -764,8 +764,9 @@ class NowPlayingViewModel(
                 errorMessage = "Couldn't play \"${song.title}\" - $reason",
                 loadingSongId = null
             )
-            // Auto-skip unplayable track after brief pause so playlist playback continues
-            if (queue.hasNext()) {
+            // Auto-skip unplayable track after brief pause so playlist playback continues - not
+            // while offline, where every next song fails the same way.
+            if (queue.hasNext() && (resolution as? PlaybackResolution.Unplayable)?.offline != true) {
                 delay(1500)
                 if (_uiState.value.song?.telegramMessageId == song.telegramMessageId && _uiState.value.loadingSongId == null) {
                     nextSong()

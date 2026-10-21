@@ -314,6 +314,12 @@ def _fetch_to_file(info, filepath, chunk=4 * 1024 * 1024, refresh=None):
         raise
 
 
+# Errors that mean the phone can't reach YouTube, as opposed to YouTube refusing one client.
+_NETWORK_ERRORS = ("No address associated with hostname", "Name or service not known",
+                   "Temporary failure in name resolution", "Network is unreachable", "timed out",
+                   "Connection refused", "Connection reset", "Failed to establish a new connection")
+
+
 def _resolve_info(video_id, format_selector, audio_first=False):
     """[video_id]'s stream for [format_selector], from the first client that gives a link that
     works, and which client it was. Play tries the light android client first (fastest to
@@ -326,6 +332,8 @@ def _resolve_info(video_id, format_selector, audio_first=False):
         "noplaylist": True,
         "skip_download": True,
         "extractor_args": {"youtube": {"player_client": ["android", "ios"]}},
+        # yt-dlp's default is 20 s per request; a working connection answers in one or two.
+        "socket_timeout": 10,
     }
     # Light: one client, and no watch page / configs / player JS - the android client's URLs
     # need no deciphering, so those are pure overhead, and parsing them in Python was most of
@@ -361,6 +369,11 @@ def _resolve_info(video_id, format_selector, audio_first=False):
                 last_error = ValueError("no stream url")
         except Exception as e:
             last_error = e
+            # Can't reach YouTube at all: another client won't either. Trying each one made an
+            # offline song wait through every client's timeouts before failing.
+            if any(sign in str(e) for sign in _NETWORK_ERRORS):
+                failures.append(f"{mode}: {str(e).replace('ERROR: ', '').strip()[:220]}")
+                break
         failures.append(f"{mode}: {str(last_error).replace('ERROR: ', '').strip()[:220]}")
     raise Exception(" | ".join(failures)) from last_error
 

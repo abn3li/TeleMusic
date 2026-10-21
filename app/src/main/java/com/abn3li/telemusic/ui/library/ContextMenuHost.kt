@@ -22,6 +22,8 @@ private class MenuWindowState {
     fun release(owner: Any) { if (request?.owner === owner) request = null }
 }
 
+private const val MENU_WINDOW_LINGER_MS = 3_000L
+
 private val LocalMenuWindow = staticCompositionLocalOf<MenuWindowState?> { null }
 
 /** Keep one native window; hidden windows neither intercept input nor retain menu content. */
@@ -38,6 +40,16 @@ internal fun ContextMenuHost(content: @Composable () -> Unit) {
 private fun SharedMenuWindow(state: MenuWindowState) {
     val request = state.request
     val active = request != null
+    // Compose's Popup checks where it is on screen every frame for as long as it exists, so a
+    // window kept for the whole session ran a frame on every vsync with no menu open (~120
+    // wakeups a second while idle). It exists only while a menu is up, and briefly after, so
+    // back-to-back menus still reuse it.
+    var keep by remember { mutableStateOf(false) }
+    LaunchedEffect(active) {
+        if (active) keep = true
+        else if (keep) { kotlinx.coroutines.delay(MENU_WINDOW_LINGER_MS); keep = false }
+    }
+    if (!active && !keep) return
     Popup(popupPositionProvider = WindowOriginPosition,
         onDismissRequest = { state.request?.dismiss?.invoke() },
         properties = PopupProperties(focusable = active, dismissOnBackPress = active,

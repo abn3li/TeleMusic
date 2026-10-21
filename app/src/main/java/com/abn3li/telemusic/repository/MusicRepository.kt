@@ -1,5 +1,7 @@
 package com.abn3li.telemusic.repository
 
+import com.abn3li.telemusic.data.remote.Internet
+import com.abn3li.telemusic.data.remote.internet
 import com.abn3li.telemusic.data.local.observeAllWithArt
 import kotlinx.coroutines.launch
 import coil.imageLoader
@@ -67,11 +69,14 @@ private const val THUMBNAIL_BATCH = 60
 // This many covers in a row failing to connect means the phone is offline: stop the pass.
 private const val THUMBNAIL_OFFLINE_STREAK = 3
 
+private const val NO_INTERNET = "no internet connection"
+
 /** What playing a song resolves to - see MusicRepository.resolvePlayback. */
 sealed interface PlaybackResolution {
     data class Playable(val uri: Uri) : PlaybackResolution
-    /** [reason] finishes "Couldn't play …" - e.g. "video may be unavailable". */
-    data class Unplayable(val reason: String) : PlaybackResolution
+    /** [reason] finishes "Couldn't play …" - e.g. "video may be unavailable". [offline]: the
+     * phone can't reach the internet, so the next song won't play either. */
+    data class Unplayable(val reason: String, val offline: Boolean = false) : PlaybackResolution
 }
 
 // A song with no lyrics anywhere is searched again after this long, in case some appear.
@@ -611,12 +616,21 @@ class MusicRepository(
         return when {
             current.localFilePath != null -> PlaybackResolution.Playable(localFileToUri(current.localFilePath!!))
             current.isLocalImport -> PlaybackResolution.Unplayable("file may have been moved or deleted")
-            current.youtubeVideoId != null -> resolveDirectPlaybackUri(current)?.let { PlaybackResolution.Playable(it) }
-                ?: PlaybackResolution.Unplayable("video may be unavailable")
+            current.youtubeVideoId != null -> resolveYouTubePlayback(current)
             // A Telegram song with no copy on the phone needs Telegram (not set up, or logged out).
             !tdlibManager.isStarted -> PlaybackResolution.Unplayable("set up Telegram in Settings > Telegram to play it")
             else -> PlaybackResolution.Playable(TdlibDataSource.uriFor(getFreshFileIdForSong(current)))
         }
+    }
+
+    private suspend fun resolveYouTubePlayback(song: SongEntity): PlaybackResolution {
+        // No network at all: say so now. Asking yt-dlp anyway sat through its timeouts, the
+        // loading spinner going for a minute and more before the song quietly stopped.
+        if (appContext.internet() == Internet.NONE) return PlaybackResolution.Unplayable(NO_INTERNET, offline = true)
+        resolveDirectPlaybackUri(song)?.let { return PlaybackResolution.Playable(it) }
+        // Failed on a network Android couldn't confirm reaches the internet: that's the cause.
+        return if (appContext.internet() != Internet.OK) PlaybackResolution.Unplayable(NO_INTERNET, offline = true)
+        else PlaybackResolution.Unplayable("video may be unavailable")
     }
 
     private fun isLocalFileValid(path: String): Boolean =

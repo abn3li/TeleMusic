@@ -41,7 +41,7 @@ import org.robolectric.annotation.GraphicsMode
 @Config(sdk = [34], application = Application::class)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 class LibraryEditingUiTest : LocalComposeTest() {
-    @Test fun sharedMenuWindowReopensWithDifferentContentAndRetainsOneNativeWindow() {
+    @Test fun sharedMenuWindowExistsOnlyWhileMenusAreUsed() {
         var open by mutableStateOf(false)
         var number by mutableStateOf(0)
         setContent {
@@ -54,26 +54,23 @@ class LibraryEditingUiTest : LocalComposeTest() {
                 }
             }
         }
-        fun nativeWindow(): android.view.View {
+        fun popupWindows(): Int {
             val type = Class.forName("android.view.WindowManagerGlobal")
             val global = type.getMethod("getInstance").invoke(null)
             val field = type.getDeclaredField("mViews").apply { isAccessible = true }
             @Suppress("UNCHECKED_CAST")
-            return (field.get(global) as List<android.view.View>).single { it.javaClass.simpleName == "PopupLayout" }
+            return (field.get(global) as List<android.view.View>).count { it.javaClass.simpleName == "PopupLayout" }
         }
-        lateinit var initial: android.view.View
-        compose.runOnIdle { initial = nativeWindow() }
+        // No menu open: no window, so nothing polls the screen every frame while the app sits still.
+        compose.runOnIdle { assertEquals(0, popupWindows()) }
         repeat(2) { index ->
             compose.onNodeWithText("Open menu").performTouchInput { click() }
             compose.onNodeWithText("Menu ${index + 1}").assertIsDisplayed().performClick()
             compose.waitUntil(timeoutMillis = 1000) { !open }
             compose.onNodeWithText("Menu ${index + 1}").assertDoesNotExist()
-            compose.runOnIdle {
-                assertSame(initial, nativeWindow())
-                val params = initial.layoutParams as android.view.WindowManager.LayoutParams
-                assertTrue(params.flags and android.view.WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE != 0)
-            }
         }
+        compose.mainClock.advanceTimeBy(4_000)
+        compose.runOnIdle { assertEquals(0, popupWindows()) }
     }
     private val songs = (1L..3L).map { SongEntity(it, 0, "Song $it", "Artist") }
     private val queue = PlaybackQueue()
