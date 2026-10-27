@@ -135,9 +135,19 @@ internal fun LyricsPage(
     val song = state.song
     val translation by viewModel.translation.collectAsState()
     val context = androidx.compose.ui.platform.LocalContext.current
-    DisposableEffect(active) {
-        viewModel.setLyricsVisible(active)
-        onDispose { viewModel.setLyricsVisible(false) }
+    // On screen only while the app is in front too: with the app in the background or the screen
+    // locked, the lyrics page left open translates nothing.
+    val lifecycleOwner = androidx.compose.ui.platform.LocalLifecycleOwner.current
+    DisposableEffect(active, lifecycleOwner) {
+        val lifecycle = lifecycleOwner.lifecycle
+        fun update() = viewModel.setLyricsVisible(active && lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.STARTED))
+        val observer = androidx.lifecycle.LifecycleEventObserver { _, _ -> update() }
+        lifecycle.addObserver(observer)
+        update()
+        onDispose {
+            lifecycle.removeObserver(observer)
+            viewModel.setLyricsVisible(false)
+        }
     }
     LaunchedEffect(translation.failed) {
         if (translation.failed) android.widget.Toast.makeText(context, "Couldn't translate the lyrics - tap Translate to try again", android.widget.Toast.LENGTH_SHORT).show()
