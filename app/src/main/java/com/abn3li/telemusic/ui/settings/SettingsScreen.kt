@@ -114,6 +114,7 @@ fun SettingsScreen(onBack: () -> Unit, onOpenSpotify: () -> Unit, onLoggedOut: (
     var lyricsSourcesOff by remember { mutableStateOf(app.settingsStore.lyricsSourcesOff) }
     var translationLanguageOpen by remember { mutableStateOf(false) }
     val translationLanguage by app.settingsStore.lyricsTranslationLanguage.collectAsState()
+    val translationEnabled by app.settingsStore.lyricsTranslationEnabled.collectAsState()
     var licensesOpen by remember { mutableStateOf(false) }
 
     // DNS and proxy save as they're changed - no Save buttons. Before Telegram is set up in Settings there's nothing to connect or restart.
@@ -328,18 +329,28 @@ fun SettingsScreen(onBack: () -> Unit, onOpenSpotify: () -> Unit, onLoggedOut: (
                 }
                 GroupDivider(start = 57.dp)
                 GroupRow(
-                    title = "Translate Lyrics To",
+                    title = "Lyrics Translation",
                     icon = { GroupIcon(Icons.Rounded.Translate, TileBlue) },
-                    onClick = { translationLanguageOpen = !translationLanguageOpen },
-                    trailing = { GroupValue(LyricsTranslator.languageName(translationLanguage)) }
+                    trailing = { GroupSwitch(translationEnabled, { on -> app.settingsStore.setLyricsTranslationEnabled(on) }) }
                 )
-                AnimatedVisibility(translationLanguageOpen) {
+                AnimatedVisibility(translationEnabled) {
                     Column {
-                        LyricsTranslator.LANGUAGES.forEach { language ->
-                            GroupDivider(start = 57.dp)
-                            GroupOption(label = language.name, selected = language.code == translationLanguage, startPadding = 57) {
-                                app.settingsStore.setLyricsTranslationLanguage(language.code)
-                                translationLanguageOpen = false
+                        GroupDivider(start = 57.dp)
+                        GroupRow(
+                            title = "Translate Lyrics To",
+                            icon = { Spacer(Modifier.size(29.dp)) },
+                            onClick = { translationLanguageOpen = !translationLanguageOpen },
+                            trailing = { GroupValue(LyricsTranslator.languageName(translationLanguage)) }
+                        )
+                        AnimatedVisibility(translationLanguageOpen) {
+                            Column {
+                                LyricsTranslator.LANGUAGES.forEach { language ->
+                                    GroupDivider(start = 57.dp)
+                                    GroupOption(label = language.name, selected = language.code == translationLanguage, startPadding = 57) {
+                                        app.settingsStore.setLyricsTranslationLanguage(language.code)
+                                        translationLanguageOpen = false
+                                    }
+                                }
                             }
                         }
                     }

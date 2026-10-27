@@ -134,6 +134,7 @@ internal fun LyricsPage(
 ) {
     val song = state.song
     val translation by viewModel.translation.collectAsState()
+    val translationEnabled by viewModel.translationEnabled.collectAsState()
     val context = androidx.compose.ui.platform.LocalContext.current
     // On screen only while the app is in front too: with the app in the background or the screen
     // locked, the lyrics page left open translates nothing.
@@ -242,7 +243,7 @@ internal fun LyricsPage(
             }
         }
         // Rides down with the page when the controls step aside, and stays.
-        if (hasLyrics) TranslateButton(
+        if (hasLyrics && translationEnabled) TranslateButton(
             on = translation.on,
             loading = translation.loading,
             onClick = { if (translation.failed) viewModel.retryTranslation() else viewModel.toggleTranslation() },

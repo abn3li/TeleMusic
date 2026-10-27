@@ -365,9 +365,19 @@ class NowPlayingViewModel(
     private val _translation = MutableStateFlow(LyricsTranslationState())
     val translation: StateFlow<LyricsTranslationState> = _translation
 
+    /** Lyrics translation switched on in Settings: without it there's no Translate button. */
+    val translationEnabled: StateFlow<Boolean> = app.settingsStore.lyricsTranslationEnabled
+
     fun setLyricsVisible(visible: Boolean) { lyricsVisible.value = visible }
 
-    fun toggleTranslation() = app.settingsStore.setLyricsTranslationOn(!app.settingsStore.lyricsTranslationOn.value)
+    // The song the Translate button was pressed on: only that one is translated - the next song
+    // starts untranslated.
+    private val translatedSong = MutableStateFlow<Long?>(null)
+
+    fun toggleTranslation() {
+        val current = _uiState.value.song?.telegramMessageId ?: return
+        translatedSong.value = if (translatedSong.value == current) null else current
+    }
 
     fun retryTranslation() { translationRetry.value++ }
 
@@ -378,18 +388,20 @@ class NowPlayingViewModel(
         return if (lines.any { it.isNotBlank() }) song.telegramMessageId to lines else null
     }
 
-    /** Follows the Translate button, the language, and - only while translating with the lyrics
-     * on screen - the lyrics shown. Off or out of sight, nothing here runs as songs play. */
+    /** Follows Settings, the Translate button, the language, and - only while a song is being
+     * translated with its lyrics on screen - the lyrics shown. Off or out of sight, nothing here
+     * runs as songs play. */
     private fun followLyricsTranslation() {
         viewModelScope.launch {
             combine(
-                app.settingsStore.lyricsTranslationOn,
+                app.settingsStore.lyricsTranslationEnabled,
+                translatedSong,
                 app.settingsStore.lyricsTranslationLanguage,
                 lyricsVisible,
                 translationRetry
-            ) { on, language, visible, _ -> Triple(on, language, visible) }
-                .collectLatest { (on, language, visible) ->
-                    if (!on) {
+            ) { enabled, song, language, visible, _ -> Triple(song.takeIf { enabled }, language, visible) }
+                .collectLatest { (song, language, visible) ->
+                    if (song == null) {
                         _translation.value = LyricsTranslationState()
                         return@collectLatest
                     }
@@ -403,7 +415,13 @@ class NowPlayingViewModel(
                         }
                         .map(::lyricsToTranslate)
                         .distinctUntilChanged()
-                        .collectLatest { lyrics -> if (lyrics != null) translate(lyrics.first, lyrics.second, language) }
+                        .collectLatest { lyrics ->
+                            when {
+                                lyrics == null -> Unit
+                                lyrics.first != song -> _translation.value = LyricsTranslationState()
+                                else -> translate(lyrics.first, lyrics.second, language)
+                            }
+                        }
                 }
         }
     }

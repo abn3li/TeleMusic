@@ -220,14 +220,14 @@ class AppSettingsStore(context: Context) {
         get() = prefs.getStringSet(KEY_LYRICS_SOURCES_OFF, emptySet()).orEmpty().toSet()
         set(value) = prefs.edit().putStringSet(KEY_LYRICS_SOURCES_OFF, value).apply()
 
-    // Lyrics translation: the Translate button's state, and the language from Settings. Flows,
-    // so the open player follows a change at once.
-    private val _lyricsTranslationOn = MutableStateFlow(prefs.getBoolean(KEY_LYRICS_TRANSLATION_ON, false))
-    val lyricsTranslationOn: StateFlow<Boolean> = _lyricsTranslationOn
+    // Lyrics translation: the feature itself and the language (Settings). Flows, so the open
+    // player follows a change at once.
+    private val _lyricsTranslationEnabled = MutableStateFlow(prefs.getBoolean(KEY_LYRICS_TRANSLATION_ENABLED, true))
+    val lyricsTranslationEnabled: StateFlow<Boolean> = _lyricsTranslationEnabled
 
-    fun setLyricsTranslationOn(on: Boolean) {
-        prefs.edit().putBoolean(KEY_LYRICS_TRANSLATION_ON, on).apply()
-        _lyricsTranslationOn.value = on
+    fun setLyricsTranslationEnabled(enabled: Boolean) {
+        prefs.edit().putBoolean(KEY_LYRICS_TRANSLATION_ENABLED, enabled).apply()
+        _lyricsTranslationEnabled.value = enabled
     }
 
     private val _lyricsTranslationLanguage = MutableStateFlow(
@@ -287,7 +287,7 @@ class AppSettingsStore(context: Context) {
 
     companion object {
         private const val KEY_LYRICS_SOURCES_OFF = "lyrics_sources_off"
-        private const val KEY_LYRICS_TRANSLATION_ON = "lyrics_translation_on"
+        private const val KEY_LYRICS_TRANSLATION_ENABLED = "lyrics_translation_enabled"
         private const val KEY_LYRICS_TRANSLATION_LANGUAGE = "lyrics_translation_language"
         private const val KEY_HOME_TELEGRAM = "home_feed_telegram"
         private const val KEY_HOME_YOUTUBE = "home_feed_youtube"
