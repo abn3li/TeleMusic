@@ -17,6 +17,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -48,8 +49,14 @@ internal fun LyricsSourceDialog(viewModel: NowPlayingViewModel, song: SongEntity
         onDismiss = onDismiss,
         actions = listOf(AlertAction("Done", bold = true, onClick = onDismiss))
     ) {
+        // Only the sources switched on in Settings > Now Playing > Lyrics Sources.
+        val context = androidx.compose.ui.platform.LocalContext.current
+        val shown = remember {
+            val off = (context.applicationContext as com.abn3li.telemusic.TgMusicApp).settingsStore.lyricsSourcesOff
+            LyricsProvider.entries.filter { it.name !in off }
+        }
         Column(Modifier.fillMaxWidth()) {
-            LyricsProvider.entries.forEachIndexed { index, provider ->
+            shown.forEachIndexed { index, provider ->
                 if (index > 0) Box(Modifier.fillMaxWidth().height(0.5.dp).background(Color.White.copy(alpha = 0.12f)))
                 val busy = source.loading != null
                 Row(

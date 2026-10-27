@@ -70,6 +70,14 @@ data class NowPlayingUiState(
     val errorMessage: String? = null
 )
 
+/** The lyrics' translation: [lines] maps each lyric line to its translation while [on]. */
+data class LyricsTranslationState(
+    val on: Boolean = false,
+    val lines: Map<String, String> = emptyMap(),
+    val loading: Boolean = false,
+    val failed: Boolean = false
+)
+
 /** The Lyrics source picker: where the lyrics on screen came from, which source is being asked
  * right now, and the outcome of the last ask. */
 data class LyricsSourceState(
@@ -348,10 +356,75 @@ class NowPlayingViewModel(
             }
     }
 
+    private val app = context.applicationContext as com.abn3li.telemusic.TgMusicApp
+
+    // Translation is fetched only while the lyrics page is on screen: songs passing by in the
+    // background cost no requests.
+    private val lyricsVisible = MutableStateFlow(false)
+    private val translationRetry = MutableStateFlow(0)
+    private val _translation = MutableStateFlow(LyricsTranslationState())
+    val translation: StateFlow<LyricsTranslationState> = _translation
+
+    fun setLyricsVisible(visible: Boolean) { lyricsVisible.value = visible }
+
+    fun toggleTranslation() = app.settingsStore.setLyricsTranslationOn(!app.settingsStore.lyricsTranslationOn.value)
+
+    fun retryTranslation() { translationRetry.value++ }
+
+    /** The lines to translate for what's on screen: the song and its lyrics, synced or plain. */
+    private fun lyricsToTranslate(state: NowPlayingUiState): Pair<Long, List<String>>? {
+        val song = state.song ?: return null
+        val lines = state.lyricLines.map { it.text }.ifEmpty { song.lyricsPlain?.lines().orEmpty() }
+        return if (lines.any { it.isNotBlank() }) song.telegramMessageId to lines else null
+    }
+
+    /** Follows the Translate button, the language, and - only while translating with the lyrics
+     * on screen - the lyrics shown. Off or out of sight, nothing here runs as songs play. */
+    private fun followLyricsTranslation() {
+        viewModelScope.launch {
+            combine(
+                app.settingsStore.lyricsTranslationOn,
+                app.settingsStore.lyricsTranslationLanguage,
+                lyricsVisible,
+                translationRetry
+            ) { on, language, visible, _ -> Triple(on, language, visible) }
+                .collectLatest { (on, language, visible) ->
+                    if (!on) {
+                        _translation.value = LyricsTranslationState()
+                        return@collectLatest
+                    }
+                    // Out of sight: keep what's shown, fetch nothing.
+                    if (!visible) return@collectLatest
+                    _uiState
+                        // The position ticks several times a second; only new lyrics matter.
+                        .distinctUntilChanged { old, new ->
+                            old.song?.telegramMessageId == new.song?.telegramMessageId &&
+                                old.lyricLines === new.lyricLines && old.song?.lyricsPlain == new.song?.lyricsPlain
+                        }
+                        .map(::lyricsToTranslate)
+                        .distinctUntilChanged()
+                        .collectLatest { lyrics -> if (lyrics != null) translate(lyrics.first, lyrics.second, language) }
+                }
+        }
+    }
+
+    private suspend fun translate(songId: Long, lines: List<String>, language: String) {
+        _translation.value = LyricsTranslationState(on = true, loading = true)
+        _translation.value = try {
+            LyricsTranslationState(on = true, lines = app.lyricsTranslator.translate(songId.toString(), lines, language))
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            android.util.Log.w("NowPlayingVM", "Lyrics translation failed: ${e.message}")
+            LyricsTranslationState(on = true, failed = true)
+        }
+    }
+
     init {
         // Keeps position/duration/isPlaying in sync while playing (it stops when paused - see
         // startPositionTicker); song changes are always driven explicitly below.
         startPositionTicker()
+        followLyricsTranslation()
 
         // Shuffle, repeat and Like can also change from the home-screen widget. Both are
         // followed as events - a queue mode change, or the library table changing - never polled.

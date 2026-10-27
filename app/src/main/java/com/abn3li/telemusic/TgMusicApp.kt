@@ -15,6 +15,7 @@ import com.abn3li.telemusic.playback.PlaybackController
 import com.abn3li.telemusic.playback.PlaybackQueue
 import com.abn3li.telemusic.repository.LocalAudioImporter
 import com.abn3li.telemusic.repository.LyricsRepository
+import com.abn3li.telemusic.repository.LyricsTranslator
 import com.abn3li.telemusic.repository.MetadataRepository
 import com.abn3li.telemusic.repository.MusicRepository
 import com.abn3li.telemusic.repository.ThumbnailGenerator
@@ -29,6 +30,7 @@ class TgMusicApp : Application(), ImageLoaderFactory {
     internal val flacCache by lazy { com.abn3li.telemusic.data.quality.FlacCache(java.io.File(filesDir, "flac_cache")) }
     lateinit var tdlibManager: TdlibManager; private set
     lateinit var musicRepository: MusicRepository; private set
+    lateinit var lyricsTranslator: LyricsTranslator; private set
     lateinit var spotifyImporter: com.abn3li.telemusic.repository.SpotifyImporter; private set
     lateinit var spotifyAccount: com.abn3li.telemusic.data.spotify.SpotifyAccount; private set
     lateinit var spotifyDao: com.abn3li.telemusic.data.local.SpotifyDao; private set
@@ -123,6 +125,7 @@ class TgMusicApp : Application(), ImageLoaderFactory {
         )
         appScope.launch(Dispatchers.IO) { youtubeAccount.load() }
 
+        lyricsTranslator = LyricsTranslator(java.io.File(filesDir, "lyrics_translations"))
         musicRepository = MusicRepository(
             songDao = db.songDao(), playlistDao = db.playlistDao(), tdlibManager = tdlibManager,
             lyricsRepository = LyricsRepository(), metadataRepository = MetadataRepository(),

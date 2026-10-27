@@ -10,10 +10,8 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.Dispatchers
 import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.ui.geometry.Rect
 import com.abn3li.telemusic.ui.theme.SystemBarsState
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.navigationBars
@@ -38,7 +36,6 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -341,7 +338,6 @@ fun TgMusicNavGraph(navController: NavHostController = rememberNavController()) 
                         viewModel = libraryViewModel,
                         callbacks = libraryCallbacks,
                         onOpenSettings = { navController.navigate(Routes.SETTINGS) },
-                        onOpenSmartPlaylist = { kind -> navController.navigate(Routes.smartPlaylist(kind)) },
                         onOpenCollection = { c -> navController.navigate(Routes.youtubeBrowse(c.browseId, c.title, c.params)) },
                         onPlayTracks = { tracks, index -> playStreams(tracks, index, false) },
                         nowPlayingId = playerState.song?.telegramMessageId,

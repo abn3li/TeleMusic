@@ -8,7 +8,7 @@ import java.util.Locale
 import javax.xml.parsers.DocumentBuilderFactory
 
 /**
- * Turns TTML lyrics (Apple-Music-style, as BiniLyrics serves them) into what the rest of the app
+ * Turns TTML lyrics (Apple-Music-style) - or lines already timed ([fromTimedLines]) - into what the rest of the app
  * already stores: plain text, and LRC for the synced version. Word timing is kept as enhanced
  * LRC - `[mm:ss.xxx]<mm:ss.xxx>word <mm:ss.xxx>word<mm:ss.xxx>` - where each `<time>` is when
  * the text after it starts, and a tag right after a word marks when it ends (written only where
@@ -21,6 +21,21 @@ import javax.xml.parsers.DocumentBuilderFactory
 internal object TtmlLyrics {
 
     class Converted(val plain: String, val synced: String?)
+
+    /** A word (or syllable) with its times; [spaceAfter] when a space follows it in the line. */
+    class TimedWord(val text: String, val beginMs: Long, val endMs: Long?, val spaceAfter: Boolean)
+
+    /** A line with its times and, when timed word by word, its [words]. */
+    class TimedLine(val beginMs: Long, val endMs: Long?, val text: String, val words: List<TimedWord>)
+
+    /** [lines] as plain text and LRC, written the same way as converted TTML. */
+    fun fromTimedLines(lines: List<TimedLine>): Converted? = build(lines.map { line ->
+        val pieces = if (line.words.isEmpty()) listOf<Piece>(Piece.Gap(line.text))
+        else line.words.flatMap { word ->
+            listOfNotNull(Piece.Word(word.text, word.beginMs, word.endMs), if (word.spaceAfter) Piece.Gap(" ") else null)
+        }
+        Line(line.beginMs, line.endMs, pieces)
+    }.filter { it.text.isNotEmpty() })
 
     // A line ending this long before the next one gets an empty line at its end, which shows
     // the countdown dots over the gap instead of leaving the last line lit through it.
@@ -67,6 +82,10 @@ internal object TtmlLyrics {
             Line(parseTime(p.getAttribute("begin")), parseTime(p.getAttribute("end")), mergeGaps(pieces))
                 .takeIf { it.text.isNotEmpty() }
         }
+        return build(lines)
+    }
+
+    private fun build(lines: List<Line>): Converted? {
         if (lines.isEmpty()) return null
 
         val plain = lines.joinToString("\n") { it.text }

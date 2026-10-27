@@ -64,6 +64,7 @@ fun LibraryHomeScreen(
     val artists by viewModel.artists.collectAsState()
     val albums by viewModel.albums.collectAsState()
     val pinned by viewModel.pinnedPlaylists.collectAsState()
+    val smartCounts by viewModel.smartCounts.collectAsState()
     val actions = rememberLibrarySongActions(viewModel, callbacks.onPlayNext, callbacks.onOpenArtist, callbacks.onOpenAlbum)
     var createPlaylist by rememberSaveable { mutableStateOf(false) }
 
@@ -84,10 +85,19 @@ fun LibraryHomeScreen(
                 LibraryDivider(start = 60.dp)
             }
         }
-        item("device_music", contentType = "library_shortcuts") {
-            Row(Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 22.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                LibraryDeviceButton("Downloads", Icons.Rounded.FileDownload, onOpenDownloads, Modifier.weight(1f))
-                LibraryDeviceButton("Local music", Icons.Outlined.Folder, onOpenLocalMusic, Modifier.weight(1f))
+        // Where the songs come from: the built-in playlists and the phone's own music.
+        item("collections", contentType = "library_shortcuts") {
+            Column(Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 22.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    LibraryCollectionButton("Liked", smartCounts.liked, SmartPlaylistKind.LIKED.icon(),
+                        { onOpenSmartPlaylist(SmartPlaylistKind.LIKED) }, Modifier.weight(1f))
+                    LibraryCollectionButton("Telegram", smartCounts.telegram, SmartPlaylistKind.TELEGRAM.icon(),
+                        { onOpenSmartPlaylist(SmartPlaylistKind.TELEGRAM) }, Modifier.weight(1f))
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    LibraryCollectionButton("Downloads", smartCounts.downloaded, Icons.Rounded.FileDownload, onOpenDownloads, Modifier.weight(1f))
+                    LibraryCollectionButton("Local music", null, Icons.Outlined.Folder, onOpenLocalMusic, Modifier.weight(1f))
+                }
             }
         }
         if (pinned.isNotEmpty()) {
@@ -174,15 +184,18 @@ private fun LibraryCategoryRow(icon: ImageVector, label: String, count: Int, onC
     }
 }
 
+/** A source of songs under the Library rows: red icon, name, and how many songs (when known). */
 @Composable
-private fun LibraryDeviceButton(label: String, icon: ImageVector, onClick: () -> Unit, modifier: Modifier) {
+private fun LibraryCollectionButton(label: String, count: Int?, icon: ImageVector, onClick: () -> Unit, modifier: Modifier) {
     val shape = RoundedCornerShape(12.dp)
-    Row(modifier.heightIn(min = 50.dp).border(0.75.dp, ink.copy(alpha = 0.18f), shape)
-        .clip(shape).background(ink.copy(alpha = 0.025f)).clickable(onClick = onClick).padding(horizontal = 12.dp, vertical = 12.dp),
-        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.Center) {
-        Icon(icon, null, tint = ink.copy(alpha = 0.65f), modifier = Modifier.size(24.dp))
-        Spacer(Modifier.width(10.dp))
-        Text(label, color = ink, fontSize = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+    Row(modifier.heightIn(min = 54.dp).border(0.75.dp, ink.copy(alpha = 0.18f), shape)
+        .clip(shape).background(ink.copy(alpha = 0.025f)).clickable(onClick = onClick).padding(horizontal = 14.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically) {
+        Icon(icon, null, tint = AppAccent, modifier = Modifier.size(22.dp))
+        Spacer(Modifier.width(11.dp))
+        Text(label, color = ink, fontSize = 15.sp, fontWeight = FontWeight.Medium, maxLines = 1,
+            overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+        if (count != null) Text(count.toString(), color = ink.copy(alpha = 0.45f), fontSize = 13.sp, modifier = Modifier.padding(start = 6.dp))
     }
 }
 

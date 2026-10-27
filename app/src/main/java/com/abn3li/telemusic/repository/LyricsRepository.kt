@@ -7,12 +7,17 @@ import android.util.Log
 import com.google.gson.Gson
 import com.abn3li.telemusic.data.remote.LrcLibResponse
 import com.abn3li.telemusic.data.remote.NetworkModule
+import com.abn3li.telemusic.data.browse.BrowseParser
+import com.abn3li.telemusic.data.browse.InnertubeBrowseClient
+import org.json.JSONObject
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.coroutines.selects.select
+import java.util.concurrent.atomic.AtomicReference
 import okhttp3.Call
 import okhttp3.Callback
 import okhttp3.Request
@@ -29,11 +34,12 @@ data class LyricsResult(val plain: String?, val synced: String?, val provider: L
 
 /** Where lyrics come from - the Lyrics source picker in Now Playing lists these. */
 enum class LyricsProvider(val label: String, val detail: String) {
-    BINI_LYRICS("BiniLyrics", "Word by word when available"),
+    BETTER_LYRICS("BetterLyrics", "Word by word when available"),
+    LYRICS_PLUS("LyricsPlus", "Word by word when available"),
     LRCLIB("LRCLIB", "Synced when available"),
     KUGOU("KuGou", "Synced"),
-    LYRICS_OVH("lyrics.ovh", "Plain text"),
-    GOOGLE("Google", "Plain text");
+    YOUTUBE_MUSIC("YouTube Music", "Plain text"),
+    LYRICS_OVH("lyrics.ovh", "Plain text");
 
     companion object {
         /** The provider saved under [name] (LyricsCacheEntity.provider), if still known. */
@@ -41,9 +47,9 @@ enum class LyricsProvider(val label: String, val detail: String) {
     }
 }
 
-/** One automatic search. No [result] with [allAnswered] means no lyrics anywhere: BiniLyrics,
- * LRCLIB, KuGou and lyrics.ovh each answered "nothing". Without it some source never got through (offline, or
- * blocked where you are), which says nothing about the song. (Google, a scrape, isn't counted.) */
+/** One automatic search. No [result] with [allAnswered] means no lyrics anywhere: every source
+ * answered "nothing". Without it some source never
+ * got through (offline, or blocked where you are), which says nothing about the song. */
 data class LyricsSearch(val result: LyricsResult?, val allAnswered: Boolean)
 
 /**
@@ -51,26 +57,19 @@ data class LyricsSearch(val result: LyricsResult?, val allAnswered: Boolean)
  * Playing) - never during library sync/metadata enrichment. See
  * MusicRepository.fetchLyricsForSong(), the sole caller of fetchLyrics() below.
  *
- * Providers are tried in this order, each one free and requiring no API key - and, unlike
- * what was here before, each one actually verified reachable (via curl) before being wired in:
- * 0. BiniLyrics (lyrics-api.binimum.org, now served from lrc.red) - community lyrics as TTML,
- *    many timed word by word, Arabic included. Its synced lyrics win over everything (word-timed
- *    ones are the only ones Now Playing sweeps word by word, and its line-timed ones are as good
- *    as anyone's). New searches there sometimes fail (503) or hang, so it gets a short
- *    time budget and the others run meanwhile. (Better Lyrics, the other word-synced API
- *    checked, answers only songs it already has cached without an API key - left out.)
- * 1. LRCLIB (lrclib.net) - open community database, line-synced (LRC) capable.
- * 2. KuGou (kugou.com) - a Chinese catalogue that nonetheless carries a large amount of
- *    English/Western music LRCLIB doesn't have. Also line-synced, so it's tried before any
- *    plain-only source - a synced match from here beats a plain one from anywhere else.
- * 3. lyrics.ovh - plain lyrics only, a real, long-standing free fallback for whatever the two
- *    synced sources above don't have. (Two earlier candidates here, Lyrist and a "LyricsPlus"
- *    wrapper, were verified dead via curl before ever landing in this file: one is blocked by
- *    a Vercel bot checkpoint that returns an HTML page instead of JSON, the other's deployment
- *    no longer exists at all - so don't reach for either as a "just add it back" fix later
- *    without re-verifying they're alive.)
- * 4. Google search scrape - last resort; fragile (HTML structure can change without notice)
- *    and plain-text only, kept only because it occasionally finds something the others miss.
+ * Every source is asked at the same time, and the answers taken in this order:
+ * 1. Word by word: BetterLyrics (Apple Music's own timing, matched by title, artist and length)
+ *    and LyricsPlus (syllable timing; it runs on several servers, all asked at once - the first
+ *    real answer wins and that server is asked first next time).
+ * 2. Line by line: those two, then LRCLIB (lrclib.net) and KuGou.
+ * 3. Plain text: LRCLIB, YouTube Music (the song's Lyrics tab - by its own video for a YouTube
+ *    song) and lyrics.ovh.
+ *
+ * BetterLyrics and LyricsPlus are searched by name and length, and don't always say which song
+ * they answered with - a close length once gave another song by the same singer. So their words
+ * are checked against lyrics found by the song's name and artist (LRCLIB, YouTube Music) when
+ * there are any ([sameLyrics]); otherwise they must at least be in the song's own script.
+ * LRCLIB, KuGou and YouTube Music check the name and artist themselves ([SongMatch]).
  *
  * Not included: Musixmatch. Getting synced lyrics out of it means reimplementing the HMAC
  * signing scheme baked into their web player's own JS to call their un-metered internal API
@@ -82,12 +81,160 @@ data class LyricsSearch(val result: LyricsResult?, val allAnswered: Boolean)
 private val AUDIO_EXTENSION = Regex("""(?i)\.(mp3|m4a|flac|ogg|wav|aac|opus|webm)$""")
 private val WHITESPACE = Regex("""\s+""")
 
-private const val BINI_SEARCH_URL = "https://lyrics-api.binimum.org/"
-// BiniLyrics sometimes hangs on a new search; past this the others' answer is used.
-private const val BINI_BUDGET_MS = 6_000L
-private const val BINI_DURATION_SLACK_S = 5
+/**
+ * Whether a source's result is the song asked for. Search results list every song sharing a word
+ * with the title, and the first one with lyrics used to win: an Arabic song got another song's
+ * words. Now the title and artist must match ([LookupMatcher] - Arabic spellings folded, the
+ * length when the artist is written in another script). Synced lines also need the same
+ * recording: within [SYNC_SLACK_S] seconds of its length, and live only for a live song -
+ * otherwise only the plain words are used.
+ */
+internal class SongMatch(title: String, artist: String, private val seconds: Int?) {
+    private val wanted = LookupMatcher.clean(title, artist, seconds ?: 0)
+    private val live = LIVE.containsMatchIn(title)
+    private val arabicTitle = hasArabic(wanted.title)
 
-class LyricsRepository {
+    /** The tidied title and artist, as a store search. */
+    val searchTerm: String get() = LookupMatcher.term(wanted)
+
+    fun accepts(title: String?, artist: String?, durationSeconds: Int?): Boolean =
+        LookupMatcher.best(listOf(LookupMatcher.Candidate(title, artist, durationSeconds?.takeIf { it > 0 })), wanted) != null
+
+    /** [accepts], or - for the search's own top result - a name written in the other script
+     * ("تملي معاك" found as "Tamally Maak"), which can't be compared: then its length must be
+     * within [CROSS_SCRIPT_SLACK_S] seconds. */
+    fun acceptsTop(title: String?, artist: String?, durationSeconds: Int?): Boolean =
+        accepts(title, artist, durationSeconds) ||
+            (title != null && hasArabic(title) != arabicTitle && seconds != null && seconds > 0 &&
+                durationSeconds != null && durationSeconds > 0 && abs(durationSeconds - seconds) <= CROSS_SCRIPT_SLACK_S)
+
+    /** Results in the source's own order: the first one gets [acceptsTop], the rest [accepts]. */
+    fun <T> sameSong(results: List<T>, title: (T) -> String?, artist: (T) -> String?, seconds: (T) -> Int?): List<T> =
+        results.filterIndexed { index, it ->
+            if (index == 0) acceptsTop(title(it), artist(it), seconds(it)) else accepts(title(it), artist(it), seconds(it))
+        }
+
+    fun timingFits(title: String?, durationSeconds: Int?): Boolean =
+        LIVE.containsMatchIn(title.orEmpty()) == live &&
+            (seconds == null || seconds <= 0 || durationSeconds == null || durationSeconds <= 0 || abs(durationSeconds - seconds) <= SYNC_SLACK_S)
+}
+
+private fun hasArabic(s: String) = s.any { it in '\u0600'..'\u06FF' }
+private const val CROSS_SCRIPT_SLACK_S = 3
+private val LIVE = Regex("""(?i)\blive\b|لايف|حفلة|مباشر""")
+private const val SYNC_SLACK_S = 6
+
+/** The Lyrics tab's browseId ("MPLY...") in a YouTube Music `next` answer, if the song has one. */
+internal fun youTubeLyricsBrowseId(next: JSONObject): String? {
+    val tabs = next.optJSONObject("contents")?.optJSONObject("singleColumnMusicWatchNextResultsRenderer")
+        ?.optJSONObject("tabbedRenderer")?.optJSONObject("watchNextTabbedResultsRenderer")?.optJSONArray("tabs") ?: return null
+    for (i in 0 until tabs.length()) {
+        val id = tabs.optJSONObject(i)?.optJSONObject("tabRenderer")?.optJSONObject("endpoint")
+            ?.optJSONObject("browseEndpoint")?.optString("browseId").orEmpty()
+        if (id.startsWith("MPLY")) return id
+    }
+    return null
+}
+
+/** The lyrics text in YouTube Music's answer for that tab, if it has any. */
+internal fun youTubeLyricsText(browse: JSONObject): String? {
+    val sections = browse.optJSONObject("contents")?.optJSONObject("sectionListRenderer")?.optJSONArray("contents") ?: return null
+    for (i in 0 until sections.length()) {
+        val runs = sections.optJSONObject(i)?.optJSONObject("musicDescriptionShelfRenderer")
+            ?.optJSONObject("description")?.optJSONArray("runs") ?: continue
+        val text = (0 until runs.length()).joinToString("") { runs.optJSONObject(it)?.optString("text").orEmpty() }.trim()
+        if (text.isNotEmpty()) return text
+    }
+    return null
+}
+
+private const val BETTER_LYRICS_URL = "https://lyrics-api.boidu.dev/getLyrics"
+private val LYRICS_PLUS_HOSTS = listOf(
+    "https://lyricsplus.prjktla.my.id",
+    "https://lyricsplus.atomix.one",
+    "https://lyricsplus.binimum.org",
+    "https://lyricsplus.prjktla.workers.dev",
+    "https://lyricsplus-seven.vercel.app",
+    "https://lyrics-plus-backend.vercel.app"
+)
+// How long the check of an unnamed answer waits on YouTube Music's lyrics to compare with.
+private const val REFERENCE_WAIT_MS = 4_000L
+// A word-timed source that hangs holds the others' answer back; past this it's given up on.
+private const val WORD_SOURCE_BUDGET_MS = 6_000L
+
+/** One request's outcome: the HTTP code (-1 when it never got an answer) and the body when 200. */
+private class HttpAnswer(val code: Int, val body: String?) {
+    /** Answered, and the answer was "not here" or the lyrics: either says something about the song. */
+    val answered: Boolean get() = code == 200 || code == 401 || code == 404
+}
+
+private val LRC_TAG = Regex("""\[[^\]]*]|<[^>]*>""")
+private val NOT_LETTERS = Regex("""[^\p{L}\p{N}]+""")
+private const val SAME_LYRICS_SHARE = 0.35
+
+/** Lyrics as a set of comparable words: tags out, case and Arabic spellings folded. */
+private fun lyricWords(text: String): Set<String> = text.replace(LRC_TAG, " ").lowercase()
+    .map { when (it) { 'أ', 'إ', 'آ' -> 'ا'; 'ة' -> 'ه'; 'ى' -> 'ي'; else -> it } }.joinToString("")
+    .split(NOT_LETTERS).filter { it.length >= 2 }.toSet()
+
+/**
+ * Whether [candidate] is this song's lyrics, for a source that doesn't name what it answered:
+ * enough of its words shared with [reference] (lyrics found by the song's name and artist), or,
+ * with nothing to compare, at least in the song's script - an Arabic title wants Arabic words.
+ */
+internal fun sameLyrics(candidate: String, reference: String?, title: String): Boolean {
+    val words = lyricWords(candidate)
+    if (words.isEmpty()) return false
+    val known = reference?.let(::lyricWords)?.takeIf { it.isNotEmpty() }
+        ?: return !mostlyArabic(title) || mostlyArabic(candidate)
+    if (mostlyArabic(candidate) != mostlyArabic(reference)) return false
+    return words.count { it in known } >= SAME_LYRICS_SHARE * min(words.size, known.size)
+}
+
+/**
+ * A LyricsPlus answer as lyrics: syllables back into enhanced LRC (a syllable ending in a space
+ * ends its word), or line times when it only has those. Null when it names another song.
+ */
+internal fun lyricsPlusResult(json: JSONObject, match: SongMatch): LyricsResult? {
+    val named = json.optJSONObject("metadata")
+    val namedTitle = named?.optString("title")?.takeIf { it.isNotBlank() }
+    if (namedTitle != null && !match.acceptsTop(namedTitle, named.optString("artist").takeIf { it.isNotBlank() }, null)) return null
+    val lines = json.optJSONArray("lyrics") ?: return null
+    val timed = (0 until lines.length()).mapNotNull { i ->
+        val line = lines.optJSONObject(i) ?: return@mapNotNull null
+        if (!line.has("time")) return@mapNotNull null
+        val begin = line.optLong("time")
+        val end = line.optLong("duration", 0L).takeIf { it > 0 }?.let { begin + it }
+        val syllables = line.optJSONArray("syllabus")
+        val words = (0 until (syllables?.length() ?: 0)).mapNotNull { j ->
+            val syllable = syllables!!.optJSONObject(j) ?: return@mapNotNull null
+            val text = syllable.optString("text")
+            if (text.isBlank() || !syllable.has("time")) return@mapNotNull null
+            val start = syllable.optLong("time")
+            TtmlLyrics.TimedWord(text.trimEnd(), start, syllable.optLong("duration", 0L).takeIf { it > 0 }?.let { start + it },
+                spaceAfter = text.last().isWhitespace())
+        }
+        val text = line.optString("text").trim()
+        if (words.isEmpty() && text.isEmpty()) null else TtmlLyrics.TimedLine(minOf(begin, words.firstOrNull()?.beginMs ?: begin), end, text, words)
+    }.sortedBy { it.beginMs }
+    val converted = TtmlLyrics.fromTimedLines(timed) ?: return null
+    return LyricsResult(plain = converted.plain.takeIf { it.isNotBlank() }, synced = converted.synced)
+}
+
+/** Written mostly in Arabic letters - one Arabic word ("Bismillah") doesn't make a song Arabic. */
+private fun mostlyArabic(text: String): Boolean {
+    var arabic = 0
+    var other = 0
+    for (c in text) if (c.isLetter()) { if (c in '؀'..'ۿ') arabic++ else other++ }
+    return arabic > other
+}
+
+/** A result's words as text: the plain lyrics, or the synced ones without their times. */
+private fun LyricsResult.text(): String? = plain ?: synced?.replace(LRC_TAG, " ")
+
+class LyricsRepository(
+    private val innertube: InnertubeBrowseClient = InnertubeBrowseClient()
+) {
 
     private val gson = Gson()
 
@@ -101,34 +248,86 @@ class LyricsRepository {
      * outside of the button press itself (that boundary hasn't changed: this whole function is
      * still only ever called from fetchLyricsForSong(), on-demand).
      */
-    suspend fun fetchLyrics(title: String, artist: String, durationSeconds: Int?): LyricsSearch {
+    suspend fun fetchLyrics(
+        title: String,
+        artist: String,
+        durationSeconds: Int?,
+        videoId: String? = null,
+        // The sources switched on in Settings. With any off, "none anywhere" is never claimed:
+        // the song is searched again once they're back on.
+        enabled: Set<LyricsProvider> = LyricsProvider.entries.toSet()
+    ): LyricsSearch {
         val reached = Reached()
-        val result = searchAll(title, artist, durationSeconds, reached)
-        return LyricsSearch(result, reached.bini.get() && reached.lrcLib.get() && reached.kuGou.get() && reached.ovh.get())
+        val result = searchAll(title, artist, durationSeconds, videoId, enabled, reached)
+        return LyricsSearch(result, enabled.size == LyricsProvider.entries.size && reached.better.get() &&
+            reached.plus.get() && reached.lrcLib.get() && reached.kuGou.get() && reached.youtube.get() && reached.ovh.get())
     }
 
     /** Which sources actually answered during one search (see LyricsSearch.allAnswered). */
     private class Reached {
-        val bini = AtomicBoolean(false)
+        val better = AtomicBoolean(false)
+        val plus = AtomicBoolean(false)
         val lrcLib = AtomicBoolean(false)
         val kuGou = AtomicBoolean(false)
+        val youtube = AtomicBoolean(false)
         val ovh = AtomicBoolean(false)
     }
 
-    private suspend fun searchAll(title: String, artist: String, durationSeconds: Int?, reached: Reached): LyricsResult? = coroutineScope {
+    private suspend fun searchAll(
+        title: String,
+        artist: String,
+        durationSeconds: Int?,
+        videoId: String?,
+        enabled: Set<LyricsProvider>,
+        reached: Reached
+    ): LyricsResult? = coroutineScope {
         val (cleanTitle, cleanArtist) = sanitizeTitleAndArtist(title, artist)
         Log.d("LyricsRepository", "Searching lyrics for '$cleanTitle' by '$cleanArtist'")
 
-        val biniDeferred = async { fetchBiniLyrics(cleanTitle, cleanArtist, durationSeconds, reached.bini) }
-        val lrcLibDeferred = async { fetchLrcLibLyrics(cleanTitle, cleanArtist, durationSeconds, reached.lrcLib) }
-        val kuGouDeferred = async { fetchKuGouLyrics(cleanTitle, cleanArtist, durationSeconds, reached.kuGou) }
-        val ovhDeferred = async { fetchLyricsOvhLyrics(cleanTitle, cleanArtist, reached.ovh) }
+        fun <T> ifOn(provider: LyricsProvider, fetch: suspend () -> T?) = async { if (provider in enabled) fetch() else null }
+        val betterDeferred = ifOn(LyricsProvider.BETTER_LYRICS) { fetchBetterLyrics(cleanTitle, cleanArtist, durationSeconds, reached.better) }
+        val plusDeferred = ifOn(LyricsProvider.LYRICS_PLUS) { fetchLyricsPlus(cleanTitle, cleanArtist, durationSeconds, reached.plus) }
+        val lrcLibDeferred = ifOn(LyricsProvider.LRCLIB) { fetchLrcLibLyrics(cleanTitle, cleanArtist, durationSeconds, reached.lrcLib) }
+        val kuGouDeferred = ifOn(LyricsProvider.KUGOU) { fetchKuGouLyrics(cleanTitle, cleanArtist, durationSeconds, reached.kuGou) }
+        val youtubeDeferred = ifOn(LyricsProvider.YOUTUBE_MUSIC) {
+            fetchYouTubeMusicLyrics(cleanTitle, cleanArtist, durationSeconds, videoId, reached.youtube)
+        }
+        val ovhDeferred = ifOn(LyricsProvider.LYRICS_OVH) { fetchLyricsOvhLyrics(cleanTitle, cleanArtist, reached.ovh) }
+
+        // Lyrics found by the song's name and artist - what the unnamed answers are checked
+        // against. Waited for only once one of those has something.
+        var referenceRead = false
+        var reference: String? = null
+        suspend fun reference(): String? {
+            if (!referenceRead) {
+                reference = lrcLibDeferred.await()?.text()
+                    ?: withTimeoutOrNull(REFERENCE_WAIT_MS) { youtubeDeferred.await() }?.text()
+                referenceRead = true
+            }
+            return reference
+        }
+        // Nor do they say which recording they timed: a live song keeps only their words.
+        val live = LIVE.containsMatchIn(cleanTitle)
+        suspend fun checked(result: LyricsResult?, provider: LyricsProvider): LyricsResult? {
+            val text = result?.text() ?: return null
+            if (sameLyrics(text, reference(), cleanTitle)) {
+                return result.copy(synced = result.synced.takeUnless { live }, plain = result.plain ?: text, provider = provider)
+            }
+            Log.d("LyricsRepository", "[${provider.label}] Answered with another song's lyrics - not used")
+            return null
+        }
 
         try {
-            val biniResult = biniDeferred.await()
-            if (biniResult?.synced != null) {
-                Log.d("LyricsRepository", if (hasWordTiming(biniResult.synced)) "[BiniLyrics] Word-synced match" else "[BiniLyrics] Line-synced match")
-                return@coroutineScope biniResult.copy(provider = LyricsProvider.BINI_LYRICS)
+            val better = checked(betterDeferred.await(), LyricsProvider.BETTER_LYRICS)
+            val plus = checked(plusDeferred.await(), LyricsProvider.LYRICS_PLUS)
+            val unnamed = listOfNotNull(better, plus)
+            unnamed.firstOrNull { it.synced != null && hasWordTiming(it.synced) }?.let {
+                Log.d("LyricsRepository", "[${it.provider?.label}] Word-synced match")
+                return@coroutineScope it
+            }
+            unnamed.firstOrNull { it.synced != null }?.let {
+                Log.d("LyricsRepository", "[${it.provider?.label}] Line-synced match")
+                return@coroutineScope it
             }
 
             val lrcLibResult = lrcLibDeferred.await()
@@ -148,9 +347,15 @@ class LyricsRepository {
                 return@coroutineScope lrcLibResult.copy(provider = LyricsProvider.LRCLIB)
             }
 
-            if (biniResult != null) {
-                Log.d("LyricsRepository", "[BiniLyrics] Plain-only match")
-                return@coroutineScope biniResult.copy(provider = LyricsProvider.BINI_LYRICS)
+            unnamed.firstOrNull()?.let {
+                Log.d("LyricsRepository", "[${it.provider?.label}] Plain-only match")
+                return@coroutineScope it
+            }
+
+            val youtubeResult = youtubeDeferred.await()
+            if (youtubeResult != null) {
+                Log.d("LyricsRepository", "[YouTube Music] Plain match")
+                return@coroutineScope youtubeResult.copy(provider = LyricsProvider.YOUTUBE_MUSIC)
             }
 
             val ovhResult = ovhDeferred.await()
@@ -159,42 +364,32 @@ class LyricsRepository {
                 return@coroutineScope ovhResult.copy(provider = LyricsProvider.LYRICS_OVH)
             }
 
-            // Not raced with the rest: a plain-text scrape that's rarely reached (only when
-            // all three real providers above have nothing), so there's no latency to hide by
-            // starting it early, only bandwidth to waste on every single fetch if it were.
-            try {
-                val googleLyrics = fetchGoogleLyrics(cleanTitle, cleanArtist)
-                if (!googleLyrics.isNullOrBlank()) {
-                    Log.d("LyricsRepository", "[Google Search] Succeeded")
-                    return@coroutineScope LyricsResult(googleLyrics, null, LyricsProvider.GOOGLE)
-                }
-            } catch (e: Exception) {
-                Log.w("LyricsRepository", "[Google Search] Failed: ${e.message}")
-            }
-
             null
         } finally {
             // Whichever of these lost the race is no longer worth waiting on, and
             // coroutineScope will not return while they're still running.
-            biniDeferred.cancel()
+            betterDeferred.cancel()
+            plusDeferred.cancel()
             lrcLibDeferred.cancel()
             kuGouDeferred.cancel()
+            youtubeDeferred.cancel()
             ovhDeferred.cancel()
         }
     }
 
     /** Asks only [provider] - the Lyrics source picker. [LyricsSearch.allAnswered] tells a real
      * "it has none" apart from "couldn't reach it" when nothing is found. */
-    suspend fun fetchFrom(provider: LyricsProvider, title: String, artist: String, durationSeconds: Int?): LyricsSearch {
+    suspend fun fetchFrom(provider: LyricsProvider, title: String, artist: String, durationSeconds: Int?, videoId: String? = null): LyricsSearch {
         val (cleanTitle, cleanArtist) = sanitizeTitleAndArtist(title, artist)
         val reached = AtomicBoolean(false)
         val result = try {
             when (provider) {
-                LyricsProvider.BINI_LYRICS -> fetchBiniLyrics(cleanTitle, cleanArtist, durationSeconds, reached)
+                LyricsProvider.BETTER_LYRICS -> fetchBetterLyrics(cleanTitle, cleanArtist, durationSeconds, reached)
+                LyricsProvider.LYRICS_PLUS -> fetchLyricsPlus(cleanTitle, cleanArtist, durationSeconds, reached)
                 LyricsProvider.LRCLIB -> fetchLrcLibLyrics(cleanTitle, cleanArtist, durationSeconds, reached)
                 LyricsProvider.KUGOU -> fetchKuGouLyrics(cleanTitle, cleanArtist, durationSeconds, reached)
+                LyricsProvider.YOUTUBE_MUSIC -> fetchYouTubeMusicLyrics(cleanTitle, cleanArtist, durationSeconds, videoId, reached)
                 LyricsProvider.LYRICS_OVH -> fetchLyricsOvhLyrics(cleanTitle, cleanArtist, reached)
-                LyricsProvider.GOOGLE -> fetchGoogleLyrics(cleanTitle, cleanArtist, reached)?.takeIf { it.isNotBlank() }?.let { LyricsResult(it, null) }
             }
         } catch (e: CancellationException) {
             throw e
@@ -220,71 +415,82 @@ class LyricsRepository {
         return "${tidy(title)}|${tidy(artist)}"
     }
 
-    /**
-     * BiniLyrics: search by title and artist, pick the best entry, download its TTML. Entries
-     * with no timing are skipped (they're DJ mixes and the like), as is any cut more than
-     * [BINI_DURATION_SLACK_S] seconds off the track's own length - the search lists remixes and
-     * live versions too. Among the rest, a word-timed one wins over a line-timed one only when
-     * the length says it's the same recording; without a length, the search's own order does.
-     */
-    private suspend fun fetchBiniLyrics(
+    /** BetterLyrics: one request by title, artist and length, answered with Apple Music's TTML.
+     * It answers 401 when it has nothing that fits - a real "not here". */
+    private suspend fun fetchBetterLyrics(
         title: String,
         artist: String,
         durationSeconds: Int?,
         reached: AtomicBoolean? = null
     ): LyricsResult? = withContext(Dispatchers.IO) {
-        withTimeoutOrNull(BINI_BUDGET_MS) { fetchBiniLyricsNow(title, artist, durationSeconds, reached) }
-    }
-
-    private suspend fun fetchBiniLyricsNow(
-        title: String,
-        artist: String,
-        durationSeconds: Int?,
-        reached: AtomicBoolean?
-    ): LyricsResult? = run {
-        try {
-            val url = BINI_SEARCH_URL.toHttpUrl().newBuilder()
-                .addQueryParameter("track", title)
-                .addQueryParameter("artist", artist)
-                .build()
-            val body = httpGet(url.toString()) ?: return@run null
-            val response = runCatching { gson.fromJson(body, BiniSearchResponse::class.java) }.getOrNull()
-                ?: return@run null
-            val seconds = durationSeconds ?: -1
-            val usable = response.results.orEmpty()
-                .filter { it.timing_type == "word" || it.timing_type == "line" }
-                .filter { it.lyricsUrl?.startsWith("https://") == true }
-                .filter { seconds <= 0 || it.duration <= 0 || abs(it.duration - seconds) <= BINI_DURATION_SLACK_S }
-            val pick = (if (seconds > 0) usable.firstOrNull { it.timing_type == "word" } else null)
-                ?: usable.firstOrNull()
-            // Answered only once it's clear: nothing matching, or the lyrics downloaded. Found but
-            // not downloaded (failed, or out of time mid-download) says nothing about the song.
-            if (pick == null) {
-                reached?.set(true)
-                return@run null
+        withTimeoutOrNull(WORD_SOURCE_BUDGET_MS) {
+            try {
+                val url = BETTER_LYRICS_URL.toHttpUrl().newBuilder()
+                    .addQueryParameter("s", title)
+                    .addQueryParameter("a", artist)
+                    .apply { if (durationSeconds != null && durationSeconds > 0) addQueryParameter("d", durationSeconds.toString()) }
+                    .build()
+                val answer = httpCall(url.toString())
+                if (answer.answered) reached?.set(true)
+                val ttml = answer.body?.let { runCatching { JSONObject(it).optString("ttml") }.getOrNull() }
+                    ?.takeIf { it.isNotBlank() } ?: return@withTimeoutOrNull null
+                val converted = TtmlLyrics.convert(ttml) ?: return@withTimeoutOrNull null
+                LyricsResult(plain = converted.plain.takeIf { it.isNotBlank() }, synced = converted.synced)
+                    .takeIf { it.plain != null || it.synced != null }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.w("LyricsRepository", "[BetterLyrics] Failed: ${e.message}")
+                null
             }
-            val ttml = httpGet(pick.lyricsUrl!!) ?: return@run null
-            reached?.set(true)
-            val converted = TtmlLyrics.convert(ttml) ?: return@run null
-            LyricsResult(plain = converted.plain.takeIf { it.isNotBlank() }, synced = converted.synced)
-                .takeIf { it.plain != null || it.synced != null }
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: Exception) {
-            Log.w("LyricsRepository", "[BiniLyrics] Failed: ${e.message}")
-            null
         }
     }
 
-    private fun hasWordTiming(synced: String): Boolean = synced.contains("]<")
+    // The LyricsPlus server that last answered, asked first next time.
+    private val lyricsPlusHost = AtomicReference<String?>(null)
 
-    private data class BiniSearchResponse(val results: List<BiniEntry>? = null)
-    @Suppress("PropertyName")
-    private data class BiniEntry(
-        val duration: Int = -1,
-        val timing_type: String? = null,
-        val lyricsUrl: String? = null
-    )
+    /** LyricsPlus: every server asked at once; the first with lyrics wins. When it names the song
+     * it answered with, that name must be this song's. */
+    private suspend fun fetchLyricsPlus(
+        title: String,
+        artist: String,
+        durationSeconds: Int?,
+        reached: AtomicBoolean? = null
+    ): LyricsResult? = withTimeoutOrNull(WORD_SOURCE_BUDGET_MS) {
+        coroutineScope {
+            val hosts = lyricsPlusHost.get()?.let { first -> listOf(first) + LYRICS_PLUS_HOSTS.filterNot { it == first } }
+                ?: LYRICS_PLUS_HOSTS
+            val pending = hosts.map { host -> host to async(Dispatchers.IO) { lyricsPlusFrom(host, title, artist, durationSeconds) } }
+                .toMutableList()
+            try {
+                while (pending.isNotEmpty()) {
+                    val (host, answer) = select { pending.forEach { (host, job) -> job.onAwait { host to it } } }
+                    pending.removeAll { it.first == host }
+                    if (answer.answered) reached?.set(true)
+                    val body = answer.body ?: continue
+                    val result = runCatching { lyricsPlusResult(JSONObject(body), SongMatch(title, artist, durationSeconds)) }.getOrNull()
+                    if (result != null) {
+                        lyricsPlusHost.set(host)
+                        return@coroutineScope result
+                    }
+                }
+                null
+            } finally {
+                pending.forEach { it.second.cancel() }
+            }
+        }
+    }
+
+    private suspend fun lyricsPlusFrom(host: String, title: String, artist: String, durationSeconds: Int?): HttpAnswer {
+        val url = "$host/v2/lyrics/get".toHttpUrl().newBuilder()
+            .addQueryParameter("title", title)
+            .addQueryParameter("artist", artist)
+            .apply { if (durationSeconds != null && durationSeconds > 0) addQueryParameter("duration", durationSeconds.toString()) }
+            .build()
+        return httpCall(url.toString())
+    }
+
+    private fun hasWordTiming(synced: String): Boolean = synced.contains("]<")
 
     /** LRCLIB's exact-match endpoint needs a precise title/artist/duration match and 404s
      * otherwise (routine, not an error worth logging loudly) - falls back to its fuzzier
@@ -317,9 +523,11 @@ class LyricsRepository {
                 val results = NetworkModule.lrcLibApi.searchLyrics(trackName = title, artistName = artist)
                 // Only the broad search answering (found or not) counts as LRCLIB having answered.
                 reached?.set(true)
-                val bestMatch = results.firstOrNull { !it.syncedLyrics.isNullOrBlank() }
-                    ?: results.firstOrNull { !it.plainLyrics.isNullOrBlank() }
-                bestMatch?.toLyricsResultOrNull()
+                val match = SongMatch(title, artist, durationSeconds)
+                val same = match.sameSong(results, { it.trackName }, { it.artistName }, { it.duration?.toInt() })
+                same.firstOrNull { !it.syncedLyrics.isNullOrBlank() && match.timingFits(it.trackName, it.duration?.toInt()) }
+                    ?.toLyricsResultOrNull()
+                    ?: same.firstOrNull { !it.plainLyrics.isNullOrBlank() }?.toLyricsResultOrNull(withSynced = false)
             } catch (searchException: Exception) {
                 Log.w("LyricsRepository", "[LRCLIB] Search failed: ${searchException.message}")
                 null
@@ -330,9 +538,9 @@ class LyricsRepository {
             searchMatch?.takeIf { it.synced != null } ?: exactMatch ?: searchMatch
         }
 
-    private fun LrcLibResponse.toLyricsResultOrNull(): LyricsResult? {
+    private fun LrcLibResponse.toLyricsResultOrNull(withSynced: Boolean = true): LyricsResult? {
         val plain = plainLyrics?.takeIf { it.isNotBlank() }
-        val synced = syncedLyrics?.takeIf { it.isNotBlank() }
+        val synced = syncedLyrics?.takeIf { it.isNotBlank() && withSynced }
         return if (plain != null || synced != null) LyricsResult(plain, synced) else null
     }
 
@@ -354,7 +562,8 @@ class LyricsRepository {
 
                 // KuGou counts as having answered only when every call it made replied: a failed
                 // candidate search or download says nothing about whether it has the lyrics.
-                val hashes = kuGouSearchSongHashes(keyword, seconds) ?: return@withContext null
+                val match = SongMatch(title, artist, durationSeconds)
+                val hashes = kuGouSearchSongHashes(keyword, seconds, match) ?: return@withContext null
                 var allReplied = true
                 var candidate: KuGouCandidate? = null
                 for (hash in hashes) {
@@ -363,7 +572,9 @@ class LyricsRepository {
                 }
                 if (candidate == null) {
                     val found = kuGouSearchLyricsCandidates(keyword = keyword, seconds = seconds)
-                    if (found == null) allReplied = false else candidate = found.firstOrNull()
+                    if (found == null) allReplied = false
+                    else candidate = match.sameSong(found, { it.song }, { it.singer }, { it.duration / 1000 })
+                        .firstOrNull { match.timingFits(it.song, it.duration / 1000) }
                 }
                 if (candidate == null) {
                     if (allReplied) reached?.set(true)
@@ -380,11 +591,10 @@ class LyricsRepository {
             }
         }
 
-    /** Song hashes worth trying, restricted to cuts within 8 seconds of the track's own
-     * duration - otherwise the first result for a common title is as likely to be a cover or a
-     * remix as the right recording - ordered closest match first. */
+    /** Song hashes worth trying: this song (SongMatch), cut to the same recording - otherwise the
+     * first result for a common title is as likely to be a cover or a remix - closest length first. */
     /** Null when KuGou couldn't be reached (as opposed to no matching songs). */
-    private suspend fun kuGouSearchSongHashes(keyword: String, seconds: Int): List<String>? {
+    private suspend fun kuGouSearchSongHashes(keyword: String, seconds: Int, match: SongMatch): List<String>? {
         val url = "https://mobileservice.kugou.com/api/v3/search/song".toHttpUrl().newBuilder()
             .addQueryParameter("version", "9108")
             .addQueryParameter("plat", "0")
@@ -395,7 +605,8 @@ class LyricsRepository {
         val body = httpGet(url.toString()) ?: return null
         val response = runCatching { gson.fromJson(body, KuGouSearchSongResponse::class.java) }.getOrNull() ?: return null
         return response.data?.info.orEmpty()
-            .filter { seconds <= 0 || abs(it.duration - seconds) <= 8 }
+            .let { songs -> match.sameSong(songs, { it.songname }, { it.singername }, { it.duration }) }
+            .filter { match.timingFits(it.songname, it.duration) }
             .sortedBy { abs(it.duration - seconds) }
             .map { it.hash }
     }
@@ -434,10 +645,12 @@ class LyricsRepository {
         }.getOrNull()
     }
 
-    /** Cancellable: when a faster provider already answered, fetchLyrics cancels KuGou (or
-     * BiniLyrics), and that now aborts the request in flight. A blocking execute() ignored the cancel, so the
+    private suspend fun httpGet(url: String): String? = httpCall(url).body
+
+    /** Cancellable: when a faster provider already answered, fetchLyrics cancels the slower
+     * ones, and that aborts the request in flight. A blocking execute() ignored the cancel, so the
      * lyrics waited for KuGou's whole chain of up to ten requests before showing. */
-    private suspend fun httpGet(url: String): String? = try {
+    private suspend fun httpCall(url: String): HttpAnswer = try {
         val request = Request.Builder()
             .url(url)
             .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36")
@@ -447,21 +660,21 @@ class LyricsRepository {
             continuation.invokeOnCancellation { call.cancel() }
             call.enqueue(object : Callback {
                 override fun onFailure(call: Call, e: IOException) {
-                    continuation.resume(null)
+                    continuation.resume(HttpAnswer(-1, null))
                 }
 
                 override fun onResponse(call: Call, response: Response) {
                     val body = runCatching {
                         response.use { if (it.isSuccessful) it.body?.string() else null }
                     }.getOrNull()
-                    continuation.resume(body)
+                    continuation.resume(HttpAnswer(response.code, body))
                 }
             })
         }
     } catch (e: CancellationException) {
         throw e
     } catch (e: Exception) {
-        null
+        HttpAnswer(-1, null)
     }
 
     private fun stripParenthetical(s: String): String =
@@ -487,9 +700,9 @@ class LyricsRepository {
 
     private data class KuGouSearchSongResponse(val data: KuGouSearchSongData?)
     private data class KuGouSearchSongData(val info: List<KuGouSongInfo> = emptyList())
-    private data class KuGouSongInfo(val hash: String, val duration: Int = -1)
+    private data class KuGouSongInfo(val hash: String, val songname: String? = null, val singername: String? = null, val duration: Int = -1)
     private data class KuGouSearchLyricsResponse(val candidates: List<KuGouCandidate> = emptyList())
-    private data class KuGouCandidate(val id: String, val accesskey: String)
+    private data class KuGouCandidate(val id: String, val accesskey: String, val song: String? = null, val singer: String? = null, val duration: Int = -1)
     private data class KuGouDownloadResponse(val content: String = "")
 
     private suspend fun fetchLyricsOvhLyrics(title: String, artist: String, reached: AtomicBoolean? = null): LyricsResult? =
@@ -511,44 +724,34 @@ class LyricsRepository {
             }
         }
 
-    private suspend fun fetchGoogleLyrics(title: String, artist: String, reached: AtomicBoolean? = null): String? = withContext(Dispatchers.IO) {
-        val query = "$artist $title lyrics".trim()
-        val url = "https://www.google.com/search?q=${Uri.encode(query)}"
-
-        val request = Request.Builder()
-            .url(url)
-            .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36")
-            .header("Accept-Language", "en-US,en;q=0.9,ar;q=0.8")
-            .build()
-
+    /** YouTube Music's Lyrics tab for this song (see the provider order above): [videoId] when
+     * it's a YouTube song, else the YouTube Music song matching this title and artist. */
+    private suspend fun fetchYouTubeMusicLyrics(
+        title: String,
+        artist: String,
+        durationSeconds: Int?,
+        videoId: String?,
+        reached: AtomicBoolean? = null
+    ): LyricsResult? = withContext(Dispatchers.IO) {
         try {
-            val response = NetworkModule.client.newCall(request).execute()
-            val html = response.body?.string() ?: return@withContext null
-            if (response.isSuccessful) reached?.set(true)
-
-            // Regex matches Google's lyrics card containers
-            val regexDiv = Regex("""(?s)<div[^>]*class="[^"]*(?:BNeawe|hwc|XzT28c)[^"]*"[^>]*>(.*?)</div>""")
-            val matches = regexDiv.findAll(html).map { it.groupValues[1] }.toList()
-
-            for (match in matches) {
-                val plainText = match.replace(Regex("""<[^>]*>"""), "\n")
-                    .replace("&amp;", "&")
-                    .replace("&lt;", "<")
-                    .replace("&gt;", ">")
-                    .replace("&quot;", "\"")
-                    .replace("&#39;", "'")
-                    .lines()
-                    .map { it.trim() }
-                    .filter { it.isNotBlank() && !it.contains("Google") && !it.contains("Search") }
-                    .joinToString("\n")
-
-                if (plainText.length > 60 && plainText.lines().size > 3) {
-                    return@withContext plainText
+            val id = videoId ?: run {
+                val match = SongMatch(title, artist, durationSeconds)
+                val songs = BrowseParser.parseSearchSongs(innertube.searchSongs(match.searchTerm))
+                val same = match.sameSong(songs, { it.title }, { it.artist }, { it.durationSeconds })
+                val pick = same.firstOrNull()
+                if (pick == null) {
+                    reached?.set(true)
+                    return@withContext null
                 }
+                pick.videoId
             }
-            null
+            val text = youTubeLyricsBrowseId(innertube.next(id))?.let { youTubeLyricsText(innertube.browse(it)) }
+            reached?.set(true)
+            text?.let { LyricsResult(it, null) }
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
-            Log.w("LyricsRepository", "Google Search lyrics failed: ${e.message}")
+            Log.w("LyricsRepository", "[YouTube Music] Failed: ${e.message}")
             null
         }
     }

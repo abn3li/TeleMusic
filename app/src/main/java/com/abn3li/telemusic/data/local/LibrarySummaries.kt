@@ -30,6 +30,9 @@ data class PlaylistCoverChoice(
     val coverSongArtUrl: String?
 )
 
+/** Song counts of the three built-in playlists (see SongDao.observeSmartPlaylistCounts). */
+data class SmartPlaylistCounts(val liked: Int = 0, val telegram: Int = 0, val downloaded: Int = 0)
+
 data class PlaylistArtwork(val playlistId: Long, val art: String, val artUrl: String?, val addedAtMillis: Long)
 
 /** Every playlist with its cover: the chosen photo or song, else its four newest songs with

@@ -16,7 +16,7 @@ internal fun rememberYouTubeLikeAction(videoId: String?): YouTubeLikeAction? {
     val session = account.sessionId
     if (videoId.isNullOrBlank() || !account.signedIn || session == null) return null
     val states by app.youtubeLikeStates.collectAsState()
-    // Like BitChord, unknown tracks start neutral; refresh silently without a loading row.
+    // Unknown tracks start neutral; refresh silently without a loading row.
     val liked = states[session to videoId] ?: false
     LaunchedEffect(videoId, session) {
         try { app.youtubeSongLiked(videoId, session) }

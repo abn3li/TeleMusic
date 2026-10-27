@@ -57,7 +57,6 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.AccountCircle
-import androidx.compose.material.icons.rounded.Shuffle
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -79,7 +78,6 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -110,7 +108,6 @@ fun HomeScreen(
     viewModel: LibraryViewModel,
     callbacks: LibraryCallbacks,
     onOpenSettings: () -> Unit,
-    onOpenSmartPlaylist: (SmartPlaylistKind) -> Unit,
     onOpenCollection: (BrowseCollection) -> Unit,
     onPlayTracks: (List<BrowseTrack>, Int) -> Unit,
     // The song loaded in the player, if any - lets "Continue Listening" pause/resume it in place.
@@ -168,33 +165,14 @@ fun HomeScreen(
             )
         }
     ) {
-        // The last song played, large, with its own blurred colours: one tap back into it.
-        if (homeFeeds.telegram) home.recentlyPlayed.firstOrNull()?.let { last ->
+        // The last song played, large, with its own blurred colours: one tap back into it. Shown
+        // with either feed on - the last song may be a library song or a YouTube one.
+        if (homeFeeds.telegram || homeFeeds.youtube) home.recentlyPlayed.firstOrNull()?.let { last ->
             item("continue") {
                 val isCurrent = last.telegramMessageId == nowPlayingId
                 ContinueListeningCard(last, isCurrent && isPlaying) {
                     if (isCurrent) callbacks.onTogglePlayPause()
                     else callbacks.onPlay(home.recentlyPlayed.map { it.telegramMessageId }, 0)
-                }
-            }
-        }
-
-        item("shortcuts") {
-            Row(
-                Modifier.padding(horizontal = 16.dp).padding(top = 12.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                ShortcutButton("Liked", SmartPlaylistKind.LIKED.icon(), Modifier.weight(1f)) {
-                    onOpenSmartPlaylist(SmartPlaylistKind.LIKED)
-                }
-                ShortcutButton("Telegram", SmartPlaylistKind.TELEGRAM.icon(), Modifier.weight(1f)) {
-                    onOpenSmartPlaylist(SmartPlaylistKind.TELEGRAM)
-                }
-                ShortcutButton("Downloaded", SmartPlaylistKind.DOWNLOADED.icon(), Modifier.weight(1f)) {
-                    onOpenSmartPlaylist(SmartPlaylistKind.DOWNLOADED)
-                }
-                ShortcutButton("Shuffle", Icons.Rounded.Shuffle, Modifier.weight(1f)) {
-                    if (home.allIds.isNotEmpty()) callbacks.onPlayCollection(home.allIds, true)
                 }
             }
         }
@@ -369,24 +347,6 @@ internal fun HomeSectionHeader(
                 )
             }
         }
-    }
-}
-
-/** One of the four shortcuts: a pink icon over a short label, in one compact row. */
-@Composable
-private fun ShortcutButton(label: String, icon: ImageVector, modifier: Modifier, onClick: () -> Unit) {
-    Column(
-        modifier
-            .height(64.dp)
-            .clip(RoundedCornerShape(14.dp))
-            .background(LibraryFieldColor)
-            .clickable(onClick = onClick),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center
-    ) {
-        Icon(icon, contentDescription = null, tint = AppAccent, modifier = Modifier.size(22.dp))
-        Spacer(Modifier.height(5.dp))
-        Text(label, color = ink.copy(alpha = 0.92f), fontSize = 11.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
 }
 

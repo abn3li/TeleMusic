@@ -1,5 +1,7 @@
 package com.abn3li.telemusic.data.settings
 
+import com.abn3li.telemusic.repository.LyricsTranslator
+
 import android.content.Context
 import android.net.Uri
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -213,6 +215,31 @@ class AppSettingsStore(context: Context) {
         get() = prefs.getStringSet("keep_both_song_ids", emptySet()).orEmpty().mapNotNull { it.toLongOrNull() }.toSet()
         set(value) = prefs.edit().putStringSet("keep_both_song_ids", value.map { it.toString() }.toSet()).apply()
 
+    /** Lyrics sources switched off in Settings (LyricsProvider names); the rest are searched. */
+    var lyricsSourcesOff: Set<String>
+        get() = prefs.getStringSet(KEY_LYRICS_SOURCES_OFF, emptySet()).orEmpty().toSet()
+        set(value) = prefs.edit().putStringSet(KEY_LYRICS_SOURCES_OFF, value).apply()
+
+    // Lyrics translation: the Translate button's state, and the language from Settings. Flows,
+    // so the open player follows a change at once.
+    private val _lyricsTranslationOn = MutableStateFlow(prefs.getBoolean(KEY_LYRICS_TRANSLATION_ON, false))
+    val lyricsTranslationOn: StateFlow<Boolean> = _lyricsTranslationOn
+
+    fun setLyricsTranslationOn(on: Boolean) {
+        prefs.edit().putBoolean(KEY_LYRICS_TRANSLATION_ON, on).apply()
+        _lyricsTranslationOn.value = on
+    }
+
+    private val _lyricsTranslationLanguage = MutableStateFlow(
+        prefs.getString(KEY_LYRICS_TRANSLATION_LANGUAGE, null) ?: LyricsTranslator.DEFAULT_LANGUAGE
+    )
+    val lyricsTranslationLanguage: StateFlow<String> = _lyricsTranslationLanguage
+
+    fun setLyricsTranslationLanguage(code: String) {
+        prefs.edit().putString(KEY_LYRICS_TRANSLATION_LANGUAGE, code).apply()
+        _lyricsTranslationLanguage.value = code
+    }
+
     // Dark, Light or follow the phone. A flow so the whole app recolours the moment it changes.
     private val _themeMode = MutableStateFlow(
         runCatching { ThemeMode.valueOf(prefs.getString(KEY_THEME_MODE, null) ?: ThemeMode.DARK.name) }.getOrDefault(ThemeMode.DARK)
@@ -259,6 +286,9 @@ class AppSettingsStore(context: Context) {
     }
 
     companion object {
+        private const val KEY_LYRICS_SOURCES_OFF = "lyrics_sources_off"
+        private const val KEY_LYRICS_TRANSLATION_ON = "lyrics_translation_on"
+        private const val KEY_LYRICS_TRANSLATION_LANGUAGE = "lyrics_translation_language"
         private const val KEY_HOME_TELEGRAM = "home_feed_telegram"
         private const val KEY_HOME_YOUTUBE = "home_feed_youtube"
         private const val KEY_THEME_MODE = "theme_mode"

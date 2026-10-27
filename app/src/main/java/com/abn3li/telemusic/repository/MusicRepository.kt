@@ -40,6 +40,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.transform
@@ -365,6 +366,9 @@ class MusicRepository(
     fun observeDownloadedSongs(sortField: SortField, ascending: Boolean): Flow<List<SongEntity>> =
         songDao.observeDownloaded().map { it.sortedForLibrary(sortField, ascending) }
             .flowOn(Dispatchers.Default)
+
+    fun observeSmartPlaylistCounts(): Flow<com.abn3li.telemusic.data.local.SmartPlaylistCounts> =
+        songDao.observeSmartPlaylistCounts().distinctUntilChanged()
 
     // ---- Import from local storage ----
     /** [treeUri] is a folder the user picked via the system file explorer (SAF) - no storage
@@ -1212,6 +1216,10 @@ class MusicRepository(
         val songKey = lyricsRepository.cacheKey(song.title, song.artist)
         val queryKey = lyricsRepository.cacheKey(query.title, query.artist)
 
+        // The song's own video finds its YouTube Music lyrics directly - not for a custom search,
+        // which asks about another title.
+        val videoId = song.youtubeVideoId.takeIf { query === song }
+
         if (!force) {
             val cached = lyricsCache.get(songKey)
             if (cached != null) {
@@ -1223,7 +1231,9 @@ class MusicRepository(
             }
         }
 
-        val search = lyricsRepository.fetchLyrics(query.title, query.artist, query.durationSeconds.takeIf { it > 0 })
+        val off = settingsStore.lyricsSourcesOff
+        val enabled = LyricsProvider.entries.filterTo(mutableSetOf()) { it.name !in off }
+        val search = lyricsRepository.fetchLyrics(query.title, query.artist, query.durationSeconds.takeIf { it > 0 }, videoId, enabled)
         val lyrics = search.result?.takeIf { it.plain != null || it.synced != null }
         when {
             // Found: kept under the song's own name and whatever was searched.
@@ -1239,7 +1249,7 @@ class MusicRepository(
     /** The Lyrics source picker: asks only [provider]. A find replaces the song's lyrics (and its
      * cache entry); nothing found leaves what's there. */
     suspend fun fetchLyricsFrom(song: SongEntity, provider: LyricsProvider): LyricsSearch {
-        val search = lyricsRepository.fetchFrom(provider, song.title, song.artist, song.durationSeconds.takeIf { it > 0 })
+        val search = lyricsRepository.fetchFrom(provider, song.title, song.artist, song.durationSeconds.takeIf { it > 0 }, song.youtubeVideoId)
         search.result?.let { saveLyrics(song, listOf(lyricsRepository.cacheKey(song.title, song.artist)), it) }
         return search
     }

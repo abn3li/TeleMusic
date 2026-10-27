@@ -9,6 +9,7 @@ import com.abn3li.telemusic.data.local.ArtistSummary
 import com.abn3li.telemusic.data.local.PlaylistEntity
 import com.abn3li.telemusic.data.local.PlaylistSummary
 import com.abn3li.telemusic.data.local.SongEntity
+import com.abn3li.telemusic.data.local.SmartPlaylistCounts
 import com.abn3li.telemusic.repository.MusicRepository
 import com.abn3li.telemusic.repository.SortField
 import kotlinx.coroutines.flow.*
@@ -142,6 +143,8 @@ class LibraryViewModel(private val repository: MusicRepository) : ViewModel() {
     val albums: StateFlow<List<AlbumSummary>> = repository.observeAlbums().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
     val artists: StateFlow<List<ArtistSummary>> = repository.observeArtists().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
     val playlists: StateFlow<List<PlaylistEntity>> = repository.observePlaylists().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+    val smartCounts: StateFlow<SmartPlaylistCounts> = repository.observeSmartPlaylistCounts()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), SmartPlaylistCounts())
     val playlistSummaries: StateFlow<List<PlaylistSummary>> = repository.observePlaylistSummaries().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     private val _showAlphabetIndex = MutableStateFlow(repository.showSongIndex)

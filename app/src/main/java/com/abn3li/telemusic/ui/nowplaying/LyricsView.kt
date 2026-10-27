@@ -48,6 +48,11 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.rounded.SwapHoriz
+import androidx.compose.material.icons.rounded.Translate
+import androidx.compose.foundation.layout.offset
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import com.abn3li.telemusic.ui.theme.SoftButton as Button
 import androidx.compose.material3.ButtonDefaults
 import com.abn3li.telemusic.ui.theme.SoftTonalButton as FilledTonalButton
@@ -128,6 +133,17 @@ internal fun LyricsPage(
     modifier: Modifier = Modifier
 ) {
     val song = state.song
+    val translation by viewModel.translation.collectAsState()
+    val context = androidx.compose.ui.platform.LocalContext.current
+    DisposableEffect(active) {
+        viewModel.setLyricsVisible(active)
+        onDispose { viewModel.setLyricsVisible(false) }
+    }
+    LaunchedEffect(translation.failed) {
+        if (translation.failed) android.widget.Toast.makeText(context, "Couldn't translate the lyrics - tap Translate to try again", android.widget.Toast.LENGTH_SHORT).show()
+    }
+    val translations = translation.lines.takeIf { translation.on }.orEmpty()
+    val hasLyrics = !state.isFetchingLyrics && (state.lyricLines.isNotEmpty() || !song?.lyricsPlain.isNullOrBlank())
     Box(modifier.fillMaxSize()) {
         when {
             state.isFetchingLyrics -> Column(
@@ -143,6 +159,7 @@ internal fun LyricsPage(
 
             state.lyricLines.isNotEmpty() -> SyncedLyrics(
                 lines = state.lyricLines,
+                translations = translations,
                 viewModel = viewModel,
                 effects = effects,
                 active = active,
@@ -158,13 +175,19 @@ internal fun LyricsPage(
                     .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onUserInteraction)
                     .padding(horizontal = 28.dp, vertical = 36.dp)
             ) {
-                Text(
+                if (translations.isEmpty()) Text(
                     text = song.lyricsPlain,
                     color = Color.White.copy(alpha = 0.85f),
                     fontSize = 24.sp,
                     fontWeight = FontWeight.Bold,
                     lineHeight = 34.sp
-                )
+                ) else song.lyricsPlain.lines().forEach { line ->
+                    Text(line, color = Color.White.copy(alpha = 0.85f), fontSize = 24.sp, fontWeight = FontWeight.Bold, lineHeight = 34.sp)
+                    translations[line.trim()]?.let { translated ->
+                        Text(translated, color = Color.White.copy(alpha = 0.55f), fontSize = 15.sp, fontWeight = FontWeight.Medium,
+                            lineHeight = 21.sp, style = TranslationStyle, modifier = Modifier.fillMaxWidth().padding(bottom = 10.dp))
+                    }
+                }
                 LyricsSourceButton(onOpenLyricsSource, Modifier.padding(top = 28.dp))
                 Spacer(Modifier.height(120.dp))
             }
@@ -208,6 +231,44 @@ internal fun LyricsPage(
                 }
             }
         }
+        // Rides down with the page when the controls step aside, and stays.
+        if (hasLyrics) TranslateButton(
+            on = translation.on,
+            loading = translation.loading,
+            onClick = { if (translation.failed) viewModel.retryTranslation() else viewModel.toggleTranslation() },
+            modifier = Modifier.align(Alignment.BottomEnd).padding(end = 18.dp, bottom = 14.dp)
+        )
+    }
+}
+
+/** Under a lyric line: its translation, in its own direction (Arabic right to left) whatever the
+ * line's own. */
+private val TranslationStyle = androidx.compose.ui.text.TextStyle(textDirection = androidx.compose.ui.text.style.TextDirection.Content)
+
+/** The Translate button: a small disc, solid white while on - like the player's other active
+ * buttons - and a spinner while translating. */
+@Composable
+private fun TranslateButton(on: Boolean, loading: Boolean, onClick: () -> Unit, modifier: Modifier = Modifier) {
+    val haptics = LocalHapticFeedback.current
+    val fill by androidx.compose.animation.animateColorAsState(
+        if (on) Color.White.copy(alpha = 0.92f) else Color.White.copy(alpha = 0.12f), tween(200), label = "translateFill")
+    val ink by androidx.compose.animation.animateColorAsState(
+        if (on) Color.Black else Color.White.copy(alpha = 0.85f), tween(200), label = "translateInk")
+    // 48dp to touch, the disc inside it smaller.
+    Box(
+        modifier
+            .size(48.dp)
+            .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) {
+                haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                onClick()
+            }
+            .semantics { contentDescription = if (on) "Hide translation" else "Translate lyrics" },
+        contentAlignment = Alignment.Center
+    ) {
+        Box(Modifier.size(34.dp).clip(CircleShape).background(fill), contentAlignment = Alignment.Center) {
+            if (loading) CalmSpinner(Modifier.size(15.dp), color = ink, strokeWidth = 2.dp)
+            else Icon(Icons.Rounded.Translate, contentDescription = null, tint = ink, modifier = Modifier.size(18.dp))
+        }
     }
 }
 
@@ -242,6 +303,7 @@ private class LyricCascade {
 @Composable
 private fun SyncedLyrics(
     lines: List<LyricLine>,
+    translations: Map<String, String>,
     viewModel: NowPlayingViewModel,
     effects: PlayerEffects,
     active: Boolean,
@@ -353,7 +415,7 @@ private fun SyncedLyrics(
                         } else {
                             Spacer(Modifier.height(6.dp))
                         }
-                    } else {
+                    } else Column {
                         LyricLineText(
                             text = line.text,
                             sweep = if (isActive) sweepTiming(line, lines.getOrNull(index + 1)) else null,
@@ -371,6 +433,10 @@ private fun SyncedLyrics(
                                 viewModel.seekTo(line.timeMs)
                             }
                         )
+                        translations[line.text.trim()]?.let { translated ->
+                            TranslationLine(translated, isActive, distance, justPassed = activeIndex >= 0 && index == activeIndex - 1,
+                                blurEnabled = autoFollow && effects.lyricsBlur)
+                        }
                     }
                 }
             }
@@ -440,7 +506,7 @@ private const val UNSUNG_ALPHA = 0.35f
 private const val SWEEP_EDGE_PX = 36f
 
 /**
- * Only lyrics timed word by word (BiniLyrics) sweep, exactly with the singing. Lyrics that only
+ * Only lyrics timed word by word sweep, exactly with the singing. Lyrics that only
  * say when each LINE starts have none: the whole line lights up at once, as before. A word-timed
  * line whose last word has no end time finishes at a normal singing pace, a little before the
  * next line.
@@ -563,7 +629,7 @@ private fun rememberSungChars(
 
 /**
  * The line being sung, under the title on Now Playing's cover page: a note and the line, the
- * next one fading in as it starts. Word-timed lyrics (BiniLyrics) light up word by word; the
+ * next one fading in as it starts. Word-timed lyrics light up word by word; the
  * rest show the whole line. Nothing between lines (an instrumental break) shows nothing, and a
  * jump of more than one line (a seek) switches without the fade. Follows the position only
  * while [active]; it asks for frames only during a fade or a word-timed sweep.
@@ -664,11 +730,7 @@ private fun LyricLineText(
         animationSpec = tween(durationMillis = 420, delayMillis = if (isActive) 100 else 40, easing = LyricEasing),
         label = "lyricScale"
     )
-    val blurTarget = if (!blurEnabled || isActive || Build.VERSION.SDK_INT < Build.VERSION_CODES.S) 0.dp
-    else (distance * 1.6f).coerceAtMost(6f).dp
-    // Snapped, never animated: an animated radius visibly smears in/out around the line on every
-    // change. The line just sung waits until it has scrolled away before blurring.
-    val blurRadius by animateDpAsState(blurTarget, snap(delayMillis = if (justPassed) 260 else 0), label = "lyricBlur")
+    val blurRadius by rememberLineBlur(isActive, distance, justPassed, blurEnabled)
 
     val sungChars by rememberSungChars(text, sweep, progressState, isPlaying)
     var layout by remember { mutableStateOf<TextLayoutResult?>(null) }
@@ -719,6 +781,42 @@ private fun LyricLineText(
                 transformOrigin = TransformOrigin(0f, 0.5f)
             }
             .padding(horizontal = LINE_PADDING_H, vertical = GLOW_ROOM + LINE_PADDING_V)
+            .then(if (blurRadius > 0.2.dp) Modifier.blur(blurRadius, BlurredEdgeTreatment.Unbounded) else Modifier)
+    )
+}
+
+/** How blurred a line [distance] lines from the one being sung is. Snapped, never animated: an
+ * animated radius visibly smears in/out around the line on every change. The line just sung
+ * waits until it has scrolled away before blurring. */
+@Composable
+private fun rememberLineBlur(isActive: Boolean, distance: Int, justPassed: Boolean, blurEnabled: Boolean): State<Dp> {
+    val target = if (!blurEnabled || isActive || Build.VERSION.SDK_INT < Build.VERSION_CODES.S) 0.dp
+    else (distance * 1.6f).coerceAtMost(6f).dp
+    return animateDpAsState(target, snap(delayMillis = if (justPassed) 260 else 0), label = "lyricBlur")
+}
+
+/** A line's translation, right under it: about 60% of its size, calmer, and fading and blurring
+ * with it. */
+@Composable
+private fun TranslationLine(text: String, isActive: Boolean, distance: Int, justPassed: Boolean, blurEnabled: Boolean) {
+    val alpha by animateFloatAsState(
+        targetValue = if (isActive) 0.62f else 0.2f,
+        animationSpec = tween(durationMillis = 380, delayMillis = if (isActive) 120 else 60, easing = LyricEasing),
+        label = "translationAlpha"
+    )
+    val blurRadius by rememberLineBlur(isActive, distance, justPassed, blurEnabled)
+    Text(
+        text = text,
+        color = Color.White,
+        fontSize = 18.sp,
+        fontWeight = FontWeight.SemiBold,
+        lineHeight = 24.sp,
+        style = TranslationStyle,
+        modifier = Modifier
+            .fillMaxWidth()
+            .graphicsLayer { this.alpha = alpha }
+            .padding(start = LINE_PADDING_H, end = LINE_PADDING_H, bottom = LINE_PADDING_V + 8.dp)
+            .offset(y = (-4).dp)
             .then(if (blurRadius > 0.2.dp) Modifier.blur(blurRadius, BlurredEdgeTreatment.Unbounded) else Modifier)
     )
 }

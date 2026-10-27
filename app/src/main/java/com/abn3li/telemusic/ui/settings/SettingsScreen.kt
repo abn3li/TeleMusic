@@ -31,6 +31,10 @@ import androidx.compose.material.icons.rounded.BlurOn
 import androidx.compose.material.icons.rounded.CleaningServices
 import androidx.compose.material.icons.rounded.Code
 import androidx.compose.material.icons.rounded.Dns
+import androidx.compose.material.icons.rounded.Lyrics
+import androidx.compose.material.icons.rounded.Translate
+import com.abn3li.telemusic.repository.LyricsProvider
+import com.abn3li.telemusic.repository.LyricsTranslator
 import androidx.compose.material.icons.rounded.Folder
 import androidx.compose.material.icons.rounded.Groups
 import androidx.compose.material.icons.rounded.Info
@@ -106,6 +110,10 @@ fun SettingsScreen(onBack: () -> Unit, onOpenSpotify: () -> Unit, onLoggedOut: (
     val themeMode by app.settingsStore.themeMode.collectAsState()
     var cacheLimit by remember { mutableStateOf(app.settingsStore.maxCacheSizeBytes) }
     var cacheOptionsOpen by remember { mutableStateOf(false) }
+    var lyricsSourcesOpen by remember { mutableStateOf(false) }
+    var lyricsSourcesOff by remember { mutableStateOf(app.settingsStore.lyricsSourcesOff) }
+    var translationLanguageOpen by remember { mutableStateOf(false) }
+    val translationLanguage by app.settingsStore.lyricsTranslationLanguage.collectAsState()
     var licensesOpen by remember { mutableStateOf(false) }
 
     // DNS and proxy save as they're changed - no Save buttons. Before Telegram is set up in Settings there's nothing to connect or restart.
@@ -289,6 +297,54 @@ fun SettingsScreen(onBack: () -> Unit, onOpenSpotify: () -> Unit, onLoggedOut: (
         item("now_playing") {
             GroupHeader("Now Playing")
             GroupCard {
+                val sourcesOn = LyricsProvider.entries.count { it.name !in lyricsSourcesOff }
+                GroupRow(
+                    title = "Lyrics Sources",
+                    icon = { GroupIcon(Icons.Rounded.Lyrics, TileOrange) },
+                    onClick = { lyricsSourcesOpen = !lyricsSourcesOpen },
+                    trailing = { GroupValue(if (sourcesOn == LyricsProvider.entries.size) "All" else "$sourcesOn of ${LyricsProvider.entries.size}") }
+                )
+                AnimatedVisibility(lyricsSourcesOpen) {
+                    Column {
+                        LyricsProvider.entries.forEach { provider ->
+                            val on = provider.name !in lyricsSourcesOff
+                            GroupDivider(start = 57.dp)
+                            GroupRow(
+                                title = provider.label,
+                                desc = provider.detail,
+                                icon = { Spacer(Modifier.size(29.dp)) },
+                                trailing = {
+                                    // At least one stays on: with none, lyrics could never be found.
+                                    GroupSwitch(on, { turnOn ->
+                                        if (turnOn || sourcesOn > 1) {
+                                            lyricsSourcesOff = if (turnOn) lyricsSourcesOff - provider.name else lyricsSourcesOff + provider.name
+                                            app.settingsStore.lyricsSourcesOff = lyricsSourcesOff
+                                        }
+                                    })
+                                }
+                            )
+                        }
+                    }
+                }
+                GroupDivider(start = 57.dp)
+                GroupRow(
+                    title = "Translate Lyrics To",
+                    icon = { GroupIcon(Icons.Rounded.Translate, TileBlue) },
+                    onClick = { translationLanguageOpen = !translationLanguageOpen },
+                    trailing = { GroupValue(LyricsTranslator.languageName(translationLanguage)) }
+                )
+                AnimatedVisibility(translationLanguageOpen) {
+                    Column {
+                        LyricsTranslator.LANGUAGES.forEach { language ->
+                            GroupDivider(start = 57.dp)
+                            GroupOption(label = language.name, selected = language.code == translationLanguage, startPadding = 57) {
+                                app.settingsStore.setLyricsTranslationLanguage(language.code)
+                                translationLanguageOpen = false
+                            }
+                        }
+                    }
+                }
+                GroupDivider(start = 57.dp)
                 GroupRow(
                     title = "Lyrics Glow",
                     icon = { GroupIcon(Icons.Rounded.AutoAwesome, TilePink) },
@@ -313,7 +369,7 @@ fun SettingsScreen(onBack: () -> Unit, onOpenSpotify: () -> Unit, onLoggedOut: (
                     }
                 )
             }
-            SettingsNote("These effects may increase CPU and GPU usage.")
+            SettingsNote("Lyrics are searched in the sources switched on, and only a song with the same name and artist is used. The Translate button on the lyrics shows each line in this language. These effects may increase CPU and GPU usage.")
         }
 
         item("library") {

@@ -1,8 +1,8 @@
 package com.abn3li.telemusic.ui.nowplaying
 
 /**
- * One synced lyric line. [words], when the lyrics have word timing (enhanced LRC, e.g. from
- * BiniLyrics), say how many of [text]'s characters are sung by when: at [WordMark.timeMs] the
+ * One synced lyric line. [words], when the lyrics have word timing (enhanced LRC, from the
+ * word-timed sources), say how many of [text]'s characters are sung by when: at [WordMark.timeMs] the
  * first [WordMark.chars] characters are done. Sorted, both columns never going backwards.
  * Empty for plain line-synced lyrics, whose sweep is estimated from the line's length instead.
  */
