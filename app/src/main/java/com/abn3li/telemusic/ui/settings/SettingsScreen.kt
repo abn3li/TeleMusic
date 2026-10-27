@@ -1,5 +1,13 @@
 package com.abn3li.telemusic.ui.settings
 
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.activity.compose.BackHandler
 import com.abn3li.telemusic.data.settings.ThemeMode
 import com.abn3li.telemusic.ui.theme.LocalPalette
 import com.abn3li.telemusic.ui.theme.paper
@@ -35,6 +43,7 @@ import androidx.compose.material.icons.rounded.Lyrics
 import androidx.compose.material.icons.rounded.Translate
 import com.abn3li.telemusic.repository.LyricsProvider
 import com.abn3li.telemusic.repository.LyricsTranslator
+import com.abn3li.telemusic.data.settings.DnsResolver
 import androidx.compose.material.icons.rounded.Folder
 import androidx.compose.material.icons.rounded.Groups
 import androidx.compose.material.icons.rounded.Info
@@ -98,7 +107,7 @@ private val TileGrey = Color(0xFF636366)
 private val TileIndigo = Color(0xFF5E5CE6)
 
 @Composable
-fun SettingsScreen(onBack: () -> Unit, onOpenSpotify: () -> Unit, onLoggedOut: () -> Unit, onOpenTelegram: () -> Unit, onYouTubeSignIn: () -> Unit) {
+fun SettingsScreen(onBack: () -> Unit, onOpenSpotifyPlaylist: (Long, String) -> Unit, onLoggedOut: () -> Unit, onYouTubeSignIn: () -> Unit) {
     val context = LocalContext.current
     val app = context.applicationContext as TgMusicApp
     val scope = rememberCoroutineScope()
@@ -109,10 +118,9 @@ fun SettingsScreen(onBack: () -> Unit, onOpenSpotify: () -> Unit, onLoggedOut: (
     val homeFeeds by app.settingsStore.homeFeeds.collectAsState()
     val themeMode by app.settingsStore.themeMode.collectAsState()
     var cacheLimit by remember { mutableStateOf(app.settingsStore.maxCacheSizeBytes) }
-    var cacheOptionsOpen by remember { mutableStateOf(false) }
-    var lyricsSourcesOpen by remember { mutableStateOf(false) }
+    // A list opened from a row (Lyrics Sources, Translate Lyrics To): its own page over Settings.
+    var settingsPage by rememberSaveable { mutableStateOf<SettingsPage?>(null) }
     var lyricsSourcesOff by remember { mutableStateOf(app.settingsStore.lyricsSourcesOff) }
-    var translationLanguageOpen by remember { mutableStateOf(false) }
     val translationLanguage by app.settingsStore.lyricsTranslationLanguage.collectAsState()
     val translationEnabled by app.settingsStore.lyricsTranslationEnabled.collectAsState()
     var licensesOpen by remember { mutableStateOf(false) }
@@ -247,6 +255,7 @@ fun SettingsScreen(onBack: () -> Unit, onOpenSpotify: () -> Unit, onLoggedOut: (
         )
     )
 
+    Box(Modifier.fillMaxSize()) {
     LargeTitleList(title = "Settings", onBack = onBack, grouped = true) {
         // Every service you sign in to, in one card.
         item("accounts") {
@@ -257,10 +266,10 @@ fun SettingsScreen(onBack: () -> Unit, onOpenSpotify: () -> Unit, onLoggedOut: (
                     trailing = { GroupValue(if (youtube.signedIn) youtube.name ?: "Connected" else "Sign In") })
                 GroupDivider(start = 57.dp)
                 GroupRow(title = "Telegram", desc = "Sign in and sync a chat or channel",
-                    icon = { GroupIcon(Icons.AutoMirrored.Rounded.Send, TileBlue) }, onClick = onOpenTelegram)
+                    icon = { GroupIcon(Icons.AutoMirrored.Rounded.Send, TileBlue) }, onClick = { settingsPage = SettingsPage.TELEGRAM })
                 GroupDivider(start = 57.dp)
                 com.abn3li.telemusic.ui.spotify.SpotifyAccountRow(
-                    onOpenPlaylists = onOpenSpotify,
+                    onOpenPlaylists = { settingsPage = SettingsPage.SPOTIFY },
                     onHelp = { uriHandler.openUri("https://developer.spotify.com/dashboard") }
                 )
             }
@@ -302,31 +311,9 @@ fun SettingsScreen(onBack: () -> Unit, onOpenSpotify: () -> Unit, onLoggedOut: (
                 GroupRow(
                     title = "Lyrics Sources",
                     icon = { GroupIcon(Icons.Rounded.Lyrics, TileOrange) },
-                    onClick = { lyricsSourcesOpen = !lyricsSourcesOpen },
+                    onClick = { settingsPage = SettingsPage.LYRICS_SOURCES },
                     trailing = { GroupValue(if (sourcesOn == LyricsProvider.entries.size) "All" else "$sourcesOn of ${LyricsProvider.entries.size}") }
                 )
-                AnimatedVisibility(lyricsSourcesOpen) {
-                    Column {
-                        LyricsProvider.entries.forEach { provider ->
-                            val on = provider.name !in lyricsSourcesOff
-                            GroupDivider(start = 57.dp)
-                            GroupRow(
-                                title = provider.label,
-                                desc = provider.detail,
-                                icon = { Spacer(Modifier.size(29.dp)) },
-                                trailing = {
-                                    // At least one stays on: with none, lyrics could never be found.
-                                    GroupSwitch(on, { turnOn ->
-                                        if (turnOn || sourcesOn > 1) {
-                                            lyricsSourcesOff = if (turnOn) lyricsSourcesOff - provider.name else lyricsSourcesOff + provider.name
-                                            app.settingsStore.lyricsSourcesOff = lyricsSourcesOff
-                                        }
-                                    })
-                                }
-                            )
-                        }
-                    }
-                }
                 GroupDivider(start = 57.dp)
                 GroupRow(
                     title = "Lyrics Translation",
@@ -339,20 +326,9 @@ fun SettingsScreen(onBack: () -> Unit, onOpenSpotify: () -> Unit, onLoggedOut: (
                         GroupRow(
                             title = "Translate Lyrics To",
                             icon = { Spacer(Modifier.size(29.dp)) },
-                            onClick = { translationLanguageOpen = !translationLanguageOpen },
+                            onClick = { settingsPage = SettingsPage.TRANSLATE_TO },
                             trailing = { GroupValue(LyricsTranslator.languageName(translationLanguage)) }
                         )
-                        AnimatedVisibility(translationLanguageOpen) {
-                            Column {
-                                LyricsTranslator.LANGUAGES.forEach { language ->
-                                    GroupDivider(start = 57.dp)
-                                    GroupOption(label = language.name, selected = language.code == translationLanguage, startPadding = 57) {
-                                        app.settingsStore.setLyricsTranslationLanguage(language.code)
-                                        translationLanguageOpen = false
-                                    }
-                                }
-                            }
-                        }
                     }
                 }
                 GroupDivider(start = 57.dp)
@@ -435,22 +411,9 @@ fun SettingsScreen(onBack: () -> Unit, onOpenSpotify: () -> Unit, onLoggedOut: (
                 GroupRow(
                     title = "Cache Limit",
                     icon = { GroupIcon(Icons.Rounded.SdStorage, TileOrange) },
-                    onClick = { cacheOptionsOpen = !cacheOptionsOpen },
+                    onClick = { settingsPage = SettingsPage.CACHE_LIMIT },
                     trailing = { GroupValue(cacheLabel) }
                 )
-                AnimatedVisibility(cacheOptionsOpen) {
-                    Column {
-                        AppSettingsStore.CACHE_PRESETS.forEach { (label, bytes) ->
-                            GroupDivider(start = 57.dp)
-                            GroupOption(label = label, selected = cacheLimit == bytes, startPadding = 57) {
-                                cacheLimit = bytes
-                                app.settingsStore.maxCacheSizeBytes = bytes
-                                scope.launch { app.musicRepository.enforceCacheLimit() }
-                                cacheOptionsOpen = false
-                            }
-                        }
-                    }
-                }
                 GroupDivider(start = 57.dp)
                 GroupRow(
                     title = "Clear Cache",
@@ -467,7 +430,8 @@ fun SettingsScreen(onBack: () -> Unit, onOpenSpotify: () -> Unit, onLoggedOut: (
         item("connection") {
             GroupHeader("Connection")
             GroupCard {
-                DnsResolverRows(network, icon = { GroupIcon(Icons.Rounded.Dns, TileGreen) }, title = "DNS", onChange = ::saveDns)
+                DnsResolverRows(network, icon = { GroupIcon(Icons.Rounded.Dns, TileGreen) }, title = "DNS",
+                    onOpenOptions = { settingsPage = SettingsPage.DNS }, onChange = ::saveDns)
                 GroupDivider(start = 57.dp)
                 ProxyRows(
                     network,
@@ -550,6 +514,65 @@ fun SettingsScreen(onBack: () -> Unit, onOpenSpotify: () -> Unit, onLoggedOut: (
             updateCheckStatus?.let { GroupFooter(it) }
             Spacer(Modifier.height(12.dp))
         }
+    }
+
+    // Over Settings, sliding in from the side like a pushed page; Back returns to Settings where it
+    // was. A slide only: a fade draws the page into a layer its own size, cutting off the part it
+    // draws up behind the status bar until the animation ends - that strip then popped in late.
+    AnimatedVisibility(
+        visible = settingsPage != null,
+        enter = slideInHorizontally(tween(300, easing = FastOutSlowInEasing)) { it },
+        exit = slideOutHorizontally(tween(260, easing = FastOutSlowInEasing)) { it }
+    ) {
+        // Kept while sliding out, so the page doesn't go blank mid-animation.
+        var shown by remember { mutableStateOf(settingsPage) }
+        settingsPage?.let { shown = it }
+        BackHandler(settingsPage != null) { settingsPage = null }
+        when (shown) {
+            SettingsPage.LYRICS_SOURCES -> LyricsSourcesPage(
+                off = lyricsSourcesOff,
+                onChange = { lyricsSourcesOff = it; app.settingsStore.lyricsSourcesOff = it },
+                onBack = { settingsPage = null }
+            )
+            SettingsPage.TELEGRAM -> com.abn3li.telemusic.ui.sync.SyncScreen(onBack = { settingsPage = null })
+            SettingsPage.SPOTIFY -> com.abn3li.telemusic.ui.spotify.SpotifyLibraryScreen(
+                onBack = { settingsPage = null },
+                onOpenPlaylist = onOpenSpotifyPlaylist
+            )
+            SettingsPage.CACHE_LIMIT -> OptionsPage(
+                title = "Cache Limit",
+                options = AppSettingsStore.CACHE_PRESETS.map { (label, bytes) -> Triple(bytes.toString(), label, null) },
+                selected = cacheLimit.toString(),
+                footer = "Songs played from Telegram and YouTube are kept on the phone up to this size; the oldest go first.",
+                onPick = { picked ->
+                    val bytes = picked.toLong()
+                    cacheLimit = bytes
+                    app.settingsStore.maxCacheSizeBytes = bytes
+                    scope.launch { app.musicRepository.enforceCacheLimit() }
+                    settingsPage = null
+                },
+                onBack = { settingsPage = null }
+            )
+            SettingsPage.DNS -> OptionsPage(
+                title = "DNS",
+                options = DnsResolver.entries.map { Triple(it.name, it.displayName, "${it.source} · ${it.description}") },
+                selected = network.dns.name,
+                footer = "How Telegram finds its servers. A change applies after a restart.",
+                onPick = { picked ->
+                    network.dns = DnsResolver.valueOf(picked)
+                    saveDns(false)
+                    settingsPage = null
+                },
+                onBack = { settingsPage = null }
+            )
+            SettingsPage.TRANSLATE_TO -> TranslateToPage(
+                selected = translationLanguage,
+                onPick = { app.settingsStore.setLyricsTranslationLanguage(it); settingsPage = null },
+                onBack = { settingsPage = null }
+            )
+            null -> Unit
+        }
+    }
     }
 
     if (licensesOpen) LicensesSheet(onDismiss = { licensesOpen = false })
@@ -691,4 +714,74 @@ private fun LinkRow(title: String, value: String, icon: androidx.compose.ui.grap
             }
         }
     )
+}
+
+/** Lists opened from a Settings row, each on its own page. */
+private enum class SettingsPage { LYRICS_SOURCES, TRANSLATE_TO, CACHE_LIMIT, DNS, TELEGRAM, SPOTIFY }
+
+/** One choice out of [options] (key, label, detail), on its own page; picking one returns. */
+@Composable
+private fun OptionsPage(
+    title: String,
+    options: List<Triple<String, String, String?>>,
+    selected: String,
+    footer: String?,
+    onPick: (String) -> Unit,
+    onBack: () -> Unit
+) {
+    LargeTitleList(title = title, onBack = onBack, grouped = true) {
+        item("options") {
+            Spacer(Modifier.height(8.dp))
+            GroupCard {
+                options.forEachIndexed { index, (key, label, detail) ->
+                    if (index > 0) GroupDivider()
+                    GroupOption(label = label, detail = detail, selected = key == selected, startPadding = 15) { onPick(key) }
+                }
+            }
+            footer?.let { GroupFooter(it) }
+        }
+    }
+}
+
+/** Every lyrics source with its own switch; at least one stays on - with none, lyrics could never be found. */
+@Composable
+private fun LyricsSourcesPage(off: Set<String>, onChange: (Set<String>) -> Unit, onBack: () -> Unit) {
+    val on = LyricsProvider.entries.count { it.name !in off }
+    LargeTitleList(title = "Lyrics Sources", onBack = onBack, grouped = true) {
+        item("sources") {
+            Spacer(Modifier.height(8.dp))
+            GroupCard {
+                LyricsProvider.entries.forEachIndexed { index, provider ->
+                    if (index > 0) GroupDivider()
+                    val enabled = provider.name !in off
+                    GroupRow(
+                        title = provider.label,
+                        desc = provider.detail,
+                        trailing = {
+                            GroupSwitch(enabled, { turnOn ->
+                                if (turnOn || on > 1) onChange(if (turnOn) off - provider.name else off + provider.name)
+                            })
+                        }
+                    )
+                }
+            }
+            GroupFooter("Lyrics are searched in the sources switched on, and only a song with the same name and artist is used. Word-by-word sources come first.")
+        }
+    }
+}
+
+/** The language the Translate button on the lyrics translates into. */
+@Composable
+private fun TranslateToPage(selected: String, onPick: (String) -> Unit, onBack: () -> Unit) {
+    LargeTitleList(title = "Translate Lyrics To", onBack = onBack, grouped = true) {
+        item("languages") {
+            Spacer(Modifier.height(8.dp))
+            GroupCard {
+                LyricsTranslator.LANGUAGES.forEachIndexed { index, language ->
+                    if (index > 0) GroupDivider()
+                    GroupOption(label = language.name, selected = language.code == selected, startPadding = 15) { onPick(language.code) }
+                }
+            }
+        }
+    }
 }

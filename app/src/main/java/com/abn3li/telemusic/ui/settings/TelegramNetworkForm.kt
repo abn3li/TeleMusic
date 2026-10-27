@@ -136,6 +136,8 @@ internal fun ColumnScope.DnsResolverRows(
     form: TelegramNetworkForm,
     icon: (@Composable () -> Unit)? = null,
     title: String = "Resolver",
+    // Set: the row opens the options on their own page (Settings) instead of in place.
+    onOpenOptions: (() -> Unit)? = null,
     onChange: (typing: Boolean) -> Unit = {}
 ) {
     // Options line up with the row's title: past the icon when there is one.
@@ -143,10 +145,10 @@ internal fun ColumnScope.DnsResolverRows(
     GroupRow(
         title = title,
         icon = icon,
-        onClick = { form.dnsOptionsOpen = !form.dnsOptionsOpen },
+        onClick = onOpenOptions ?: { form.dnsOptionsOpen = !form.dnsOptionsOpen },
         trailing = { GroupValue(form.dns.displayName.substringBefore(" (")) }
     )
-    AnimatedVisibility(form.dnsOptionsOpen) {
+    AnimatedVisibility(onOpenOptions == null && form.dnsOptionsOpen) {
         Column {
             DnsResolver.entries.forEach { resolver ->
                 GroupDivider(start = indent.dp)

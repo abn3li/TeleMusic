@@ -82,7 +82,6 @@ import com.abn3li.telemusic.ui.nowplaying.NowPlayingViewModel
 import com.abn3li.telemusic.ui.nowplaying.PlayerSheetOverlay
 import com.abn3li.telemusic.ui.settings.SettingsScreen
 import com.abn3li.telemusic.ui.theme.LocalPalette
-import com.abn3li.telemusic.ui.sync.SyncScreen
 
 private val LibraryRoutes = setOf(
     Routes.LIBRARY, Routes.LIBRARY_SONGS, Routes.LIBRARY_ALBUMS, Routes.LIBRARY_ARTISTS, Routes.LIBRARY_PLAYLISTS,
@@ -102,7 +101,6 @@ object Routes {
     const val LIBRARY_RECENTLY_ADDED = "library/recently_added"
     const val LIBRARY_SEARCH = "library/search"
     const val ARTIST_SONGS = "artist_songs/{artist}"
-    const val SYNC = "sync"
     const val SETTINGS = "settings"
     const val ALBUM = "album/{album}"
     const val ARTIST = "artist/{artist}"
@@ -111,7 +109,6 @@ object Routes {
     const val SEARCH = "search"
     const val DISCOVER = "discover"
     const val YOUTUBE_SIGN_IN = "youtube_sign_in"
-    const val SPOTIFY = "spotify"
     const val YOUTUBE_BROWSE = "youtube_browse/{browseId}/{title}/{params}"
 
     fun album(name: String) = "album/${Uri.encode(name)}"
@@ -226,7 +223,7 @@ fun TgMusicNavGraph(navController: NavHostController = rememberNavController()) 
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = navBackStackEntry?.destination?.route
     val inLibrary = currentRoute in LibraryRoutes
-    val showBottomBar = inLibrary || currentRoute in listOf(Routes.HOME, Routes.DISCOVER, Routes.SEARCH, Routes.SYNC, Routes.SETTINGS)
+    val showBottomBar = inLibrary || currentRoute in listOf(Routes.HOME, Routes.DISCOVER, Routes.SEARCH, Routes.SETTINGS)
 
     val frostedBackdrop = rememberFrostedBackdrop()
     val backdropHost = remember { FrostedBackdropHost() }
@@ -359,12 +356,6 @@ fun TgMusicNavGraph(navController: NavHostController = rememberNavController()) 
                         focusRequest = searchFocusRequest.intValue
                     )
                 }
-                composable(Routes.SPOTIFY) {
-                    com.abn3li.telemusic.ui.spotify.SpotifyLibraryScreen(
-                        onBack = { navController.popBackStack() },
-                        onOpenPlaylist = { id, name -> navController.navigate(Routes.playlist(id, name)) }
-                    )
-                }
                 composable(Routes.LIBRARY) {
                     LibraryHomeScreen(
                         viewModel = libraryViewModel,
@@ -443,13 +434,11 @@ fun TgMusicNavGraph(navController: NavHostController = rememberNavController()) 
                 composable(Routes.YOUTUBE_SIGN_IN) {
                     com.abn3li.telemusic.ui.youtube.YouTubeSignInScreen(onDone = { navController.popBackStack() })
                 }
-                composable(Routes.SYNC) { SyncScreen(onBack = { navController.popBackStack() }) }
                 composable(Routes.SETTINGS) {
                     SettingsScreen(
-                        onOpenTelegram = { navController.navigate(Routes.SYNC) },
+                        onOpenSpotifyPlaylist = { id, name -> navController.navigate(Routes.playlist(id, name)) },
                         onYouTubeSignIn = { navController.navigate(Routes.YOUTUBE_SIGN_IN) },
                         onBack = { navController.popBackStack() },
-                        onOpenSpotify = { navController.navigate(Routes.SPOTIFY) },
                         onLoggedOut = {
                             navController.navigate(Routes.HOME) { popUpTo(0) { inclusive = true } }
                         }
