@@ -47,6 +47,11 @@ data class ProxySettings(
 class AppSettingsStore(context: Context) {
     private val prefs = context.applicationContext.getSharedPreferences("app_settings", Context.MODE_PRIVATE)
 
+    init {
+        // Left by the old Translate switch that applied to every song.
+        if (prefs.contains("lyrics_translation_on")) prefs.edit().remove("lyrics_translation_on").apply()
+    }
+
     val proxySettings: ProxySettings
         get() = ProxySettings(proxyEnabled, proxyServer, proxyPort, proxySecret)
 

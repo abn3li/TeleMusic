@@ -361,7 +361,6 @@ class NowPlayingViewModel(
     // Translation is fetched only while the lyrics page is on screen: songs passing by in the
     // background cost no requests.
     private val lyricsVisible = MutableStateFlow(false)
-    private val translationRetry = MutableStateFlow(0)
     private val _translation = MutableStateFlow(LyricsTranslationState())
     val translation: StateFlow<LyricsTranslationState> = _translation
 
@@ -379,8 +378,6 @@ class NowPlayingViewModel(
         translatedSong.value = if (translatedSong.value == current) null else current
     }
 
-    fun retryTranslation() { translationRetry.value++ }
-
     /** The lines to translate for what's on screen: the song and its lyrics, synced or plain. */
     private fun lyricsToTranslate(state: NowPlayingUiState): Pair<Long, List<String>>? {
         val song = state.song ?: return null
@@ -397,9 +394,8 @@ class NowPlayingViewModel(
                 app.settingsStore.lyricsTranslationEnabled,
                 translatedSong,
                 app.settingsStore.lyricsTranslationLanguage,
-                lyricsVisible,
-                translationRetry
-            ) { enabled, song, language, visible, _ -> Triple(song.takeIf { enabled }, language, visible) }
+                lyricsVisible
+            ) { enabled, song, language, visible -> Triple(song.takeIf { enabled }, language, visible) }
                 .collectLatest { (song, language, visible) ->
                     if (song == null) {
                         _translation.value = LyricsTranslationState()

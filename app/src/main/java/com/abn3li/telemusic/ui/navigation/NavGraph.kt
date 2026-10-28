@@ -36,6 +36,8 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -223,7 +225,10 @@ fun TgMusicNavGraph(navController: NavHostController = rememberNavController()) 
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = navBackStackEntry?.destination?.route
     val inLibrary = currentRoute in LibraryRoutes
-    val showBottomBar = inLibrary || currentRoute in listOf(Routes.HOME, Routes.DISCOVER, Routes.SEARCH, Routes.SETTINGS)
+    // Settings hides the tabs while its Spotify page is open.
+    var settingsHidesTabs by remember { mutableStateOf(false) }
+    val showBottomBar = inLibrary || currentRoute in listOf(Routes.HOME, Routes.DISCOVER, Routes.SEARCH) ||
+        (currentRoute == Routes.SETTINGS && !settingsHidesTabs)
 
     val frostedBackdrop = rememberFrostedBackdrop()
     val backdropHost = remember { FrostedBackdropHost() }
@@ -438,6 +443,7 @@ fun TgMusicNavGraph(navController: NavHostController = rememberNavController()) 
                     SettingsScreen(
                         onOpenSpotifyPlaylist = { id, name -> navController.navigate(Routes.playlist(id, name)) },
                         onYouTubeSignIn = { navController.navigate(Routes.YOUTUBE_SIGN_IN) },
+                        onTabsHidden = { settingsHidesTabs = it },
                         onBack = { navController.popBackStack() },
                         onLoggedOut = {
                             navController.navigate(Routes.HOME) { popUpTo(0) { inclusive = true } }
@@ -497,6 +503,7 @@ fun TgMusicNavGraph(navController: NavHostController = rememberNavController()) 
                     currentRoute = if (inLibrary) Routes.LIBRARY else currentRoute,
                     onNavigate = navigateTab,
                     backdrop = backdropHost.active ?: frostedBackdrop,
+                    backdropBelow = backdropHost.below,
                     state = state,
                     bottomInset = navBarInset,
                     onExpand = expand,

@@ -7,6 +7,12 @@ import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.updateTransition
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.ExitTransition
+import androidx.compose.animation.togetherWith
+import androidx.compose.ui.draw.drawWithContent
 import androidx.activity.compose.BackHandler
 import com.abn3li.telemusic.data.settings.ThemeMode
 import com.abn3li.telemusic.ui.theme.LocalPalette
@@ -19,6 +25,7 @@ import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.ExperimentalAnimationApi
 import androidx.compose.foundation.layout.Column
 import com.abn3li.telemusic.ui.library.GroupLabelColor
 import androidx.compose.runtime.rememberUpdatedState
@@ -107,7 +114,14 @@ private val TileGrey = Color(0xFF636366)
 private val TileIndigo = Color(0xFF5E5CE6)
 
 @Composable
-fun SettingsScreen(onBack: () -> Unit, onOpenSpotifyPlaylist: (Long, String) -> Unit, onLoggedOut: () -> Unit, onYouTubeSignIn: () -> Unit) {
+fun SettingsScreen(
+    onBack: () -> Unit,
+    onOpenSpotifyPlaylist: (Long, String) -> Unit,
+    onLoggedOut: () -> Unit,
+    onYouTubeSignIn: () -> Unit,
+    // True while a page that hides the tab bar (Spotify) is open over Settings.
+    onTabsHidden: (Boolean) -> Unit = {}
+) {
     val context = LocalContext.current
     val app = context.applicationContext as TgMusicApp
     val scope = rememberCoroutineScope()
@@ -120,6 +134,14 @@ fun SettingsScreen(onBack: () -> Unit, onOpenSpotifyPlaylist: (Long, String) -> 
     var cacheLimit by remember { mutableStateOf(app.settingsStore.maxCacheSizeBytes) }
     // A list opened from a row (Lyrics Sources, Translate Lyrics To): its own page over Settings.
     var settingsPage by rememberSaveable { mutableStateOf<SettingsPage?>(null) }
+    val pageTransition = updateTransition(settingsPage, label = "settingsPage")
+    // A page fully slid in covers Settings: Settings stops drawing underneath it.
+    val pageCovers = pageTransition.currentState != null && pageTransition.targetState != null && !pageTransition.isRunning
+    val tabsHidden = settingsPage == SettingsPage.SPOTIFY
+    DisposableEffect(tabsHidden) {
+        onTabsHidden(tabsHidden)
+        onDispose { onTabsHidden(false) }
+    }
     var lyricsSourcesOff by remember { mutableStateOf(app.settingsStore.lyricsSourcesOff) }
     val translationLanguage by app.settingsStore.lyricsTranslationLanguage.collectAsState()
     val translationEnabled by app.settingsStore.lyricsTranslationEnabled.collectAsState()
@@ -256,6 +278,7 @@ fun SettingsScreen(onBack: () -> Unit, onOpenSpotifyPlaylist: (Long, String) -> 
     )
 
     Box(Modifier.fillMaxSize()) {
+    Box(Modifier.fillMaxSize().drawWithContent { if (!pageCovers) drawContent() }) {
     LargeTitleList(title = "Settings", onBack = onBack, grouped = true) {
         // Every service you sign in to, in one card.
         item("accounts") {
@@ -515,19 +538,20 @@ fun SettingsScreen(onBack: () -> Unit, onOpenSpotifyPlaylist: (Long, String) -> 
             Spacer(Modifier.height(12.dp))
         }
     }
+    }
 
+    BackHandler(settingsPage != null) { settingsPage = null }
     // Over Settings, sliding in from the side like a pushed page; Back returns to Settings where it
     // was. A slide only: a fade draws the page into a layer its own size, cutting off the part it
     // draws up behind the status bar until the animation ends - that strip then popped in late.
-    AnimatedVisibility(
-        visible = settingsPage != null,
-        enter = slideInHorizontally(tween(300, easing = FastOutSlowInEasing)) { it },
-        exit = slideOutHorizontally(tween(260, easing = FastOutSlowInEasing)) { it }
-    ) {
-        // Kept while sliding out, so the page doesn't go blank mid-animation.
-        var shown by remember { mutableStateOf(settingsPage) }
-        settingsPage?.let { shown = it }
-        BackHandler(settingsPage != null) { settingsPage = null }
+    // No size transform either: it clips the same way.
+    @OptIn(ExperimentalAnimationApi::class)
+    pageTransition.AnimatedContent(
+        transitionSpec = {
+            (if (targetState != null) slideInHorizontally(tween(300, easing = FastOutSlowInEasing)) { it } togetherWith ExitTransition.None
+            else EnterTransition.None togetherWith slideOutHorizontally(tween(260, easing = FastOutSlowInEasing)) { it }).using(null)
+        }
+    ) { shown ->
         when (shown) {
             SettingsPage.LYRICS_SOURCES -> LyricsSourcesPage(
                 off = lyricsSourcesOff,

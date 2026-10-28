@@ -67,7 +67,8 @@ internal fun BoxScope.FrostedHeaderBackground(backdrop: FrostedBackdrop, progres
 /** The page is recorded once; each small glass surface reads the same display list. */
 internal class FrostedBackdrop {
     val source = if (Build.VERSION.SDK_INT >= 31) NativeFrostedSource() else null
-    var position = Offset.Zero
+    // State, so the glass follows a page sliding in or out (it moves; its picture doesn't change).
+    var position by mutableStateOf(Offset.Zero)
     var ready by mutableStateOf(false)
 }
 
@@ -76,16 +77,24 @@ internal class FrostedBackdropHost {
     private val pages = mutableListOf<FrostedBackdrop>()
     var active by mutableStateOf<FrostedBackdrop?>(null)
         private set
+    // The page under [active]: seen beside it while it slides in or out.
+    var below by mutableStateOf<FrostedBackdrop?>(null)
+        private set
 
     fun attach(backdrop: FrostedBackdrop) {
         pages.remove(backdrop)
         pages.add(backdrop)
-        active = backdrop
+        update()
     }
 
     fun detach(backdrop: FrostedBackdrop) {
         pages.remove(backdrop)
+        update()
+    }
+
+    private fun update() {
         active = pages.lastOrNull()
+        below = pages.getOrNull(pages.size - 2)
     }
 }
 
@@ -215,7 +224,7 @@ internal fun Modifier.frostedCapsule(capsules: FrostedCapsules, id: Int): Modifi
  * half the work of blurring each capsule on its own, every frame the page behind changes.
  */
 @Composable
-internal fun Modifier.frostedCapsuleGroup(backdrop: FrostedBackdrop, capsules: FrostedCapsules): Modifier {
+internal fun Modifier.frostedCapsuleGroup(backdrop: FrostedBackdrop, capsules: FrostedCapsules, below: FrostedBackdrop? = null): Modifier {
     val light = LocalPalette.current.isLight
     var position by remember { mutableStateOf(Offset.Zero) }
     val surface = remember { if (Build.VERSION.SDK_INT >= 31) NativeFrostedSurface() else null }
@@ -238,13 +247,14 @@ internal fun Modifier.frostedCapsuleGroup(backdrop: FrostedBackdrop, capsules: F
                     return@onDrawWithContent
                 }
                 if (shapes.isNotEmpty()) {
-                    val source = backdrop.source
                     val canvas = drawContext.canvas.nativeCanvas
-                    val sampled = backdrop.ready && Build.VERSION.SDK_INT >= 31 && surface != null && source != null &&
-                        source.node.hasDisplayList() && canvas.isHardwareAccelerated
+                    val top = backdrop.drawnSource()
+                    val under = below?.drawnSource()
+                    val sampled = Build.VERSION.SDK_INT >= 31 && surface != null && (top != null || under != null) &&
+                        canvas.isHardwareAccelerated
                     clipPath(path) {
                         if (sampled) {
-                            surface!!.draw(this, source!!, position - backdrop.position)
+                            surface!!.draw(this, top, position - backdrop.position, under, position - (below?.position ?: Offset.Zero))
                             drawRect(FrostedGrain.brush)
                         }
                         drawRect(tint.copy(alpha = if (sampled) { if (light) 0.73f else 0.8f } else 1f))
@@ -258,6 +268,10 @@ internal fun Modifier.frostedCapsuleGroup(backdrop: FrostedBackdrop, capsules: F
             }
         }
 }
+
+/** The page's picture, once it has one to sample. */
+private fun FrostedBackdrop.drawnSource(): NativeFrostedSource? =
+    source?.takeIf { ready && Build.VERSION.SDK_INT >= 31 && it.node.hasDisplayList() }
 
 /** The capsules mid-movement: the blur last made, moved and faded with each one - not made again. */
 private fun DrawScope.drawMovingCapsules(capsules: FrostedCapsules, surface: NativeFrostedSurface?, light: Boolean) {
@@ -307,6 +321,8 @@ internal class NativeFrostedSurface {
     private var recordedScale = 1f
     private var recordedSource: NativeFrostedSource? = null
     private var recordedPosition = Offset.Unspecified
+    private var recordedUnder: NativeFrostedSource? = null
+    private var recordedUnderPosition = Offset.Unspecified
     private var recordedBackground = Color.Unspecified
 
     fun hasRecording(): Boolean = node.hasDisplayList()
@@ -324,7 +340,10 @@ internal class NativeFrostedSurface {
         }
     }
 
-    fun draw(scope: DrawScope, source: NativeFrostedSource, position: Offset) = with(scope) {
+    fun draw(scope: DrawScope, source: NativeFrostedSource, position: Offset) = draw(scope, source, position, null, Offset.Zero)
+
+    /** Samples [source] - and [under] where [source] doesn't reach, as when it slides in over it. */
+    fun draw(scope: DrawScope, source: NativeFrostedSource?, position: Offset, under: NativeFrostedSource?, underPosition: Offset) = with(scope) {
         // Nine times fewer pixels than a full-resolution effect, confined to these small pills.
         val scale = 0.33f
         // Enough of the neighbourhood that the edge does not turn into a streak (the blur's sigma is
@@ -348,22 +367,35 @@ internal class NativeFrostedSurface {
         // A display list holds a live reference to its child RenderNode. Scrolling updates the
         // page node; the sampling commands stay the same until this surface moves or resizes.
         // Check hasDisplayList too: Android can discard a layer while it is off screen.
+        // Once the top page covers this surface, the one under it can't be seen.
+        val covers = source != null && position.x >= 0f && position.y >= 0f &&
+            position.x + size.width <= source.node.width && position.y + size.height <= source.node.height
+        val shownUnder = if (covers) null else under
+        val background = (source ?: under)!!.background
         if (geometryChanged || recordedSource !== source || recordedPosition != position ||
-            recordedBackground != source.background || !node.hasDisplayList()) {
+            recordedUnder !== shownUnder || (shownUnder != null && recordedUnderPosition != underPosition) ||
+            recordedBackground != background || !node.hasDisplayList()) {
             val recording = node.beginRecording(width, height)
             try {
-                recording.drawColor(source.background.toArgb())
+                recording.drawColor(background.toArgb())
                 recording.scale(scale, scale)
-                recording.translate(padding - position.x, padding - position.y)
-                recording.clipRect(position.x - padding, position.y - padding,
-                    position.x + size.width + padding, position.y + size.height + padding)
-                recording.drawRenderNode(source.node)
+                recording.translate(padding, padding)
+                for ((page, at) in listOf(shownUnder to underPosition, source to position)) {
+                    if (page == null) continue
+                    recording.save()
+                    recording.translate(-at.x, -at.y)
+                    recording.clipRect(at.x - padding, at.y - padding, at.x + size.width + padding, at.y + size.height + padding)
+                    recording.drawRenderNode(page.node)
+                    recording.restore()
+                }
             } finally {
                 node.endRecording()
             }
             recordedSource = source
             recordedPosition = position
-            recordedBackground = source.background
+            recordedUnder = shownUnder
+            recordedUnderPosition = underPosition
+            recordedBackground = background
             recordedPadding = padding
             recordedScale = scale
         }

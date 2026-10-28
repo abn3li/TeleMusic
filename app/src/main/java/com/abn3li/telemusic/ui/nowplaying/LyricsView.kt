@@ -151,7 +151,7 @@ internal fun LyricsPage(
         }
     }
     LaunchedEffect(translation.failed) {
-        if (translation.failed) android.widget.Toast.makeText(context, "Couldn't translate the lyrics - tap Translate to try again", android.widget.Toast.LENGTH_SHORT).show()
+        if (translation.failed) android.widget.Toast.makeText(context, "Couldn't translate the lyrics", android.widget.Toast.LENGTH_SHORT).show()
     }
     val translations = translation.lines.takeIf { translation.on }.orEmpty()
     val hasLyrics = !state.isFetchingLyrics && (state.lyricLines.isNotEmpty() || !song?.lyricsPlain.isNullOrBlank())
@@ -246,7 +246,7 @@ internal fun LyricsPage(
         if (hasLyrics && translationEnabled) TranslateButton(
             on = translation.on,
             loading = translation.loading,
-            onClick = { if (translation.failed) viewModel.retryTranslation() else viewModel.toggleTranslation() },
+            onClick = viewModel::toggleTranslation,
             modifier = Modifier.align(Alignment.BottomEnd).padding(end = 18.dp, bottom = 14.dp)
         )
     }

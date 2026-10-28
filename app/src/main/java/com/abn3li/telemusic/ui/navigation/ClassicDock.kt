@@ -73,7 +73,9 @@ internal fun ClassicDock(
     onPrevious: () -> Unit,
     transition: PlayerTransition,
     showTabs: Boolean,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    // The page under [backdrop], sampled beside it while it slides.
+    backdropBelow: FrostedBackdrop? = null
 ) {
     if (!showTabs && state.song == null) return
 
@@ -104,7 +106,7 @@ internal fun ClassicDock(
     Column(modifier.fillMaxWidth()
         .padding(start = 16.dp, end = 16.dp, bottom = maxOf(bottomInset, 15.dp) + 2.dp)
         .clickable(remember { MutableInteractionSource() }, indication = null) {}
-        .frostedCapsuleGroup(backdrop, capsules)) {
+        .frostedCapsuleGroup(backdrop, capsules, backdropBelow)) {
         if (state.song != null) {
             ClassicMiniPlayer(state, onExpand, onExpandDrag, onExpandDragEnd, onPlayPause, onNext, onPrevious, transition,
                 Modifier.fillMaxWidth().height(56.dp)
