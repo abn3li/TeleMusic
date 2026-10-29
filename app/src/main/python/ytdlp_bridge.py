@@ -8,9 +8,12 @@ Chaquopy Kotlin<->Python boundary cleanly - no custom Python objects.
 import os
 import re
 import time
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from urllib.parse import quote
 import yt_dlp
+
+# How long a song's lookup waits on the light client before also trying the default ones.
+_RACE_AFTER_S = 2.0
 
 # What a download saves: YouTube's audio-only Opus stream (48 kHz), else another audio-only
 # stream - never a file with video in it (no "/best"), whatever the caller's selector allows.
@@ -344,38 +347,74 @@ def _resolve_info(video_id, format_selector, audio_first=False):
     # android/ios clients with only a video file (format 18), so "full" (android + ios) comes
     # last - it fails the same way "light" does.
     defaults = {k: v for k, v in opts.items() if k != "extractor_args"}
-    order = (("default", defaults), ("light", light), ("full", opts)) if audio_first \
-        else (("light", light), ("default", defaults), ("full", opts))
     url = f"https://music.youtube.com/watch?v={video_id}"
-    last_error = None
+
+    def attempt(mode, options):
+        """[mode]'s stream, or an exception saying why there isn't one."""
+        with yt_dlp.YoutubeDL(options) as ydl:
+            info = ydl.extract_info(url, download=False)
+        if not info or not info.get("url"):
+            raise ValueError("no stream url")
+        if info.get("vcodec") in (None, "none"):
+            return info, mode
+        if audio_first:
+            raise ValueError("only a video file offered")
+        # A video file's link from those clients is sometimes throttled to a few KB/s (the
+        # player then sat buffering at 0:00): its speed is tried once, briefly, first.
+        if not _link_is_fast(info):
+            raise ValueError("video link too slow")
+        return info, mode
+
+    def offline(e):
+        # Can't reach YouTube at all: another client won't either.
+        return any(sign in str(e) for sign in _NETWORK_ERRORS)
+
+    def reason(mode, e):
+        return f"{mode}: {str(e).replace('ERROR: ', '').strip()[:220]}"
+
+    if audio_first:
+        order = (("default", defaults), ("light", light), ("full", opts))
+        failures = []
+        for mode, options in order:
+            try:
+                return attempt(mode, options)
+            except Exception as e:
+                failures.append(reason(mode, e))
+                if offline(e):
+                    break
+        raise Exception(" | ".join(failures))
+
+    # Play: the light client first, as it's quickest when it works. If it hasn't answered in
+    # [_RACE_AFTER_S], the default clients start alongside it and whichever gives a working link
+    # first plays - a light lookup that fails or hangs no longer holds the song up for its whole
+    # wait before the next one even starts. The one left running finishes in the background.
+    pool = ThreadPoolExecutor(max_workers=2)
     failures = []
-    for mode, attempt in order:
+    try:
+        running = {pool.submit(attempt, "light", light): "light"}
+        started_default = False
+        deadline = time.monotonic() + _RACE_AFTER_S
+        while running:
+            timeout = max(0.0, deadline - time.monotonic()) if not started_default else None
+            done, _ = wait(running, timeout=timeout, return_when=FIRST_COMPLETED)
+            for future in done:
+                mode = running.pop(future)
+                try:
+                    return future.result()
+                except Exception as e:
+                    failures.append(reason(mode, e))
+                    if offline(e):
+                        raise Exception(" | ".join(failures)) from e
+            if not started_default and (not done or not running):
+                started_default = True
+                running[pool.submit(attempt, "default", defaults)] = "default"
         try:
-            with yt_dlp.YoutubeDL(attempt) as ydl:
-                info = ydl.extract_info(url, download=False)
-            if info and info.get("url"):
-                audio_only = info.get("vcodec") in (None, "none")
-                if audio_only:
-                    return info, mode
-                if audio_first:
-                    last_error = ValueError("only a video file offered")
-                # A video file's link from those clients is sometimes throttled to a few KB/s (the
-                # player then sat buffering at 0:00): its speed is tried once, briefly, first.
-                elif _link_is_fast(info):
-                    return info, mode
-                else:
-                    last_error = ValueError("video link too slow")
-            else:
-                last_error = ValueError("no stream url")
+            return attempt("full", opts)
         except Exception as e:
-            last_error = e
-            # Can't reach YouTube at all: another client won't either. Trying each one made an
-            # offline song wait through every client's timeouts before failing.
-            if any(sign in str(e) for sign in _NETWORK_ERRORS):
-                failures.append(f"{mode}: {str(e).replace('ERROR: ', '').strip()[:220]}")
-                break
-        failures.append(f"{mode}: {str(last_error).replace('ERROR: ', '').strip()[:220]}")
-    raise Exception(" | ".join(failures)) from last_error
+            failures.append(reason("full", e))
+            raise Exception(" | ".join(failures)) from e
+    finally:
+        pool.shutdown(wait=False)
 
 
 def resolve_stream_url(video_id, format_selector="bestaudio/best"):
@@ -388,6 +427,15 @@ def resolve_stream_url(video_id, format_selector="bestaudio/best"):
     entry = _entry_from_info(info)
     entry["url"] = info.get("url")
     return entry
+
+
+def warm_up():
+    """Loads yt-dlp's YouTube extractor now, so the first song played doesn't wait for it.
+    Nothing is fetched."""
+    t0 = time.monotonic()
+    with yt_dlp.YoutubeDL({"quiet": True, "no_warnings": True}) as ydl:
+        ydl.get_info_extractor("Youtube")
+    print(f"[timing] warm_up: {time.monotonic() - t0:.2f}s")
 
 
 def _link_is_fast(info, sample=256 * 1024, within=1.5):

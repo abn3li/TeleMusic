@@ -22,6 +22,9 @@ import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
+import com.abn3li.telemusic.data.local.displayArtwork
+import androidx.compose.material.icons.rounded.IosShare
 import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.interaction.DragInteraction
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -121,6 +124,7 @@ private const val INTRO_COUNTDOWN_MIN_MS = 3000L
  * The Lyrics page body: synced lyrics with the Apple-Music-style follow animation, or the
  * plain/empty/loading states. [onUserInteraction] keeps the player controls visible.
  */
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
 internal fun LyricsPage(
     state: NowPlayingUiState,
@@ -155,6 +159,35 @@ internal fun LyricsPage(
     }
     val translations = translation.lines.takeIf { translation.on }.orEmpty()
     val hasLyrics = !state.isFetchingLyrics && (state.lyricLines.isNotEmpty() || !song?.lyricsPlain.isNullOrBlank())
+
+    // Lines picked to share (a long-press starts picking), by their place in the lyrics shown.
+    val shownLines = remember(state.lyricLines, song?.lyricsPlain) {
+        state.lyricLines.map { it.text }.ifEmpty { song?.lyricsPlain?.lines().orEmpty() }
+    }
+    var selection by remember(song?.telegramMessageId, shownLines) { mutableStateOf<Set<Int>?>(null) }
+    var shareCard by remember { mutableStateOf<LyricsShareCard?>(null) }
+    val haptics = LocalHapticFeedback.current
+    androidx.activity.compose.BackHandler(selection != null) { selection = null }
+    fun startSelection(index: Int) {
+        if (selection != null || shownLines.getOrNull(index).isNullOrBlank()) return
+        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+        selection = setOf(index)
+    }
+    fun toggleSelection(index: Int) {
+        val current = selection ?: return
+        if (shownLines.getOrNull(index).isNullOrBlank()) return
+        val next = when {
+            index in current -> current - index
+            current.size >= LYRICS_SHARE_MAX_LINES -> {
+                android.widget.Toast.makeText(context, "Up to $LYRICS_SHARE_MAX_LINES lines", android.widget.Toast.LENGTH_SHORT).show()
+                current
+            }
+            else -> current + index
+        }
+        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+        selection = next.ifEmpty { null }
+    }
+
     Box(modifier.fillMaxSize()) {
         when {
             state.isFetchingLyrics -> Column(
@@ -174,6 +207,9 @@ internal fun LyricsPage(
                 viewModel = viewModel,
                 effects = effects,
                 active = active,
+                selection = selection,
+                onLongPressLine = ::startSelection,
+                onSelectLine = ::toggleSelection,
                 onOpenLyricsSource = onOpenLyricsSource,
                 onUserInteraction = onUserInteraction
             )
@@ -186,14 +222,21 @@ internal fun LyricsPage(
                     .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onUserInteraction)
                     .padding(horizontal = 28.dp, vertical = 36.dp)
             ) {
-                if (translations.isEmpty()) Text(
-                    text = song.lyricsPlain,
-                    color = Color.White.copy(alpha = 0.85f),
-                    fontSize = 24.sp,
-                    fontWeight = FontWeight.Bold,
-                    lineHeight = 34.sp
-                ) else song.lyricsPlain.lines().forEach { line ->
-                    Text(line, color = Color.White.copy(alpha = 0.85f), fontSize = 24.sp, fontWeight = FontWeight.Bold, lineHeight = 34.sp)
+                shownLines.forEachIndexed { index, line ->
+                    val selected = selection?.let { index in it }
+                    Text(
+                        line,
+                        color = Color.White.copy(alpha = when (selected) { null -> 0.85f; true -> 1f; false -> 0.3f }),
+                        fontSize = 24.sp,
+                        fontWeight = FontWeight.Bold,
+                        lineHeight = 34.sp,
+                        modifier = Modifier.fillMaxWidth().combinedClickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = null,
+                            onLongClick = { startSelection(index) },
+                            onClick = { if (selection != null) toggleSelection(index) else onUserInteraction() }
+                        )
+                    )
                     translations[line.trim()]?.let { translated ->
                         Text(translated, color = Color.White.copy(alpha = 0.55f), fontSize = 15.sp, fontWeight = FontWeight.Medium,
                             lineHeight = 21.sp, style = TranslationStyle, modifier = Modifier.fillMaxWidth().padding(bottom = 10.dp))
@@ -242,13 +285,58 @@ internal fun LyricsPage(
                 }
             }
         }
+        selection?.let { picked ->
+            ShareSelectionBar(
+                count = picked.size,
+                onCancel = { selection = null },
+                onShare = {
+                    val current = song ?: return@ShareSelectionBar
+                    val lines = picked.sorted().map { shownLines[it].trim() }
+                    shareCard = LyricsShareCard(
+                        lines = lines,
+                        translations = lines.map { translations[it] },
+                        title = current.title,
+                        artist = current.artist,
+                        artwork = current.displayArtwork
+                    )
+                }
+            )
+        }
+        shareCard?.let { LyricsShareDialog(it, onDismiss = { shareCard = null }) }
         // Rides down with the page when the controls step aside, and stays.
-        if (hasLyrics && translationEnabled) TranslateButton(
+        if (hasLyrics && translationEnabled && selection == null) TranslateButton(
             on = translation.on,
             loading = translation.loading,
             onClick = viewModel::toggleTranslation,
             modifier = Modifier.align(Alignment.BottomEnd).padding(end = 18.dp, bottom = 14.dp)
         )
+    }
+}
+
+/** While picking lines to share: Cancel and Share side by side at the bottom, clear of the lyrics. */
+@Composable
+private fun androidx.compose.foundation.layout.BoxScope.ShareSelectionBar(count: Int, onCancel: () -> Unit, onShare: () -> Unit) {
+    Row(
+        Modifier.align(Alignment.BottomCenter).padding(bottom = 14.dp),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(
+            Modifier.height(46.dp).clip(CircleShape).background(Color(0xCC1C1C1E))
+                .clickable(onClick = onCancel).padding(horizontal = 20.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            Text("Cancel", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Medium)
+        }
+        Row(
+            Modifier.height(46.dp).clip(CircleShape).background(Color.White.copy(alpha = 0.92f))
+                .clickable(onClick = onShare).padding(horizontal = 22.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(Icons.Rounded.IosShare, contentDescription = null, tint = Color.Black, modifier = Modifier.size(18.dp))
+            Spacer(Modifier.width(8.dp))
+            Text(if (count == 1) "Share 1 Line" else "Share $count Lines", color = Color.Black, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+        }
     }
 }
 
@@ -318,9 +406,13 @@ private fun SyncedLyrics(
     viewModel: NowPlayingViewModel,
     effects: PlayerEffects,
     active: Boolean,
+    selection: Set<Int>?,
+    onLongPressLine: (Int) -> Unit,
+    onSelectLine: (Int) -> Unit,
     onOpenLyricsSource: () -> Unit,
     onUserInteraction: () -> Unit
 ) {
+    val selecting = selection != null
     val progressState = viewModel.playbackProgress.collectAsStateWhileActive(active)
     // The letter-by-letter sweep runs smoothly between the player's position updates only while
     // the music plays and the lyrics are visible; covered or paused, it holds still.
@@ -373,8 +465,9 @@ private fun SyncedLyrics(
         val anchorPx = with(density) { (maxHeight * 0.14f).toPx() }
         val topSpacer = maxHeight * 0.14f
 
-        LaunchedEffect(activeIndex, autoFollow, active) {
-            if (!active || !autoFollow || activeIndex < 0) return@LaunchedEffect
+        // Holds still while lines are being picked; follows again after.
+        LaunchedEffect(activeIndex, autoFollow, active, selecting) {
+            if (!active || !autoFollow || selecting || activeIndex < 0) return@LaunchedEffect
             val itemIndex = activeIndex + 1
             val target = listState.layoutInfo.visibleItemsInfo.firstOrNull { it.index == itemIndex }
             if (target == null) {
@@ -429,15 +522,21 @@ private fun SyncedLyrics(
                     } else Column {
                         LyricLineText(
                             text = line.text,
-                            sweep = if (isActive) sweepTiming(line, lines.getOrNull(index + 1)) else null,
+                            sweep = if (isActive && !selecting) sweepTiming(line, lines.getOrNull(index + 1)) else null,
                             progressState = progressState,
                             isPlaying = isPlaying,
                             isActive = isActive,
                             distance = distance,
                             justPassed = activeIndex >= 0 && index == activeIndex - 1,
-                            blurEnabled = autoFollow && effects.lyricsBlur,
+                            blurEnabled = autoFollow && effects.lyricsBlur && !selecting,
                             glow = effects.lyricsGlow,
+                            selected = selection?.let { index in it },
+                            onLongClick = { onLongPressLine(index) },
                             onClick = {
+                                if (selecting) {
+                                    onSelectLine(index)
+                                    return@LyricLineText
+                                }
                                 haptics.performHapticFeedback(HapticFeedbackType.LongPress)
                                 latestOnInteraction()
                                 autoFollow = true
@@ -445,8 +544,9 @@ private fun SyncedLyrics(
                             }
                         )
                         translations[line.text.trim()]?.let { translated ->
-                            TranslationLine(translated, isActive, distance, justPassed = activeIndex >= 0 && index == activeIndex - 1,
-                                blurEnabled = autoFollow && effects.lyricsBlur)
+                            TranslationLine(translated, selection?.let { index in it } ?: isActive, distance,
+                                justPassed = activeIndex >= 0 && index == activeIndex - 1,
+                                blurEnabled = autoFollow && effects.lyricsBlur && !selecting)
                         }
                     }
                 }
@@ -711,6 +811,7 @@ internal fun CurrentLyricLine(
     }
 }
 
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
 private fun LyricLineText(
     text: String,
@@ -722,22 +823,25 @@ private fun LyricLineText(
     justPassed: Boolean,
     blurEnabled: Boolean,
     glow: Boolean,
+    // Picking lines to share: picked ones bright, the rest dim, whichever is being sung.
+    selected: Boolean?,
+    onLongClick: () -> Unit,
     onClick: () -> Unit
 ) {
     // Soft halo on the line being sung: eases in after the line lights up, leaves quickly so the
     // old and new halos never overlap mid-scroll.
     val haloAlpha by animateFloatAsState(
-        targetValue = if (glow && isActive) 0.6f else 0f,
+        targetValue = if (glow && isActive && selected == null) 0.6f else 0f,
         animationSpec = if (isActive) tween(500, delayMillis = 150, easing = LyricEasing) else tween(220, easing = LyricEasing),
         label = "lyricHalo"
     )
     val alpha by animateFloatAsState(
-        targetValue = if (isActive) 1f else 0.3f,
+        targetValue = if (selected ?: isActive) 1f else 0.3f,
         animationSpec = tween(durationMillis = 380, delayMillis = if (isActive) 120 else 60, easing = LyricEasing),
         label = "lyricAlpha"
     )
     val scale by animateFloatAsState(
-        targetValue = if (isActive) 1f else 0.96f,
+        targetValue = if (selected ?: isActive) 1f else 0.96f,
         animationSpec = tween(durationMillis = 420, delayMillis = if (isActive) 100 else 40, easing = LyricEasing),
         label = "lyricScale"
     )
@@ -761,7 +865,8 @@ private fun LyricLineText(
         },
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onClick)
+            .combinedClickable(interactionSource = remember { MutableInteractionSource() }, indication = null,
+                onLongClick = onLongClick, onClick = onClick)
             // The layers below reach GLOW_ROOM past the line's top and bottom, without taking
             // that space, so they're big enough for the glow (a layer cuts off what's outside it).
             .glowRoom(GLOW_ROOM)

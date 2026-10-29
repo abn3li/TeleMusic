@@ -897,11 +897,16 @@ class NowPlayingViewModel(
 
     private fun prefetchNextTrack() {
         prefetchJob?.cancel()
-        val nextId = queue.peekNextId() ?: return
+        // The next song, then the one Previous goes to (usually played already, so nothing to do).
+        val ids = listOfNotNull(queue.peekNextId(), queue.peekPreviousId().takeIf { queue.hasPrevious() })
+            .distinct().filter { it != queue.currentSongId() }
+        if (ids.isEmpty()) return
         prefetchJob = viewModelScope.launch(Dispatchers.IO) {
-            val nextSong = allSongsMap.value[nextId] ?: repository.getSongById(nextId) ?: return@launch
-            if (nextSong.youtubeVideoId != null && nextSong.localFilePath == null) {
-                repository.resolveDirectPlaybackUri(nextSong)
+            for (id in ids) {
+                val song = allSongsMap.value[id] ?: repository.getSongById(id) ?: continue
+                if (song.youtubeVideoId != null && song.localFilePath == null) {
+                    repository.prefetchYouTubeOpening(song)
+                }
             }
         }
     }

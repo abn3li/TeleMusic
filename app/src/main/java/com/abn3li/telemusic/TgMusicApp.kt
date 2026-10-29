@@ -28,6 +28,7 @@ import kotlinx.coroutines.withContext
 class TgMusicApp : Application(), ImageLoaderFactory {
     val flacUpgradeStore by lazy { com.abn3li.telemusic.data.quality.FlacUpgradeStore(this) }
     internal val flacCache by lazy { com.abn3li.telemusic.data.quality.FlacCache(java.io.File(filesDir, "flac_cache")) }
+    val youtubeAudioCache by lazy { com.abn3li.telemusic.playback.YouTubeAudioCache(this) }
     lateinit var tdlibManager: TdlibManager; private set
     lateinit var musicRepository: MusicRepository; private set
     lateinit var lyricsTranslator: LyricsTranslator; private set
@@ -167,6 +168,12 @@ class TgMusicApp : Application(), ImageLoaderFactory {
         appScope.launch { discoveryRepository.preloadGenres() }
         // Widgets show the last played song until something plays (no-op with no widget).
         com.abn3li.telemusic.widget.MusicWidgets.refresh(this)
+    }
+
+    /** Readies yt-dlp once, when the app is opened with the YouTube feed on - not for a process
+     * started only for a widget or the player in the background. */
+    fun warmUpYouTube() {
+        if (settingsStore.homeFeeds.value.youtube) appScope.launch { ytDlpRepository.warmUp() }
     }
 
     /** The first screen has what it needs to show (Home's library, or the hello screens) - the

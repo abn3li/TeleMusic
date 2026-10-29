@@ -38,6 +38,7 @@ class MainActivity : ComponentActivity() {
         // already running (reopened from recents) it goes as soon as the screen is drawn.
         val splash = installSplashScreen()
         val app = application as TgMusicApp
+        app.warmUpYouTube()
         val coldStart = SystemClock.uptimeMillis() - Process.getStartUptimeMillis() < COLD_START_WINDOW_MS
         if (coldStart && savedInstanceState == null) {
             splash.setKeepOnScreenCondition {

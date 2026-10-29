@@ -182,6 +182,12 @@ class PlaybackQueue {
         return null
     }
 
+    /** Peeks at the song Previous goes to, without moving - for pre-fetching it too. */
+    fun peekPreviousId(): Long? {
+        if (base.isEmpty()) return null
+        return base[if (baseIndex - 1 >= 0) baseIndex - 1 else base.size - 1]
+    }
+
     fun hasPrevious(): Boolean {
         if (base.size <= 1) return false
         return when (repeatMode) {

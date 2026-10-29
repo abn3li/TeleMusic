@@ -75,7 +75,7 @@ class MusicService : MediaLibraryService() {
         super.onCreate()
         running = this
         val app = application as TgMusicApp
-        val normalDataSourceFactory = DefaultDataSource.Factory(this, ResolvingDataSource.Factory(app.tdlibManager))
+        val normalDataSourceFactory = DefaultDataSource.Factory(this, ResolvingDataSource.Factory(app.tdlibManager, app.youtubeAudioCache))
         val dataSourceFactory = androidx.media3.datasource.DataSource.Factory {
             FlacRoutingDataSource(normalDataSourceFactory.createDataSource())
         }

@@ -505,8 +505,16 @@ private fun PinMenuItem(pinned: Boolean, onClick: () -> Unit) {
 
 @Composable
 fun SmartPlaylistDetailScreen(kind: SmartPlaylistKind, viewModel: LibraryViewModel, callbacks: LibraryCallbacks) {
-    val repository = (LocalContext.current.applicationContext as TgMusicApp).musicRepository
+    val context = LocalContext.current
+    val repository = (context.applicationContext as TgMusicApp).musicRepository
     val scope = rememberCoroutineScope()
+    // Downloads has a second list: songs kept as they played (they play without internet too).
+    // One page for both, so switching swaps only the list.
+    var showCached by rememberSaveable { mutableStateOf(false) }
+    val cachedTab = kind == SmartPlaylistKind.DOWNLOADED && showCached
+    val cached by remember(cachedTab) {
+        if (cachedTab) repository.observeCachedSongs() else kotlinx.coroutines.flow.emptyFlow()
+    }.collectAsState(initial = null)
     val songs by remember(kind) {
         when (kind) {
             SmartPlaylistKind.LIKED -> repository.observeFavorites(SortField.TITLE, true)
@@ -521,20 +529,52 @@ fun SmartPlaylistDetailScreen(kind: SmartPlaylistKind, viewModel: LibraryViewMod
             SmartPlaylistKind.DOWNLOADED -> repository.observeHideDownloadedFromTracks()
         }
     }.collectAsState()
-    val list = songs.orEmpty()
+    val cachedSongs = cached
+    val list = (if (cachedTab) cachedSongs?.songs else songs).orEmpty()
     val pinnedKeys by viewModel.pinnedKeys.collectAsState()
     val pinned = smartPinKey(kind) in pinnedKeys
+    var confirmClear by remember { mutableStateOf(false) }
+    fun size(bytes: Long) = android.text.format.Formatter.formatShortFileSize(context, bytes)
+    fun toast(text: String) = android.widget.Toast.makeText(context, text, android.widget.Toast.LENGTH_SHORT).show()
 
     PlaylistLikePage(
-        title = kind.label,
-        collectionKey = "smart:${kind.name}",
-        songs = songs,
+        title = if (kind == SmartPlaylistKind.DOWNLOADED) "Downloads" else kind.label,
+        collectionKey = if (cachedTab) "smart:CACHED" else "smart:${kind.name}",
+        songs = if (cachedTab) cachedSongs?.songs else songs,
         placeholder = kind.icon(),
         viewModel = viewModel,
         callbacks = callbacks,
-        titleOrderByDefault = true,
+        // Cached: the song played last first, like the cache keeps them.
+        titleOrderByDefault = !cachedTab,
+        recentLabel = if (cachedTab) "Recently Played" else "Recently Added",
+        detailLine = if (cachedTab) cachedSongs?.let { songCountLine(it.songs) + if (it.bytes > 0) " · " + size(it.bytes) else "" } else null,
+        heroFooter = if (kind == SmartPlaylistKind.DOWNLOADED) { { DownloadsTabs(cached = showCached, onSelect = { showCached = it }) } } else null,
+        listHeader = if (cachedTab && list.isNotEmpty()) { {
+            item("cached_note", contentType = "note") {
+                Text(
+                    "Kept on the phone as they played, so they play without internet. The oldest go when the cache is full.",
+                    color = ink.copy(alpha = 0.5f), fontSize = 13.sp, lineHeight = 17.sp,
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 22.dp).padding(top = 4.dp, bottom = 10.dp)
+                )
+            }
+        } } else null,
+        emptyText = if (cachedTab) "Songs you play all the way through stay here and play without internet." else "No songs here yet",
+        songSubtitle = if (cachedTab) { song -> cachedSongs?.sizes?.get(song.telegramMessageId)?.let { "${song.artist} · ${size(it)}" } } else null,
+        onRemoveFromCache = if (cachedTab) { song ->
+            scope.launch {
+                val freed = repository.removeFromCache(song)
+                toast(if (freed == null) "It's playing now" else "Removed from the cache (${size(freed)})")
+            }
+        } else null,
         menu = { close ->
             LibraryMenuItem("Play Next", Icons.Rounded.QueuePlayNext) { list.forEach { callbacks.onPlayNext(it.telegramMessageId) }; close() }
+            if (cachedTab) {
+                if (list.isNotEmpty()) {
+                    LibraryMenuDivider()
+                    LibraryMenuItem("Clear Cached Songs", Icons.Rounded.Delete, destructive = true) { confirmClear = true; close() }
+                }
+                return@PlaylistLikePage
+            }
             LibraryMenuDivider()
             LibraryMenuItem(
                 if (hidden) "Show in Songs" else "Hide from Songs",
@@ -553,6 +593,49 @@ fun SmartPlaylistDetailScreen(kind: SmartPlaylistKind, viewModel: LibraryViewMod
             PinMenuItem(pinned) { viewModel.togglePin(smartPinKey(kind)); close() }
         }
     )
+
+    if (confirmClear) {
+        val shown = cachedSongs
+        AppAlert(
+            title = "Clear Cached Songs?",
+            message = "Removes the ${shown?.songs?.size ?: 0} songs kept as they played" +
+                (shown?.let { " (${size(it.bytes)})" } ?: "") + ". They stream again when played. Downloads stay.",
+            onDismiss = { confirmClear = false },
+            actions = listOf(
+                AlertAction("Cancel", bold = true) { confirmClear = false },
+                AlertAction("Clear", destructive = true) {
+                    confirmClear = false
+                    scope.launch {
+                        val (count, bytes) = repository.clearCachedSongs()
+                        toast(if (count == 0) "Nothing to clear" else "Cleared ${size(bytes)}")
+                    }
+                }
+            )
+        )
+    }
+}
+
+/** Downloads' two lists: what was downloaded, and what was kept as it played. */
+@Composable
+private fun DownloadsTabs(cached: Boolean, onSelect: (cached: Boolean) -> Unit) {
+    val shape = RoundedCornerShape(10.dp)
+    Row(
+        Modifier.fillMaxWidth().padding(horizontal = 18.dp).height(36.dp).clip(shape)
+            .background(ink.copy(alpha = 0.08f)).padding(3.dp)
+    ) {
+        for ((label, isCached) in listOf("Downloaded" to false, "Cached" to true)) {
+            val selected = cached == isCached
+            Box(
+                Modifier.weight(1f).fillMaxHeight().clip(RoundedCornerShape(8.dp))
+                    .background(if (selected) ink.copy(alpha = 0.16f) else Color.Transparent)
+                    .clickable(enabled = !selected) { onSelect(isCached) },
+                contentAlignment = Alignment.Center
+            ) {
+                Text(label, color = ink.copy(alpha = if (selected) 1f else 0.6f), fontSize = 14.sp,
+                    fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium)
+            }
+        }
+    }
 }
 
 /**
@@ -575,11 +658,24 @@ private fun PlaylistLikePage(
     covers: List<String>? = null,
     // Set while choosing a cover song: a tap picks the song instead of playing it.
     onPickSong: ((SongEntity) -> Unit)? = null,
+    // Null: the song count and length.
+    detailLine: String? = null,
+    // Under the Play / Shuffle buttons (Downloads' tabs).
+    heroFooter: (@Composable ColumnScope.() -> Unit)? = null,
+    // The second sort's name: what the songs' own order is when not by title.
+    recentLabel: String = "Recently Added",
+    // Rows above the songs.
+    listHeader: (LazyListScope.() -> Unit)? = null,
+    emptyText: String = "No songs here yet",
+    // A song's second line, when it isn't just its artist (null: the artist).
+    songSubtitle: ((SongEntity) -> String?)? = null,
+    // Set on the Cached list: the song card offers Remove from Cache.
+    onRemoveFromCache: ((SongEntity) -> Unit)? = null,
     menu: @Composable ColumnScope.(close: () -> Unit) -> Unit
 ) {
     val source = songs.orEmpty()
     val heroCovers = covers ?: remember(source) { autoPlaylistCovers(source) }
-    var byTitle by rememberSaveable { mutableStateOf(titleOrderByDefault) }
+    var byTitle by rememberSaveable(collectionKey) { mutableStateOf(titleOrderByDefault) }
     val list = remember(source, byTitle) {
         when {
             byTitle == titleOrderByDefault -> source
@@ -588,7 +684,8 @@ private fun PlaylistLikePage(
         }
     }
     val showIndex by viewModel.showAlphabetIndex.collectAsState()
-    val actions = rememberLibrarySongActions(viewModel, callbacks.onPlayNext, callbacks.onOpenArtist, callbacks.onOpenAlbum)
+    val songActions = rememberLibrarySongActions(viewModel, callbacks.onPlayNext, callbacks.onOpenArtist, callbacks.onOpenAlbum)
+    val actions = remember(songActions, onRemoveFromCache) { songActions.withRemoveFromCache(onRemoveFromCache) }
     CollectionDetailPage(
         title = title,
         actions = actions,
@@ -597,12 +694,14 @@ private fun PlaylistLikePage(
         sortToken = byTitle.toString(),
         subtitle = null,
         onSubtitleClick = null,
-        detailLine = songCountLine(list),
+        detailLine = detailLine ?: songCountLine(list),
         hero = { HeroImage(heroCovers, placeholder) },
+        heroFooter = heroFooter,
         songs = list,
         loaded = songs != null,
         callbacks = callbacks,
         indexKey = if (showIndex && byTitle) { song -> song.title } else null,
+        emptyText = emptyText,
         menu = { close ->
             menu(close)
             val editing = LocalLibraryEditing.current
@@ -610,7 +709,7 @@ private fun PlaylistLikePage(
             LibraryMenuItem("Title", if (byTitle && editing?.isCustom != true) Icons.Rounded.Check else Icons.Rounded.SortByAlpha,
                 selected = byTitle && editing?.isCustom != true) { editing?.resetOrder(); byTitle = true; close() }
             LibraryMenuDivider()
-            LibraryMenuItem("Recently Added", if (!byTitle && editing?.isCustom != true) Icons.Rounded.Check else Icons.Rounded.Schedule,
+            LibraryMenuItem(recentLabel, if (!byTitle && editing?.isCustom != true) Icons.Rounded.Check else Icons.Rounded.Schedule,
                 selected = !byTitle && editing?.isCustom != true) { editing?.resetOrder(); byTitle = false; close() }
             CustomSortMenuItem(close)
             LibraryMenuGroupGap()
@@ -620,11 +719,13 @@ private fun PlaylistLikePage(
                 selected = showIndex
             ) { viewModel.setShowAlphabetIndex(!showIndex); close() }
         }
-    ) { shown, _ ->
+    ) { shown, searching ->
         val ids = shown.map { it.telegramMessageId }
+        if (!searching) listHeader?.invoke(this)
         itemsIndexed(shown, key = { _, s -> s.telegramMessageId }, contentType = { _, _ -> "song" }) { index, song ->
             Column(librarySongPlacement(song.telegramMessageId)) {
-            LibrarySongRow(song = song, actions = actions, onClick = { if (onPickSong != null) onPickSong(song) else callbacks.onPlay(ids, index) })
+            LibrarySongRow(song = song, actions = actions, onClick = { if (onPickSong != null) onPickSong(song) else callbacks.onPlay(ids, index) },
+                subtitle = songSubtitle?.invoke(song) ?: song.artist)
             if (index < shown.lastIndex) LibraryDivider(start = 88.dp)
             }
         }
@@ -695,6 +796,9 @@ internal fun CollectionDetailPage(
     menu: (@Composable ColumnScope.(close: () -> Unit) -> Unit)? = null,
     // Set to show the A–Z strip (only for a title-sorted list): which text of a song it indexes.
     indexKey: ((SongEntity) -> String)? = null,
+    // Under the Play / Shuffle buttons.
+    heroFooter: (@Composable ColumnScope.() -> Unit)? = null,
+    emptyText: String = "No songs here yet",
     body: LazyListScope.(shown: List<SongEntity>, searching: Boolean) -> Unit
 ) {
     val editing = rememberLibraryEditing(collectionKey, sortToken)
@@ -715,6 +819,7 @@ internal fun CollectionDetailPage(
     listState = listState,
     loaded = loaded,
     onBack = { if (editing.active) editing.cancel() else callbacks.onBack() },
+    emptyText = emptyText,
     matches = { song, query -> song.title.contains(query, true) || song.artist.contains(query, true) || song.album.orEmpty().contains(query, true) },
     favorite = favorite,
     onFavorite = onFavorite,
@@ -748,6 +853,11 @@ internal fun CollectionDetailPage(
         // Always takes its room, so the title doesn't jump when it appears.
         Box(Modifier.fillMaxWidth().height(30.dp), contentAlignment = Alignment.BottomCenter) {
             if (isThisPlaying) PlaybackStatusLine(playing = playingNow, shuffled = shuffleOn)
+        }
+        heroFooter?.let { footer ->
+            Spacer(Modifier.height(14.dp))
+            footer()
+            Spacer(Modifier.height(4.dp))
         }
     },
     body = { shown, searching ->

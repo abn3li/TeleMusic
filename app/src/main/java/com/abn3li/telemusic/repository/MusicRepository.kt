@@ -106,6 +106,7 @@ class MusicRepository(
     private val appContext = context.applicationContext
     private val cacheLock = kotlinx.coroutines.sync.Mutex()
     private val flacCache get() = (appContext as com.abn3li.telemusic.TgMusicApp).flacCache
+    private val youtubeAudioCache get() = (appContext as com.abn3li.telemusic.TgMusicApp).youtubeAudioCache
 
     // Song ids already confirmed to have a working telegramFileId THIS app run - see
     // getFreshFileIdForSong's own doc for why this exists: without it, EVERY play of a Telegram
@@ -367,6 +368,99 @@ class MusicRepository(
         songDao.observeDownloaded().map { it.sortedForLibrary(sortField, ascending) }
             .flowOn(Dispatchers.Default)
 
+    /** Songs kept as they played: [songs] the one played last first, [sizes] by song id, and
+     * [bytes] all of them take. */
+    data class CachedSongs(val songs: List<SongEntity>, val sizes: Map<Long, Long>, val bytes: Long)
+
+    // Bumped when cached songs are removed here, so the Cached list follows (a removed YouTube
+    // song changes no row in the database).
+    private val cachedSongsChanged = MutableStateFlow(0)
+
+    /**
+     * Songs kept on the phone as they played, whole - Telegram files and YouTube audio - so every
+     * one plays without internet (a YouTube song only partly fetched isn't listed). Downloads and
+     * local imports aren't here; they have their own lists.
+     */
+    fun observeCachedSongs(): Flow<CachedSongs> = kotlinx.coroutines.flow.combine(songDao.observeAutoCached(), cachedSongsChanged) { telegram, _ ->
+        val bytes = HashMap<Long, Long>()
+        val songs = LinkedHashMap<Long, SongEntity>()
+        for (song in telegram) {
+            val path = song.localFilePath ?: continue
+            if (path.startsWith("content://")) continue
+            val size = File(path).length()
+            if (size <= 0) continue
+            songs[song.telegramMessageId] = song
+            bytes[song.telegramMessageId] = size
+        }
+        val youtube = youtubeAudioCache.fullyCached()
+        if (youtube.isNotEmpty()) {
+            val inLibrary = youtube.keys.toList().chunked(500).flatMap { songDao.getByYoutubeVideoIds(it) }
+                .filter { !it.isExplicitDownload && !it.isLocalImport }
+                .associateBy { it.youtubeVideoId!! }
+            for ((videoId, size) in youtube) {
+                // Not in the library: a song played from search or a YouTube page, if it's known.
+                val song = inLibrary[videoId] ?: getSongById(ytDlpStableSongId(videoId))?.takeIf { it.youtubeVideoId == videoId }
+                    ?: continue
+                if (song.telegramMessageId in songs) continue
+                songs[song.telegramMessageId] = song
+                bytes[song.telegramMessageId] = size
+            }
+        }
+        CachedSongs(songs.values.sortedByDescending { it.lastPlayedAtMillis }, bytes, bytes.values.sum())
+    }.flowOn(Dispatchers.IO)
+
+    /** Takes [song] off the phone (it streams again when played); the bytes freed, or null when
+     * it's playing now. */
+    suspend fun removeFromCache(song: SongEntity): Long? = withContext(Dispatchers.IO) {
+        val playing = withContext(Dispatchers.Main) {
+            (appContext as com.abn3li.telemusic.TgMusicApp).playbackController.currentSongId()
+        }
+        if (playing == song.telegramMessageId) return@withContext null
+        val freed = cacheLock.withLock { removeCachedCopy(song) }
+        cachedSongsChanged.value++
+        freed
+    }
+
+    /** Takes every cached song off the phone, except the one playing: how many and the bytes freed. */
+    suspend fun clearCachedSongs(): Pair<Int, Long> = withContext(Dispatchers.IO) {
+        val playing = withContext(Dispatchers.Main) {
+            (appContext as com.abn3li.telemusic.TgMusicApp).playbackController.currentSongId()
+        }
+        val playingVideoId = playing?.let { getSongById(it)?.youtubeVideoId }
+        var count = 0
+        var freed = 0L
+        cacheLock.withLock {
+            for (song in songDao.getAutoCachedSongsOldestFirst()) {
+                if (song.telegramMessageId == playing) continue
+                val bytes = removeCachedCopy(song)
+                if (bytes > 0) { count++; freed += bytes }
+            }
+            for (entry in youtubeAudioCache.entries()) {
+                if (entry.videoId == playingVideoId) continue
+                freed += youtubeAudioCache.remove(entry.key)
+            }
+        }
+        cachedSongsChanged.value++
+        count to freed
+    }
+
+    /** [song]'s kept copy - a Telegram file or YouTube audio - deleted; the bytes freed. */
+    private suspend fun removeCachedCopy(song: SongEntity): Long {
+        var freed = 0L
+        val path = song.localFilePath
+        if (path != null && !song.isExplicitDownload && !song.isLocalImport && !path.startsWith("content://")) {
+            val file = File(path)
+            val size = file.length()
+            if (!file.exists() || file.delete()) {
+                songDao.setLocalFilePath(song.telegramMessageId, null)
+                tdlibManager.deleteDownloadedFile(song.telegramFileId)
+                freed += size
+            }
+        }
+        song.youtubeVideoId?.let { freed += youtubeAudioCache.removeVideo(it) }
+        return freed
+    }
+
     fun observeSmartPlaylistCounts(): Flow<com.abn3li.telemusic.data.local.SmartPlaylistCounts> =
         songDao.observeSmartPlaylistCounts().distinctUntilChanged()
 
@@ -573,6 +667,8 @@ class MusicRepository(
     suspend fun resolveDirectPlaybackUri(song: SongEntity): Uri? {
         val videoId = song.youtubeVideoId ?: return null
         if (song.localFilePath != null) return null
+        // All of it already on the phone: nothing to look up.
+        withContext(Dispatchers.IO) { youtubeAudioCache.fullyCachedUri(videoId) }?.let { return it }
         val outcome = ytDlpRepository.resolveStreamUrl(videoId, DownloadQuality.BEST.formatSelector)
         val stream = outcome.getOrNull()?.takeIf { it.streamUrl.isNotBlank() } ?: return null
         if (stream.durationSeconds > 0 && song.durationSeconds != stream.durationSeconds) {
@@ -588,6 +684,18 @@ class MusicRepository(
 
     fun invalidateStreamCache(videoId: String) {
         ytDlpRepository.invalidateStreamCache(videoId)
+    }
+
+    /** The next song's opening, fetched while this one plays so it starts without a wait. Also
+     * keeps the cache to its limit, as the song now playing adds to it. */
+    suspend fun prefetchYouTubeOpening(song: SongEntity) {
+        enforceCacheLimit()
+        if (song.localFilePath != null) return
+        val videoId = song.youtubeVideoId ?: return
+        val uri = resolveDirectPlaybackUri(song) ?: return
+        if (uri.scheme == com.abn3li.telemusic.playback.YouTubeAudioCache.CACHED_SCHEME) return
+        youtubeAudioCache.cacheOpening(uri, song.durationSeconds)
+        android.util.Log.d("MusicRepository", "Fetched the opening of $videoId ahead")
     }
 
     /**
@@ -628,6 +736,9 @@ class MusicRepository(
     }
 
     private suspend fun resolveYouTubePlayback(song: SongEntity): PlaybackResolution {
+        // Heard before and all on the phone: plays at once, with or without internet.
+        withContext(Dispatchers.IO) { youtubeAudioCache.fullyCachedUri(song.youtubeVideoId!!) }
+            ?.let { return PlaybackResolution.Playable(it) }
         // A network that can't reach the internet: say so now. With none at all (airplane mode)
         // yt-dlp is still asked, as that's also a hand-over moment; offline it fails at once.
         if (appContext.internet() == Internet.NONE) return PlaybackResolution.Unplayable(NO_INTERNET, offline = true)
@@ -1496,12 +1607,13 @@ class MusicRepository(
             }
             val (partial, partialBytes) = purgePartialAudioFiles()
             val (ytLeftovers, ytBytes) = purgeYouTubeDownloadLeftovers(everything = false)
-            // YouTube streams play straight from the internet - nothing of them is on disk; only the
-            // links already looked up are remembered (in memory), and those go too.
+            // YouTube songs kept as they played, and the links already looked up (in memory).
             ytDlpRepository.clearStreamCache()
+            val (youtubeCount, youtubeBytes) = youtubeAudioCache.clear()
             val lyrics = clearAllLyrics()
             val (flacCount, flacBytes) = flacCache.clear()
-            CacheClearResult(count + flacCount, partial + ytLeftovers, freed + partialBytes + ytBytes + flacBytes, lyrics)
+            CacheClearResult(count + flacCount + youtubeCount, partial + ytLeftovers,
+                freed + partialBytes + ytBytes + flacBytes + youtubeBytes, lyrics)
         }
     }
 
@@ -1568,7 +1680,7 @@ class MusicRepository(
      * See [releaseLocalFile] for why a local import's localFilePath isn't always safe to delete
      * outright - a referenced (not copied) one is the user's own original file. */
     suspend fun clearAllLibrarySongs() {
-        withContext(Dispatchers.IO) { cacheLock.withLock { flacCache.clear() } }
+        withContext(Dispatchers.IO) { cacheLock.withLock { flacCache.clear(); youtubeAudioCache.clear() } }
 
         val allSongs = songDao.observeAll().firstOrNull().orEmpty()
         for (song in allSongs) {
@@ -1729,6 +1841,7 @@ class MusicRepository(
                 (appContext as com.abn3li.telemusic.TgMusicApp).playbackController.currentSongId()
             }
             val protectedIds = setOfNotNull(playing, excludeSongId)
+            val playingVideoId = playing?.let { getSongById(it)?.youtubeVideoId }
             val original = songDao.getAutoCachedSongsOldestFirst()
             val upgrades = flacCache.snapshot()
             val files = original.map { song ->
@@ -1745,6 +1858,10 @@ class MusicRepository(
             } + upgrades.map { entry ->
                 com.abn3li.telemusic.data.quality.AutomaticCacheFile(entry.size, entry.lastPlayed) {
                     if (entry.songId.toLongOrNull() in protectedIds) 0L else flacCache.evict(entry.key)
+                }
+            } + youtubeAudioCache.entries().map { entry ->
+                com.abn3li.telemusic.data.quality.AutomaticCacheFile(entry.size, entry.lastPlayed) {
+                    if (entry.videoId == playingVideoId) 0L else youtubeAudioCache.remove(entry.key)
                 }
             }
             com.abn3li.telemusic.data.quality.trimAutomaticCache(files, limit)

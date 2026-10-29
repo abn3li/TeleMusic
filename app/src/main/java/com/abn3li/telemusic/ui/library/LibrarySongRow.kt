@@ -137,8 +137,16 @@ internal class LibrarySongActions(
     val onFindArtwork: suspend (SongEntity, String, String) -> Boolean,
     val onGoToArtist: (String) -> Unit,
     val onGoToAlbum: (String) -> Unit,
-    val onDownloadSongs: (List<SongEntity>) -> Unit = { songs -> songs.forEach(onDownload) }
-)
+    val onDownloadSongs: (List<SongEntity>) -> Unit = { songs -> songs.forEach(onDownload) },
+    // Only on the Cached list (Downloads): the song card offers Remove from Cache.
+    val onRemoveFromCache: ((SongEntity) -> Unit)? = null
+) {
+    fun withRemoveFromCache(remove: ((SongEntity) -> Unit)?): LibrarySongActions =
+        if (remove == onRemoveFromCache) this
+        else LibrarySongActions(playlists, downloadingIds, onPlayNext, onToggleFavorite, onDownload, onRemoveDownload,
+            onClearSong, onAddToPlaylist, onCreatePlaylistAndAdd, onCreatePlaylistAndAddSongs, onFindArtwork, onGoToArtist,
+            onGoToAlbum, onDownloadSongs, remove)
+}
 
 internal sealed interface SongRowLeading {
     data object Artwork : SongRowLeading
@@ -573,6 +581,10 @@ private fun SongContextCard(
             if (song.isExplicitDownload || isRealLocalImport) {
                 CardDivider()
                 CardItem("Delete Download", Icons.Rounded.Delete, destructive = true) { onAction { actions.onRemoveDownload(song) } }
+            }
+            actions.onRemoveFromCache?.takeIf { !song.isExplicitDownload }?.let { remove ->
+                CardDivider()
+                CardItem("Remove from Cache", Icons.Rounded.Delete, destructive = true) { onAction { remove(song) } }
             }
             CardDivider()
             CardItem("Remove from Library", Icons.Rounded.DeleteForever, destructive = true) { onAction { actions.onClearSong(song) } }

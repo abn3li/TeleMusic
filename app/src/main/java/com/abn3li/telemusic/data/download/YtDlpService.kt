@@ -72,6 +72,11 @@ class YtDlpService(private val context: Context) {
         Python.getInstance().getModule("ytdlp_bridge")
     }
 
+    /** Starts Python and loads yt-dlp's YouTube code, without fetching anything. */
+    fun warmUp() {
+        bridge.callAttr("warm_up")
+    }
+
     fun search(query: String, limit: Int = 12): List<YtDlpSearchResult> {
         val results = bridge.callAttr("search", query, limit)
         return results.asList().map { it.toSearchResult() }

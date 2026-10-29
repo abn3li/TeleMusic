@@ -93,7 +93,7 @@ internal class FlacUpgradeController(
         if (item == null || item.mediaId == attempted?.mediaId || original != null) return
         if (!store.preferences.value.enabled) { skip(item, "Automatic upgrade is off.", show = false); return }
         val scheme = item.localConfiguration?.uri?.scheme
-        if (scheme !in listOf("http", "https", "file", "content")) {
+        if (scheme !in listOf("http", "https", YouTubeAudioCache.CACHED_SCHEME, "file", "content")) {
             skip(item, "This song plays from \"$scheme\", not a YouTube stream or a saved file.")
             return
         }
@@ -194,7 +194,7 @@ internal class FlacUpgradeController(
         }
         // A saved YouTube original may use a local URI. Reuse its cached upgrade, but
         // do not start a network search for a locally saved file.
-        if (item.localConfiguration?.uri?.scheme !in listOf("http", "https")) {
+        if (item.localConfiguration?.uri?.scheme !in listOf("http", "https", YouTubeAudioCache.CACHED_SCHEME)) {
             skip(item, "This saved copy has no cached FLAC, and saved songs aren't searched.")
             return
         }

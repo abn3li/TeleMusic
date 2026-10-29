@@ -25,13 +25,21 @@ import com.abn3li.telemusic.data.telegram.TdlibManager
 @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
 class ResolvingDataSource(
     private val tdlibDataSource: TdlibDataSource,
-    httpDataSourceFactory: DataSource.Factory
+    httpDataSourceFactory: DataSource.Factory,
+    private val youtubeAudioCache: YouTubeAudioCache
 ) : DataSource {
     private val httpDataSource: DataSource by lazy { httpDataSourceFactory.createDataSource() }
+    // YouTube streams go through the audio cache (see YouTubeAudioCache).
+    private val youtubeDataSource: DataSource by lazy { youtubeAudioCache.dataSourceFactory.createDataSource() }
     private var active: DataSource = tdlibDataSource
 
     override fun open(dataSpec: DataSpec): Long {
-        active = if (dataSpec.uri.scheme == "http" || dataSpec.uri.scheme == "https") httpDataSource else tdlibDataSource
+        val scheme = dataSpec.uri.scheme
+        active = when {
+            youtubeAudioCache.handles(dataSpec.uri) -> youtubeDataSource
+            scheme == "http" || scheme == "https" -> httpDataSource
+            else -> tdlibDataSource
+        }
         return active.open(dataSpec)
     }
 
@@ -44,22 +52,23 @@ class ResolvingDataSource(
         // addTransferListener() before the first open() ever picks which one becomes active.
         tdlibDataSource.addTransferListener(transferListener)
         httpDataSource.addTransferListener(transferListener)
+        youtubeDataSource.addTransferListener(transferListener)
     }
 
     override fun close() = active.close()
 
-    class Factory(private val tdlibManager: TdlibManager) : DataSource.Factory {
+    class Factory(private val tdlibManager: TdlibManager, private val youtubeAudioCache: YouTubeAudioCache) : DataSource.Factory {
         // A real browser User-Agent, not ExoPlayer's own default identifier - a resolved
         // googlevideo.com URL is signed for the client that generated it (yt-dlp, impersonating
         // a browser), and YouTube's CDN can reject or throttle requests from an unrecognized
         // player User-Agent even though the URL's signature itself is still valid.
         private val httpDataSourceFactory = DefaultHttpDataSource.Factory()
-            .setUserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
+            .setUserAgent(YouTubeAudioCache.STREAM_USER_AGENT)
             .setAllowCrossProtocolRedirects(true)
             .setConnectTimeoutMs(15_000)
             .setReadTimeoutMs(15_000)
 
         override fun createDataSource(): DataSource =
-            ResolvingDataSource(TdlibDataSource(tdlibManager), httpDataSourceFactory)
+            ResolvingDataSource(TdlibDataSource(tdlibManager), httpDataSourceFactory, youtubeAudioCache)
     }
 }
