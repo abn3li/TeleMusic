@@ -406,6 +406,14 @@ class MusicRepository(
                 bytes[song.telegramMessageId] = size
             }
         }
+        // Songs the FLAC upgrade kept: whole lossless copies, played from the phone.
+        for (entry in flacCache.snapshot()) {
+            if (entry.cleared) continue
+            val id = entry.songId.toLongOrNull() ?: continue
+            val song = songs[id] ?: getSongById(id)?.takeIf { !it.isExplicitDownload && !it.isLocalImport } ?: continue
+            songs[id] = song
+            bytes[id] = (bytes[id] ?: 0L) + entry.size
+        }
         CachedSongs(songs.values.sortedByDescending { it.lastPlayedAtMillis }, bytes, bytes.values.sum())
     }.flowOn(Dispatchers.IO)
 
@@ -439,6 +447,11 @@ class MusicRepository(
                 if (entry.videoId == playingVideoId) continue
                 freed += youtubeAudioCache.remove(entry.key)
             }
+            for (entry in flacCache.snapshot()) {
+                if (entry.songId == playing?.toString()) continue
+                val bytes = flacCache.evict(entry.key)
+                if (bytes > 0) { count++; freed += bytes }
+            }
         }
         cachedSongsChanged.value++
         count to freed
@@ -458,6 +471,7 @@ class MusicRepository(
             }
         }
         song.youtubeVideoId?.let { freed += youtubeAudioCache.removeVideo(it) }
+        freed += flacCache.evictSong(song.telegramMessageId.toString())
         return freed
     }
 
@@ -682,6 +696,13 @@ class MusicRepository(
         return stream.streamUrl.toUri()
     }
 
+    /** [song]'s FLAC kept by the automatic upgrade, while the upgrade is on. */
+    private suspend fun savedFlacUri(song: SongEntity): Uri? {
+        val app = appContext as com.abn3li.telemusic.TgMusicApp
+        if (!app.flacUpgradeStore.preferences.value.enabled) return null
+        return withContext(Dispatchers.IO) { flacCache.savedFile(song.telegramMessageId.toString()) }?.let { Uri.fromFile(it) }
+    }
+
     fun invalidateStreamCache(videoId: String) {
         ytDlpRepository.invalidateStreamCache(videoId)
     }
@@ -692,6 +713,8 @@ class MusicRepository(
         enforceCacheLimit()
         if (song.localFilePath != null) return
         val videoId = song.youtubeVideoId ?: return
+        // Its FLAC is here: it'll play from that, not from YouTube.
+        if (savedFlacUri(song) != null) return
         val uri = resolveDirectPlaybackUri(song) ?: return
         if (uri.scheme == com.abn3li.telemusic.playback.YouTubeAudioCache.CACHED_SCHEME) return
         youtubeAudioCache.cacheOpening(uri, song.durationSeconds)
@@ -725,6 +748,8 @@ class MusicRepository(
             // still has a local path, so the stale one would stop a deleted download streaming.
             current = song.copy(localFilePath = null)
         }
+        // A lossless copy the FLAC upgrade kept: plays at once, without internet.
+        if (!current.isExplicitDownload) savedFlacUri(current)?.let { return PlaybackResolution.Playable(it) }
         return when {
             current.localFilePath != null -> PlaybackResolution.Playable(localFileToUri(current.localFilePath!!))
             current.isLocalImport -> PlaybackResolution.Unplayable("file may have been moved or deleted")

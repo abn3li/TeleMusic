@@ -12,6 +12,7 @@ import android.os.Handler
 import android.os.Looper
 import android.os.PowerManager
 import android.os.SystemClock
+import kotlinx.coroutines.flow.collectLatest
 import androidx.core.content.ContextCompat
 import com.abn3li.telemusic.widget.MusicWidgets
 import android.util.Log
@@ -113,6 +114,24 @@ class MusicService : MediaLibraryService() {
         player.trackSelectionParameters = player.trackSelectionParameters.buildUpon()
             .setTrackTypeDisabled(androidx.media3.common.C.TRACK_TYPE_VIDEO, true)
             .build()
+        // The sleep timer: one wake-up when it's due, then the music fades out and pauses.
+        serviceScope.launch {
+            app.sleepTimer.state.collectLatest { state ->
+                if (state !is SleepTimer.State.At) return@collectLatest
+                kotlinx.coroutines.delay((state.endsAt - SleepTimer.FADE_MS - SystemClock.elapsedRealtime()).coerceAtLeast(0))
+                try {
+                    val steps = 40
+                    for (step in 1..steps) {
+                        player.volume = 1f - step / steps.toFloat()
+                        kotlinx.coroutines.delay(SleepTimer.FADE_MS / steps)
+                    }
+                    player.pause()
+                } finally {
+                    player.volume = 1f
+                }
+                app.sleepTimer.cancel()
+            }
+        }
         player.addListener(object : Player.Listener {
             override fun onPlayerError(error: PlaybackException) {
                 if (player.currentMediaItem?.localConfiguration?.uri?.scheme == "quality") {
@@ -221,6 +240,12 @@ class MusicService : MediaLibraryService() {
      * stops at the end). A song that can't be played is passed over, a few at most, the way the
      * in-app player skips an unplayable song. */
     private fun advanceAfterSongEnded() {
+        // The sleep timer was set to this song's end: the music stops here.
+        val timer = (application as TgMusicApp).sleepTimer
+        if (timer.state.value == SleepTimer.State.EndOfSong) {
+            timer.cancel()
+            return
+        }
         val queue = (application as TgMusicApp).playbackQueue
         // Only the queue's own current song ending moves the queue on - not a one-off stream
         // played from search (the queue is empty then) or an item already replaced.

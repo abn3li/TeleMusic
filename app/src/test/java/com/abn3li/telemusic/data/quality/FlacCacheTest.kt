@@ -57,6 +57,22 @@ class FlacCacheTest {
         assertNotNull(restarted.acquire("-17", target)?.also { it.buffer.deleteWhenUnused() })
     }
 
+    @Test fun savedFileIsFoundBySongAndRemovedWithIt() = runBlocking {
+        val directory = temporary.newFolder()
+        val cache = FlacCache(directory)
+        assertNull(cache.savedFile("-17"))
+        val source = source()
+        assertTrue(cache.store("-17", target, sourcePath, source, cache.token()))
+        val saved = cache.savedFile("-17")!!
+        assertTrue(cache.holds(saved))
+        assertFalse(cache.holds(source.file))
+        assertEquals(source.totalSize, saved.length())
+        assertNull(cache.savedFile("-18"))
+        assertEquals(source.totalSize, cache.evictSong("-17"))
+        assertNull(cache.savedFile("-17"))
+        assertFalse(saved.exists())
+    }
+
     @Test fun partialWrongRecordingAndChangedMetadataNeverBecomeReplayHits() {
         val cache = FlacCache(temporary.newFolder())
         val complete = source()

@@ -28,6 +28,7 @@ import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -47,6 +48,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.MoreHoriz
+import androidx.compose.material.icons.rounded.Bedtime
 import androidx.compose.material.icons.rounded.MusicNote
 import androidx.compose.material.icons.rounded.Star
 import androidx.compose.material.icons.rounded.KeyboardArrowUp
@@ -549,6 +551,11 @@ private fun NowPlayingContent(
             }
         }
 
+        // The ••• menu's dim, drawn here over the whole player - up through the status bar, which
+        // the menu's own window doesn't reach (its dim stopped short, leaving a bright strip).
+        val menuDim by animateFloatAsState(if (overflowSong != null) 0.32f else 0f, tween(250), label = "menuDim")
+        if (menuDim > 0f) Box(Modifier.fillMaxSize().drawBehind { drawRect(Color.Black, alpha = menuDim) })
+
         if (relatedVisible) {
             RelatedSongsSheet(state, viewModel, onOpenPage = onCollapse, onDismiss = { showRelated = false })
         }
@@ -984,7 +991,19 @@ private fun PlayerActionButtons(
     plain: Boolean = false
 ) {
     val haptics = LocalHapticFeedback.current
+    val sleepTimer = (LocalContext.current.applicationContext as TgMusicApp).sleepTimer
+    val timerOn = sleepTimer.state.collectAsState().value != com.abn3li.telemusic.playback.SleepTimer.State.Off
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(if (plain) 14.dp else 12.dp)) {
+        if (timerOn) CircleActionButton(
+            icon = Icons.Rounded.Bedtime,
+            contentDescription = "Sleep timer on",
+            inverted = false,
+            plain = plain,
+            onClick = {
+                haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                onOverflow()
+            }
+        )
         CircleActionButton(
             icon = if (isFavorite) Icons.Rounded.Star else Icons.Rounded.StarBorder,
             contentDescription = if (isFavorite) "Remove from favorites" else "Add to favorites",

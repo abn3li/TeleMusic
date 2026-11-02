@@ -97,6 +97,13 @@ internal class FlacUpgradeController(
             skip(item, "This song plays from \"$scheme\", not a YouTube stream or a saved file.")
             return
         }
+        // Already its saved FLAC (see MusicRepository.resolvePlayback): nothing to upgrade.
+        val path = item.localConfiguration?.uri?.takeIf { scheme == "file" }?.path
+        if (path != null && app.flacCache.holds(java.io.File(path))) {
+            attempted = item
+            store.status(item.mediaId, FlacUpgradeStage.LOSSLESS, "Playing the FLAC saved on the phone.")
+            return
+        }
         // Not known before the stream is prepared: the library's own length is used then.
         val title = item.mediaMetadata.title?.toString().orEmpty()
         val artist = item.mediaMetadata.artist?.toString().orEmpty()

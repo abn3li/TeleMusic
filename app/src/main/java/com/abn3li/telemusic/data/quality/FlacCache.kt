@@ -58,6 +58,22 @@ internal class FlacCache(private val directory: File) {
 
     @Synchronized fun snapshot(): List<Entry> { load(); return entries.values.map { it.copy() } }
 
+    /** [songId]'s saved FLAC, whole on the phone - it plays without looking anything up. */
+    @Synchronized fun savedFile(songId: String): File? {
+        load()
+        val entry = entries.values.firstOrNull { it.songId == songId && !it.cleared } ?: return null
+        return audio(entry.key).takeIf { it.length() == entry.size }
+    }
+
+    /** Whether [file] is one of the saved FLACs. */
+    fun holds(file: File): Boolean = file.parentFile?.absolutePath == directory.absolutePath
+
+    /** Removes [songId]'s saved FLAC (not while it's in use); the bytes freed. */
+    @Synchronized fun evictSong(songId: String): Long {
+        load()
+        return entries.values.filter { it.songId == songId }.map { it.key }.sumOf { evict(it) }
+    }
+
     @Synchronized fun acquire(songId: String, target: FlacTarget, onRelease: () -> Unit = {}): Hit? {
         load()
         val entry = entries[key(songId, target)]?.takeUnless { it.cleared } ?: return null

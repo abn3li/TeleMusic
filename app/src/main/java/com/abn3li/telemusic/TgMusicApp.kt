@@ -29,6 +29,7 @@ class TgMusicApp : Application(), ImageLoaderFactory {
     val flacUpgradeStore by lazy { com.abn3li.telemusic.data.quality.FlacUpgradeStore(this) }
     internal val flacCache by lazy { com.abn3li.telemusic.data.quality.FlacCache(java.io.File(filesDir, "flac_cache")) }
     val youtubeAudioCache by lazy { com.abn3li.telemusic.playback.YouTubeAudioCache(this) }
+    val sleepTimer = com.abn3li.telemusic.playback.SleepTimer()
     lateinit var tdlibManager: TdlibManager; private set
     lateinit var musicRepository: MusicRepository; private set
     lateinit var lyricsTranslator: LyricsTranslator; private set

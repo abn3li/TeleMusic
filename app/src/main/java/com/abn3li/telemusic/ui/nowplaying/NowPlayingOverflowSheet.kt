@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Bedtime
 import androidx.compose.material.icons.rounded.CloudDone
 import androidx.compose.material.icons.rounded.CloudDownload
 import androidx.compose.material.icons.rounded.ThumbUp
@@ -33,6 +34,16 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.SizeTransform
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.togetherWith
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.collectAsState
 import androidx.compose.ui.platform.LocalContext
@@ -82,16 +93,23 @@ internal fun NowPlayingOverflowSheet(
     val scope = rememberCoroutineScope()
     val haptics = LocalHapticFeedback.current
 
+    // The choice happens at once and the menu slides away meanwhile - waiting for it to finish
+    // closing first made every choice feel slow.
     fun closeThen(action: () -> Unit) {
-        scope.launch { sheetState.hide() }.invokeOnCompletion {
-            onDismiss()
-            action()
-        }
+        action()
+        scope.launch { sheetState.hide() }.invokeOnCompletion { onDismiss() }
     }
+    // The sleep timer's choices are a second page of this menu, slid in - not a menu of their own
+    // opened after this one closed.
+    var timerPage by remember { mutableStateOf(false) }
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
+        // Down under the navigation bar (its rows stay above it); the dim is the player's own -
+        // see NowPlayingScreen - so it reaches the status bar too.
+        windowInsets = androidx.compose.foundation.layout.WindowInsets(0),
+        scrimColor = Color.Transparent,
         containerColor = SheetColor,
         contentColor = Color.White,
         dragHandle = { BottomSheetDefaults.DragHandle(color = Color.White.copy(alpha = 0.3f)) }
@@ -103,6 +121,18 @@ internal fun NowPlayingOverflowSheet(
                 .padding(horizontal = 18.dp)
                 .padding(bottom = 18.dp)
         ) {
+            AnimatedContent(
+                targetState = timerPage,
+                transitionSpec = {
+                    val forward = targetState
+                    (slideInHorizontally(tween(260)) { if (forward) it else -it / 3 } + fadeIn(tween(200)))
+                        .togetherWith(slideOutHorizontally(tween(260)) { if (forward) -it / 3 else it } + fadeOut(tween(160)))
+                        .using(SizeTransform(clip = false))
+                },
+                label = "menuPage"
+            ) { onTimer ->
+            if (onTimer) SleepTimerOptions(onPicked = { closeThen {} }, onBack = { timerPage = false })
+            else Column {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Box(
                     Modifier
@@ -202,6 +232,27 @@ internal fun NowPlayingOverflowSheet(
                 HorizontalDivider(color = Color.White.copy(alpha = 0.08f), modifier = Modifier.padding(start = 52.dp))
                 SheetAction(icon = Icons.Rounded.SwapHoriz, label = "Change lyrics source", onClick = { closeThen(onLyricsSource) })
             }
+            Spacer(Modifier.height(12.dp))
+            val timerState by app.sleepTimer.state.collectAsState()
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(Color.White.copy(alpha = 0.07f))
+            ) {
+                SheetAction(
+                    icon = Icons.Rounded.Bedtime,
+                    label = "Sleep Timer",
+                    trailing = when (timerState) {
+                        is com.abn3li.telemusic.playback.SleepTimer.State.At -> "${app.sleepTimer.minutesLeft()} min"
+                        com.abn3li.telemusic.playback.SleepTimer.State.EndOfSong -> "End of song"
+                        else -> null
+                    },
+                    onClick = { timerPage = true }
+                )
+            }
+            }
+            }
         }
     }
 }
@@ -212,7 +263,8 @@ private fun SheetAction(
     label: String,
     onClick: () -> Unit,
     enabled: Boolean = true,
-    busy: Boolean = false
+    busy: Boolean = false,
+    trailing: String? = null
 ) {
     Row(
         Modifier
@@ -230,6 +282,7 @@ private fun SheetAction(
             }
         }
         Spacer(Modifier.width(14.dp))
-        Text(label, fontSize = 16.sp, color = Color.White)
+        Text(label, fontSize = 16.sp, color = Color.White, modifier = Modifier.weight(1f))
+        trailing?.let { Text(it, fontSize = 15.sp, color = Color.White.copy(alpha = 0.55f)) }
     }
 }
