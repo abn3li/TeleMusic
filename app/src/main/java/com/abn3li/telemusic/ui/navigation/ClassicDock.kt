@@ -232,8 +232,8 @@ private fun ClassicMiniPlayer(
             AsyncImage(song.displayArtwork, null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
         }
         Column(Modifier.weight(1f).padding(start = 10.dp, end = 4.dp)
-            .onGloballyPositioned { transition.dockTitle = it.boundsInRoot() }
-            .graphicsLayer { alpha = if (transition.origin?.title != null) 1f - transition.stage(0.01f, 0.04f) else 1f }
+            // No early hide: the player's title fades in rather than flying from here, so this one
+            // fades out with its capsule instead of leaving the opening without a title.
             .draggable(drag, Orientation.Horizontal, onDragStopped = { velocity ->
                 val travel = swipeTravel[0]
                 if (abs(travel) >= threshold || abs(velocity) >= 1400f) {

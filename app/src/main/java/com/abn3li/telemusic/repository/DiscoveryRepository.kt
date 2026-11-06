@@ -130,7 +130,7 @@ class DiscoveryRepository(
     private val relatedMutex = kotlinx.coroutines.sync.Mutex()
     private val relatedCache = LinkedHashMap<String, List<BrowseTrack>>()
 
-    /** Asked only when Related opens; a small session cache avoids repeated requests. */
+    /** Asked only when the queue's You Might Like tab opens; a small session cache avoids repeated requests. */
     suspend fun relatedSongs(videoId: String, force: Boolean = false): List<BrowseTrack> {
         relatedMutex.lock()
         try {

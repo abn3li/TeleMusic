@@ -14,6 +14,9 @@ import android.media.MediaRouter2
 import android.os.Build
 import android.provider.Settings
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
@@ -159,9 +162,11 @@ internal fun PlayerScrubber(
     active: Boolean,
     onInteraction: () -> Unit,
     qualityStatus: @Composable () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    // Just the bar, without the times and the quality line under it (Queue and Lyrics).
+    compact: Boolean = false
 ) {
-    // The player stays composed while collapsed or covered by Related.
+    // The player stays composed while collapsed.
     val progress by viewModel.playbackProgress.collectAsStateWhileActive(active)
     var dragging by remember { mutableStateOf(false) }
     var dragFraction by remember { mutableFloatStateOf(0f) }
@@ -179,7 +184,8 @@ internal fun PlayerScrubber(
             },
             onInteraction = onInteraction
         )
-        Row(Modifier.fillMaxWidth().padding(horizontal = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+        AnimatedVisibility(!compact, enter = fadeIn() + expandVertically(), exit = fadeOut() + shrinkVertically()) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Text(
                 formatMs(shownPositionMs),
                 color = Color.White.copy(alpha = 0.45f),
@@ -198,6 +204,7 @@ internal fun PlayerScrubber(
                 textAlign = TextAlign.End,
                 modifier = Modifier.weight(1f)
             )
+        }
         }
     }
 }
@@ -328,6 +335,53 @@ internal fun VolumeRow(onInteraction: () -> Unit, modifier: Modifier = Modifier)
             modifier = Modifier.weight(1f).padding(horizontal = 8.dp)
         )
         Icon(Icons.AutoMirrored.Rounded.VolumeUp, null, tint = Color.White.copy(alpha = 0.45f), modifier = Modifier.size(20.dp))
+    }
+}
+
+/**
+ * The Queue and Lyrics pages' controls in one row - Lyrics, Previous / Play / Next, Queue - so
+ * the list above gets the height the full controls take on the cover page.
+ */
+@Composable
+internal fun CompactControlsRow(
+    state: NowPlayingUiState,
+    visualsActive: Boolean,
+    page: PlayerPage,
+    onLyrics: () -> Unit,
+    onPrevious: () -> Unit,
+    onPlayPause: () -> Unit,
+    onNext: () -> Unit,
+    onQueue: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Row(modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        BottomRowButton(
+            icon = if (page == PlayerPage.LYRICS) Icons.Rounded.ChatBubble else Icons.Outlined.ChatBubbleOutline,
+            contentDescription = "Lyrics",
+            active = page == PlayerPage.LYRICS,
+            onClick = onLyrics
+        )
+        Row(Modifier.weight(1f), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
+            TransportButton(Icons.Rounded.FastRewind, "Previous", 34.dp, state.hasPrevious, onPrevious)
+            Spacer(Modifier.width(22.dp))
+            TransportButton(
+                icon = if (state.isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
+                contentDescription = if (state.isPlaying) "Pause" else "Play",
+                iconSize = 42.dp,
+                enabled = true,
+                onClick = onPlayPause,
+                animateSwap = true,
+                loading = visualsActive && (state.isBuffering || state.loadingSongId != null)
+            )
+            Spacer(Modifier.width(22.dp))
+            TransportButton(Icons.Rounded.FastForward, "Next", 34.dp, state.hasNext, onNext)
+        }
+        BottomRowButton(
+            icon = Icons.AutoMirrored.Rounded.QueueMusic,
+            contentDescription = "Queue",
+            active = page == PlayerPage.QUEUE,
+            onClick = onQueue
+        )
     }
 }
 

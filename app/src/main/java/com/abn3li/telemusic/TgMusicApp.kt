@@ -29,6 +29,7 @@ class TgMusicApp : Application(), ImageLoaderFactory {
     val flacUpgradeStore by lazy { com.abn3li.telemusic.data.quality.FlacUpgradeStore(this) }
     internal val flacCache by lazy { com.abn3li.telemusic.data.quality.FlacCache(java.io.File(filesDir, "flac_cache")) }
     val youtubeAudioCache by lazy { com.abn3li.telemusic.playback.YouTubeAudioCache(this) }
+    val animatedCovers by lazy { com.abn3li.telemusic.data.animatedcover.AnimatedCoverRepository(this) }
     val sleepTimer = com.abn3li.telemusic.playback.SleepTimer()
     lateinit var tdlibManager: TdlibManager; private set
     lateinit var musicRepository: MusicRepository; private set
@@ -106,6 +107,8 @@ class TgMusicApp : Application(), ImageLoaderFactory {
 
     override fun onCreate() {
         super.onCreate()
+        if (com.abn3li.telemusic.crash.CrashReporter.isCrashProcess()) return
+        com.abn3li.telemusic.crash.CrashReporter.install(this)
         val db = AppDatabase.get(this)
         credentialsStore = TelegramCredentialsStore(this)
         settingsStore = AppSettingsStore(this)

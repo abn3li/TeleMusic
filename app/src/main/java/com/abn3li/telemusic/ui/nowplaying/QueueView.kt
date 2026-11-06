@@ -1,6 +1,16 @@
 package com.abn3li.telemusic.ui.nowplaying
 
+import com.abn3li.telemusic.ui.theme.SoftTextButton as TextButton
+
 import android.widget.Toast
+import androidx.compose.material.icons.rounded.Add
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.saveable.rememberSaveable
+import com.abn3li.telemusic.TgMusicApp
+import com.abn3li.telemusic.ui.download.YouTubeContextHost
+import com.abn3li.telemusic.ui.download.youtubeTrackActions
+import com.abn3li.telemusic.ui.library.CalmSpinner
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.CubicBezierEasing
@@ -94,16 +104,26 @@ private const val SWIPE_TRIGGER_FRACTION = 0.2f
 
 private enum class QueueSection { NEXT_IN_QUEUE, UP_NEXT }
 
-/** The Queue page body: header with shuffle/repeat, then "Next in Queue" and "Up Next". */
+private enum class QueueTab(val label: String) { UP_NEXT("Up Next"), SUGGESTIONS("You Might Like") }
+
+/**
+ * The Queue page body: header with shuffle/repeat, then two tabs - the queue ("Next in Queue"
+ * and "Up Next") and songs like the one playing. A song without a YouTube id has nothing to
+ * base suggestions on, so it shows the queue alone.
+ */
 @Composable
 internal fun QueuePage(
     state: NowPlayingUiState,
     viewModel: NowPlayingViewModel,
+    onOpenPage: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val queueState by viewModel.queueState.collectAsState()
     val nextInQueue = queueState.nextInQueue
     val upNext = queueState.upNext
+    val canSuggest = !state.song?.youtubeVideoId.isNullOrBlank()
+    var tab by rememberSaveable { mutableStateOf(QueueTab.UP_NEXT) }
+    val shownTab = if (canSuggest) tab else QueueTab.UP_NEXT
 
     Column(modifier.fillMaxSize()) {
         Row(
@@ -139,6 +159,12 @@ internal fun QueuePage(
             )
         }
 
+        if (canSuggest) QueueTabs(shownTab, onSelect = { tab = it })
+        if (shownTab == QueueTab.SUGGESTIONS) {
+            SuggestionsList(state, viewModel, onOpenPage)
+            return@Column
+        }
+
         if (nextInQueue.isEmpty() && upNext.isEmpty()) {
             Column(
                 Modifier.fillMaxSize().padding(bottom = 40.dp),
@@ -170,21 +196,7 @@ internal fun QueuePage(
         val listState = rememberLazyListState()
         LazyColumn(
             state = listState,
-            modifier = Modifier
-                .fillMaxSize()
-                .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
-                .drawWithContent {
-                    drawContent()
-                    drawRect(
-                        brush = Brush.verticalGradient(
-                            0f to Color.Transparent,
-                            0.05f to Color.Black,
-                            0.93f to Color.Black,
-                            1f to Color.Transparent
-                        ),
-                        blendMode = BlendMode.DstIn
-                    )
-                }
+            modifier = Modifier.fillMaxSize().fadedEdges()
         ) {
             item(key = "queue_top") { Spacer(Modifier.height(8.dp)) }
             if (nextInQueue.isNotEmpty()) {
@@ -212,6 +224,135 @@ internal fun QueuePage(
                 )
             }
             item(key = "queue_bottom") { Spacer(Modifier.height(24.dp)) }
+        }
+    }
+}
+
+/** The lists' soft top and bottom edges, so rows fade out instead of being cut. */
+private fun Modifier.fadedEdges(): Modifier = this
+    .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
+    .drawWithContent {
+        drawContent()
+        drawRect(
+            brush = Brush.verticalGradient(
+                0f to Color.Transparent,
+                0.05f to Color.Black,
+                0.93f to Color.Black,
+                1f to Color.Transparent
+            ),
+            blendMode = BlendMode.DstIn
+        )
+    }
+
+/** Up Next / You Might Like, as one rounded switch under the header. */
+@Composable
+private fun QueueTabs(selected: QueueTab, onSelect: (QueueTab) -> Unit) {
+    val haptics = LocalHapticFeedback.current
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 26.dp)
+            .padding(top = 6.dp, bottom = 4.dp)
+            .height(36.dp)
+            .clip(RoundedCornerShape(10.dp))
+            .background(Color.White.copy(alpha = 0.1f))
+            .padding(3.dp)
+    ) {
+        QueueTab.entries.forEach { tab ->
+            val on = tab == selected
+            val pill by animateColorAsState(if (on) Color.White.copy(alpha = 0.2f) else Color.Transparent, tween(200), label = "queueTab")
+            Box(
+                Modifier
+                    .weight(1f)
+                    .fillMaxHeight()
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(pill)
+                    .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) {
+                        if (!on) {
+                            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            onSelect(tab)
+                        }
+                    },
+                contentAlignment = Alignment.Center
+            ) {
+                Text(tab.label, color = Color.White.copy(alpha = if (on) 1f else 0.6f), fontSize = 14.sp, fontWeight = FontWeight.Medium)
+            }
+        }
+    }
+}
+
+/**
+ * Songs like the one playing. They load only while this tab is open, and follow the song: a new
+ * song brings its own. Tap plays them, + puts one in Next in Queue, a long press has the rest.
+ */
+@Composable
+private fun SuggestionsList(state: NowPlayingUiState, viewModel: NowPlayingViewModel, onOpenPage: () -> Unit) {
+    val related by viewModel.relatedState.collectAsState()
+    val context = LocalContext.current
+    LaunchedEffect(state.song?.youtubeVideoId) { viewModel.fetchRelated() }
+    DisposableEffect(viewModel) { onDispose { viewModel.closeRelated() } }
+
+    YouTubeContextHost {
+        val current = related.videoId == state.song?.youtubeVideoId
+        if (!current || related.loading) {
+            Box(Modifier.fillMaxSize().padding(bottom = 40.dp), contentAlignment = Alignment.Center) { CalmSpinner() }
+        } else if (related.error != null || related.tracks.isEmpty()) {
+            Column(
+                Modifier.fillMaxSize().padding(horizontal = 26.dp).padding(bottom = 40.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center
+            ) {
+                Text(related.error ?: "No suggestions for this song yet.", color = Color.White.copy(alpha = 0.6f), fontSize = 14.sp)
+                if (related.error != null) {
+                    TextButton(onClick = { viewModel.fetchRelated(force = true) }) { Text("Retry", color = Color.White) }
+                }
+            }
+        } else {
+            LazyColumn(Modifier.fillMaxSize().fadedEdges()) {
+                item(key = "based_on") {
+                    Text(
+                        "Based on ${state.song?.title.orEmpty()}",
+                        color = Color.White.copy(alpha = 0.45f),
+                        fontSize = 13.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.padding(horizontal = 26.dp).padding(top = 10.dp, bottom = 4.dp)
+                    )
+                }
+                itemsIndexed(related.tracks, key = { _, track -> track.videoId }) { index, track ->
+                    val play = { viewModel.playRelated(related.tracks, index) }
+                    val download = { (context.applicationContext as TgMusicApp).downloadGate.run { viewModel.downloadRelated(track) } }
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .height(QueueRowHeight)
+                            .youtubeTrackActions(track, play, download, onOpenPage)
+                            .padding(start = 26.dp, end = 14.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        AsyncImage(
+                            track.thumbnailUrl, null, contentScale = ContentScale.Crop,
+                            modifier = Modifier.size(48.dp).clip(RoundedCornerShape(6.dp)).background(Color.White.copy(alpha = 0.08f))
+                        )
+                        Column(Modifier.weight(1f).padding(start = 14.dp, end = 10.dp)) {
+                            Text(track.title, color = Color.White, fontSize = 16.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Text(track.artist, color = Color.White.copy(alpha = 0.5f), fontSize = 12.5.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        }
+                        Box(
+                            Modifier
+                                .size(42.dp)
+                                .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) {
+                                    viewModel.queueRelated(track)
+                                    Toast.makeText(context, "Added to Next in Queue", Toast.LENGTH_SHORT).show()
+                                },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(Icons.Rounded.Add, "Add ${track.title} to the queue", tint = Color.White.copy(alpha = 0.6f), modifier = Modifier.size(24.dp))
+                        }
+                    }
+                }
+                item(key = "suggestions_bottom") { Spacer(Modifier.height(24.dp)) }
+            }
         }
     }
 }
@@ -363,13 +504,11 @@ private fun QueueRow(
     val scope = rememberCoroutineScope()
     var rowWidth by remember { mutableIntStateOf(0) }
     val swipe = remember { Animatable(0f) }
-    val collapse = remember { Animatable(1f) }
-    var removing by remember { mutableStateOf(false) }
     val trigger = rowWidth * SWIPE_TRIGGER_FRACTION
     val canSwipeRight = onMoveToNextInQueue != null
 
     val swipeState = rememberDraggableState { delta ->
-        if (removing || rowWidth == 0) return@rememberDraggableState
+        if (rowWidth == 0) return@rememberDraggableState
         val before = swipe.value
         val after = (before + delta).coerceIn(-rowWidth.toFloat(), if (canSwipeRight) rowWidth.toFloat() else 0f)
         if ((abs(before) >= trigger) != (abs(after) >= trigger)) {
@@ -386,18 +525,14 @@ private fun QueueRow(
     Box(
         modifier
             .fillMaxWidth()
-            .height(QueueRowHeight * collapse.value)
+            .height(QueueRowHeight)
             .onSizeChanged { rowWidth = it.width }
             .clipToBounds()
     ) {
         val offset = swipe.value
         val revealWidth = with(LocalDensity.current) { abs(offset).toDp() }
         val progress = if (rowWidth > 0) (abs(offset) / rowWidth).coerceIn(0f, 1f) else 0f
-        if (removing) {
-            Box(Modifier.fillMaxSize().background(DeleteRed), contentAlignment = Alignment.Center) {
-                Icon(Icons.Rounded.Delete, contentDescription = null, tint = Color.White, modifier = Modifier.size(26.dp))
-            }
-        } else if (offset < 0f) {
+        if (offset < 0f) {
             Box(
                 Modifier.align(Alignment.CenterEnd).width(revealWidth).fillMaxHeight().background(DeleteRed),
                 contentAlignment = Alignment.Center
@@ -423,7 +558,6 @@ private fun QueueRow(
             }
         }
 
-        if (removing) return@Box
         Row(
             Modifier
                 .fillMaxSize()
@@ -432,15 +566,16 @@ private fun QueueRow(
                 .draggable(
                     state = swipeState,
                     orientation = Orientation.Horizontal,
-                    enabled = !removing,
                     onDragStopped = {
                         val current = swipe.value
                         when {
                             current <= -trigger && trigger > 0f -> {
-                                removing = true
-                                swipe.animateTo(-rowWidth.toFloat(), tween(120, easing = QueueEasing))
-                                collapse.animateTo(0f, tween(180, easing = QueueEasing))
+                                // Removed first, so nothing here can leave a song half deleted. The
+                                // rows below slide up on their own. The reset is for a repeated
+                                // song: its next copy takes over this row and must start in place.
                                 onRemove()
+                                swipe.animateTo(-rowWidth.toFloat(), tween(120, easing = QueueEasing))
+                                swipe.snapTo(0f)
                             }
                             current >= trigger && trigger > 0f && onMoveToNextInQueue != null -> {
                                 if (onMoveToNextInQueue()) {

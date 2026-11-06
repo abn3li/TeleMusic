@@ -17,21 +17,20 @@ import androidx.compose.ui.geometry.Rect
 class PlayerTransition {
     val expansion: Animatable<Float, AnimationVector1D> = Animatable(0f)
 
-    // Where the dock's player, its artwork and its title are on screen, as the dock last laid
-    // them out (root px). Plain fields: only read when a movement starts.
+    // Where the dock's player and its artwork are on screen, as the dock last laid them out
+    // (root px). Plain fields: only read when a movement starts.
     var dockPlayer: Rect? = null
     var dockArtwork: Rect? = null
-    var dockTitle: Rect? = null
 
     /** Those places as they were when the player started opening: it opens out of them and
      * closes back into them, even if the dock moves meanwhile. Null while closed. */
     var origin by mutableStateOf<Origin?>(null)
         internal set
 
-    class Origin(val player: Rect?, val artwork: Rect?, val title: Rect?)
+    class Origin(val player: Rect?, val artwork: Rect?)
 
     internal fun captureOrigin() {
-        if (origin == null) origin = Origin(dockPlayer, dockArtwork, dockTitle)
+        if (origin == null) origin = Origin(dockPlayer, dockArtwork)
     }
 
     internal fun clearOrigin() {

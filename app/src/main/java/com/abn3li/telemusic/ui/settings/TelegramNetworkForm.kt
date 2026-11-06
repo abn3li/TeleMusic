@@ -30,8 +30,8 @@ import com.abn3li.telemusic.ui.library.GroupTextField
 import com.abn3li.telemusic.ui.library.GroupValue
 
 /**
- * The DNS and MTProto proxy fields, as typed but not yet saved - shared by Settings and the
- * Telegram settings' Telegram setup, which each decide when to save and apply them. Survives switching
+ * The DNS and MTProto proxy fields, as typed but not yet saved - shared by Settings and
+ * Telegram's phone-number step, which each decide when to save and apply them. Survives switching
  * tabs and rotating, but if the other screen saved new values meanwhile, those win (see
  * [rememberTelegramNetworkForm]) - a stale form must never write old values back.
  */
@@ -84,14 +84,6 @@ internal class TelegramNetworkForm(
         return true
     }
 
-    /** Saves both to settings (Settings and the setup screen then apply them their own way). */
-    fun save(store: AppSettingsStore) {
-        store.dnsResolver = dns
-        store.customDnsIps = customDns
-        store.updateProxy(proxyEnabled, proxyServer, proxyPort, proxySecret)
-        markSaved(store)
-    }
-
     companion object {
         /** The saved DNS and proxy settings as one comparable string. */
         fun snapshot(store: AppSettingsStore): String {
@@ -113,6 +105,14 @@ internal class TelegramNetworkForm(
         )
     }
 }
+
+private var launchDns: Pair<DnsResolver, String>? = null
+
+/** The DNS this run of the app started with, first read before anything can change it. TDLib only
+ * reads DNS when it starts, so Settings and the phone-number step both compare against this to
+ * know whether a restart is needed. */
+internal fun dnsAtLaunch(store: AppSettingsStore): Pair<DnsResolver, String> =
+    launchDns ?: (store.dnsResolver to store.customDnsIps).also { launchDns = it }
 
 /** The saved DNS and proxy settings, as a form to edit. What was typed survives switching tabs
  * and rotating - unless the settings were saved elsewhere since, and then it starts over from them. */

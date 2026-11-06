@@ -55,6 +55,8 @@ import androidx.compose.material.icons.rounded.Folder
 import androidx.compose.material.icons.rounded.Groups
 import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.LibraryMusic
+import androidx.compose.material.icons.rounded.Movie
+import androidx.compose.material.icons.rounded.SignalCellularAlt
 import androidx.compose.material.icons.rounded.Lyrics
 import androidx.compose.material.icons.rounded.SdStorage
 import androidx.compose.material.icons.rounded.SystemUpdate
@@ -152,15 +154,16 @@ fun SettingsScreen(
     val telegramRunning = app.tdlibManager.isStarted
     var proxyStatusMessage by remember { mutableStateOf<String?>(null) }
     // TDLib reads DNS only when it starts: a changed one offers a restart.
-    val launchDns = remember { dnsAtLaunch ?: (app.settingsStore.dnsResolver to app.settingsStore.customDnsIps).also { dnsAtLaunch = it } }
+    val launchDns = remember { dnsAtLaunch(app.settingsStore) }
     var savedDns by remember { mutableStateOf(app.settingsStore.dnsResolver to app.settingsStore.customDnsIps) }
-    val dnsNeedsRestart = telegramRunning && savedDns != launchDns
+    // Read from the form, which also follows a change made on Telegram's phone-number step.
+    val dnsNeedsRestart = telegramRunning && (network.dns to network.customDns) != launchDns
     // Proxy fields typed but not connected yet - connected on leaving Settings.
     var proxyEditsPending by remember { mutableStateOf(false) }
 
     // DNS is written with a blocking commit() (see AppSettingsStore.dnsResolver), so never on the
     // main thread while typing: a picked resolver saves in the background, typed servers save
-    // once on leaving Settings or on Restart.
+    // after a pause, or on leaving Settings or on Restart.
     var dnsEditsPending by remember { mutableStateOf(false) }
     fun writeDns(resolver: com.abn3li.telemusic.data.settings.DnsResolver, custom: String) {
         app.settingsStore.dnsResolver = resolver
@@ -175,6 +178,13 @@ fun SettingsScreen(
             withContext(Dispatchers.IO) { writeDns(resolver, custom) }
             network.markSaved(app.settingsStore)
         }
+    }
+    // Typed servers also save after a pause in typing, so Telegram's phone-number step, which
+    // opens over Settings, shows them too.
+    androidx.compose.runtime.LaunchedEffect(dnsEditsPending, network.customDns) {
+        if (!dnsEditsPending) return@LaunchedEffect
+        kotlinx.coroutines.delay(400L)
+        saveDns(typing = false)
     }
 
     fun saveProxy(connectNow: Boolean) {
@@ -378,8 +388,26 @@ fun SettingsScreen(
                         GroupSwitch(playerEffects.animatedBackground, { on -> app.settingsStore.updatePlayerEffects { it.copy(animatedBackground = on) } })
                     }
                 )
+                GroupDivider(start = 57.dp)
+                GroupRow(
+                    title = "Animated Covers",
+                    icon = { GroupIcon(Icons.Rounded.Movie, TileOrange) },
+                    trailing = {
+                        GroupSwitch(playerEffects.animatedCovers, { on -> app.settingsStore.updatePlayerEffects { it.copy(animatedCovers = on) } })
+                    }
+                )
+                if (playerEffects.animatedCovers) {
+                    GroupDivider(start = 57.dp)
+                    GroupRow(
+                        title = "Covers on Mobile Data",
+                        icon = { GroupIcon(Icons.Rounded.SignalCellularAlt, TileGreen) },
+                        trailing = {
+                            GroupSwitch(playerEffects.animatedCoversOnMobileData, { on -> app.settingsStore.updatePlayerEffects { it.copy(animatedCoversOnMobileData = on) } })
+                        }
+                    )
+                }
             }
-            SettingsNote("Lyrics are searched in the sources switched on, and only a song with the same name and artist is used. The Translate button on the lyrics shows each line in this language. These effects may increase CPU and GPU usage.")
+            SettingsNote("Lyrics are searched in the sources switched on, and only a song with the same name and artist is used. The Translate button on the lyrics shows each line in this language. Animated Covers look up the song's name and artist on Apple Music, Tidal and a community list. These effects may increase CPU and GPU usage.")
         }
 
         item("library") {
@@ -723,7 +751,6 @@ internal fun SettingsNote(text: String) {
 }
 
 /** The DNS Telegram started with in this process - see SettingsScreen's restart row. */
-private var dnsAtLaunch: Pair<com.abn3li.telemusic.data.settings.DnsResolver, String>? = null
 
 @Composable
 private fun LinkRow(title: String, value: String, icon: androidx.compose.ui.graphics.vector.ImageVector, tile: Color, onClick: () -> Unit) {

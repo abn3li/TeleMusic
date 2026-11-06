@@ -269,8 +269,7 @@ internal fun MixedBrowsePage(
                     if (cards.isEmpty()) continue
                     item("collections_header_$kind") {
                         HomeSectionHeader(group.title,
-                            onSeeAll = if (cards.size > BROWSE_PREVIEW_SIZE) { { expandedSection = group } } else null,
-                            seeAllLabel = "Show all")
+                            onSeeAll = if (cards.size > BROWSE_PREVIEW_SIZE) { { expandedSection = group } } else null)
                     }
                     item("collections_$kind") {
                         LazyRow(
@@ -287,8 +286,7 @@ internal fun MixedBrowsePage(
                 if (state.tracks.isNotEmpty()) {
                     item("songs_header") {
                         HomeSectionHeader("Songs",
-                            onSeeAll = if (state.tracks.size > BROWSE_PREVIEW_SIZE) { { expandedSection = BrowseSection.SONGS } } else null,
-                            seeAllLabel = "Show all")
+                            onSeeAll = if (state.tracks.size > BROWSE_PREVIEW_SIZE) { { expandedSection = BrowseSection.SONGS } } else null)
                     }
                     item("songs") {
                         LazyRow(

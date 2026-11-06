@@ -37,6 +37,8 @@ data class SyncUiState(
 
 /** No metadata toggle here anymore - that lives in the app's Settings screen. This screen is
  * purely: log in, pick a channel, kick off the (foreground-service-backed) sync. */
+private const val LOGIN_TIMEOUT_MS = 30_000L
+
 class SyncViewModel(private val tdlibManager: TdlibManager) : ViewModel() {
 
     private val _uiState = MutableStateFlow(SyncUiState())
@@ -54,9 +56,39 @@ class SyncViewModel(private val tdlibManager: TdlibManager) : ViewModel() {
         }
     }
 
-    fun submitPhoneNumber(phone: String) = viewModelScope.launch { runCatching { tdlibManager.submitPhoneNumber(phone) } }
-    fun submitCode(code: String) = viewModelScope.launch { runCatching { tdlibManager.submitCode(code) } }
-    fun submitPassword(password: String) = viewModelScope.launch { runCatching { tdlibManager.submitPassword(password) } }
+    fun submitPhoneNumber(phone: String, onError: (String) -> Unit) =
+        submitLogin(onError) { tdlibManager.submitPhoneNumber(phone) }
+
+    fun submitCode(code: String, onError: (String) -> Unit) =
+        submitLogin(onError) { tdlibManager.submitCode(code) }
+
+    fun submitPassword(password: String, onError: (String) -> Unit) =
+        submitLogin(onError) { tdlibManager.submitPassword(password) }
+
+    /** [onError] gets a sentence to show. Without a time limit, a connection lost after tapping
+     * would leave the step waiting forever with nothing said. */
+    private fun submitLogin(onError: (String) -> Unit, submit: suspend () -> Any) = viewModelScope.launch {
+        try {
+            val answered = kotlinx.coroutines.withTimeoutOrNull(LOGIN_TIMEOUT_MS) { submit() }
+            if (answered == null) onError("Telegram didn't answer. Check the connection and try again.")
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            onError(loginErrorText(e.message.orEmpty()))
+        }
+    }
+
+    private fun loginErrorText(error: String): String = when {
+        "PHONE_NUMBER_INVALID" in error -> "That phone number isn't valid."
+        "PHONE_NUMBER_BANNED" in error -> "Telegram has banned this number."
+        "API_ID" in error -> "Your API ID or hash is wrong."
+        "PHONE_CODE_EXPIRED" in error -> "That code has expired. Go back and ask for a new one."
+        "PHONE_CODE" in error -> "That code isn't right."
+        "PASSWORD_HASH_INVALID" in error -> "That password isn't right."
+        "FLOOD" in error -> "Too many tries. Wait a while and try again."
+        else -> "Telegram refused this. $error"
+    }
+
 
     fun loadChats() {
         // Two independent launches, not one fetch after another - the Saved Messages lookup

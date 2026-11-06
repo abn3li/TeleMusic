@@ -53,8 +53,11 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
@@ -66,7 +69,6 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBackIos
-import androidx.compose.material.icons.automirrored.rounded.ArrowForwardIos
 import androidx.compose.material.icons.automirrored.rounded.QueueMusic
 import androidx.compose.material.icons.rounded.Album
 import androidx.compose.material.icons.rounded.ArrowDownward
@@ -753,20 +755,21 @@ internal fun BoxScope.HeroImage(urls: List<String>, placeholder: ImageVector) {
 @Composable
 internal fun SectionHeader(title: String, onMore: (() -> Unit)?) {
     Row(
-        Modifier.fillMaxWidth().padding(horizontal = 18.dp).padding(top = 20.dp, bottom = 10.dp),
+        Modifier.fillMaxWidth().padding(horizontal = 18.dp).padding(top = 20.dp, bottom = 10.dp).heightIn(min = 48.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Text(title, color = ink, fontSize = 24.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+        Text(title, color = ink, fontSize = 22.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
         if (onMore != null) {
-            Icon(
-                Icons.AutoMirrored.Rounded.ArrowForwardIos,
-                contentDescription = "See all",
-                tint = ink.copy(alpha = 0.7f),
+            // The same "See all" as the Home and Library shelves - not a lone arrow.
+            Text(
+                "See all",
+                color = AppAccent,
+                fontSize = 15.sp,
                 modifier = Modifier
-                    .size(26.dp)
-                    .clip(CircleShape)
-                    .clickable(onClick = onMore)
-                    .padding(5.dp)
+                    .heightIn(min = 48.dp)
+                    .semantics { contentDescription = "See all $title" }
+                    .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onMore)
+                    .padding(start = 12.dp, top = 14.dp, bottom = 14.dp)
             )
         }
     }

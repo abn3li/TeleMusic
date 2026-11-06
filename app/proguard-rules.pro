@@ -34,3 +34,7 @@
 -keep, includedescriptorclasses class androidx.media3.decoder.ffmpeg.FfmpegAudioDecoder {
     private java.nio.ByteBuffer growOutputBuffer(androidx.media3.decoder.SimpleDecoderOutputBuffer, int);
 }
+
+# Line numbers in crash logs; mapping.txt turns the short names back into real ones.
+-keepattributes SourceFile,LineNumberTable
+-renamesourcefileattribute SourceFile

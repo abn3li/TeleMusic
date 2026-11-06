@@ -23,6 +23,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.foundation.border
 import com.abn3li.telemusic.data.local.displayArtwork
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.layout.LastBaseline
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Pause
 import androidx.compose.foundation.layout.fillMaxSize
@@ -307,22 +308,28 @@ internal fun HomeSectionHeader(
     title: String,
     onSeeAll: (() -> Unit)? = null,
     strapline: String? = null,
-    // In place of "See All": "Play all" is drawn as an outlined pill.
-    action: String? = null,
-    seeAllLabel: String = "See All"
+    // In place of "See all": "Play all" is drawn as an outlined pill.
+    action: String? = null
 ) {
+    // One shape for every section on every page: same title size, same "See all" in the accent
+    // colour, same 48 dp row (the link is a comfortable target outside the Home page too).
     Row(
-        Modifier.fillMaxWidth().padding(start = 18.dp, end = 18.dp,
-            top = if (action != null) 24.dp else 32.dp,
-            bottom = if (action != null) 10.dp else 14.dp),
-        verticalAlignment = Alignment.Bottom
+        // The 48 dp minimum sits inside the padding, so a header with "See all" and one without
+        // are the same height and the gaps between shelves stay even.
+        Modifier.fillMaxWidth()
+            .padding(start = 18.dp, end = 18.dp, top = if (action != null) 18.dp else 26.dp, bottom = 6.dp)
+            .heightIn(min = 48.dp),
+        verticalAlignment = Alignment.CenterVertically
     ) {
-        Column(Modifier.weight(1f)) {
+        // Under a strapline, centring would put the link between the two lines, so it sits on
+        // the title's baseline instead.
+        val onTitleLine = if (strapline != null) Modifier.alignBy(LastBaseline) else Modifier
+        Column(Modifier.weight(1f).then(onTitleLine)) {
             if (strapline != null) {
                 Text(strapline.uppercase(), color = ink.copy(alpha = 0.5f), fontSize = 12.sp, fontWeight = FontWeight.Medium,
                     letterSpacing = 0.3.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
-            Text(title, color = ink, fontSize = 21.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(title, color = ink, fontSize = 22.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
         if (onSeeAll != null) {
             if (action != null) {
@@ -331,7 +338,7 @@ internal fun HomeSectionHeader(
                     color = ink,
                     fontSize = 13.sp,
                     fontWeight = FontWeight.SemiBold,
-                    modifier = Modifier
+                    modifier = onTitleLine
                         .clip(RoundedCornerShape(50))
                         .border(1.dp, ink.copy(alpha = 0.25f), RoundedCornerShape(50))
                         .clickable(onClick = onSeeAll)
@@ -339,11 +346,14 @@ internal fun HomeSectionHeader(
                 )
             } else {
                 Text(
-                    seeAllLabel,
+                    "See all",
                     color = AppAccent,
                     fontSize = 15.sp,
-                    modifier = Modifier.semantics { contentDescription = "$seeAllLabel $title" }
+                    modifier = onTitleLine
+                        .heightIn(min = 48.dp)
+                        .semantics { contentDescription = "See all $title" }
                         .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onSeeAll)
+                        .padding(start = 12.dp, top = 14.dp, bottom = 14.dp)
                 )
             }
         }
@@ -369,8 +379,17 @@ private fun ContinueListeningCard(song: SongEntity, playing: Boolean, onClick: (
             .then(actions)
     ) {
         BlurredArtwork(song.displayArtwork, Modifier.matchParentSize(), minBrightness = CARD_MIN_BRIGHTNESS)
-        // Just enough shade for the white text over a bright cover.
-        Box(Modifier.matchParentSize().background(Color.Black.copy(alpha = 0.2f)))
+        // A one-sided shade: the cover stays visible on the left, and the text on the right keeps
+        // its contrast even on a white cover (a flat 20% veil left white text on near-white).
+        Box(
+            Modifier.matchParentSize().background(
+                Brush.horizontalGradient(
+                    0f to Color.Black.copy(alpha = 0.10f),
+                    0.40f to Color.Black.copy(alpha = 0.34f),
+                    1f to Color.Black.copy(alpha = 0.62f)
+                )
+            )
+        )
         Row(Modifier.fillMaxWidth().heightIn(min = 176.dp).padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
             SongArtwork(song, 126.dp, 10.dp, Modifier.feedArtworkBorder(RoundedCornerShape(10.dp)))
             Column(Modifier.weight(1f).padding(start = 14.dp)) {
@@ -479,7 +498,7 @@ private fun androidx.compose.foundation.lazy.LazyListScope.youTubeShelf(
         when {
             shelf.listRows && shelf.tracks.size > 1 && !shelf.isForgottenFavorites() ->
                 HomeSectionHeader(shelf.title, strapline = shelf.strapline, action = "Play all", onSeeAll = { onPlayTracks(shelf.tracks, 0) })
-            else -> HomeSectionHeader(shelf.title, strapline = shelf.strapline, onSeeAll = showAll, seeAllLabel = "Show all")
+            else -> HomeSectionHeader(shelf.title, strapline = shelf.strapline, onSeeAll = showAll)
         }
     }
     item("yt_shelf_$index", contentType = shelf.layoutKind()) {

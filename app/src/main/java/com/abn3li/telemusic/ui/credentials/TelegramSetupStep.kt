@@ -16,13 +16,11 @@ import com.abn3li.telemusic.ui.library.GroupDivider
 import com.abn3li.telemusic.ui.library.GroupFooter
 import com.abn3li.telemusic.ui.library.GroupHeader
 import com.abn3li.telemusic.ui.library.GroupTextField
-import com.abn3li.telemusic.ui.settings.DnsResolverRows
-import com.abn3li.telemusic.ui.settings.ProxyRows
-import com.abn3li.telemusic.ui.settings.rememberTelegramNetworkForm
 
 /**
- * The Telegram API ID/hash (plus DNS and proxy, for networks that block Telegram) - the first
- * step of Telegram settings until they're saved. Only Telegram needs them, so the rest of the app
+ * The Telegram API ID/hash - the first step of Telegram settings until they're saved. DNS and
+ * the proxy are on the phone-number step, next to the connection status that shows whether
+ * they're needed. Only Telegram needs these, so the rest of the app
  * (YouTube, Spotify, local files) works without ever filling this in. Saving starts TDLib, and
  * Telegram settings moves on to the phone-number step by itself. What's typed survives switching
  * tabs and rotating.
@@ -35,8 +33,6 @@ fun TelegramSetupStep(onStarted: () -> Unit) {
     var apiId by rememberSaveable { mutableStateOf("") }
     var apiHash by rememberSaveable { mutableStateOf("") }
     var error by rememberSaveable { mutableStateOf<String?>(null) }
-    var proxyMessage by rememberSaveable { mutableStateOf<String?>(null) }
-    val network = rememberTelegramNetworkForm(app.settingsStore)
     // TDLib must start exactly once: a second tap before this step goes away would start a
     // second client on the same database.
     var starting by rememberSaveable { mutableStateOf(false) }
@@ -59,14 +55,6 @@ fun TelegramSetupStep(onStarted: () -> Unit) {
                 "not your account - you'll still log in with your phone number next. Stored encrypted on this device only."
         )
 
-        GroupHeader("DNS")
-        GroupCard { DnsResolverRows(network) }
-        GroupFooter("Helps if your network blocks Telegram's addresses.")
-
-        GroupHeader("MTProto Proxy")
-        GroupCard { ProxyRows(network, onMessage = { proxyMessage = it }) }
-        GroupFooter(proxyMessage ?: "Optional - only needed if Telegram is blocked where you are.")
-
         GroupHeader("")
         GroupCard {
             GroupActionRow("Continue", loading = starting) {
@@ -81,14 +69,13 @@ fun TelegramSetupStep(onStarted: () -> Unit) {
                     return@GroupActionRow
                 }
                 starting = true
-                network.save(app.settingsStore)
                 app.credentialsStore.save(id, apiHash)
                 app.tdlibManager.start(
                     apiId = id,
                     apiHash = apiHash,
                     initialProxy = app.settingsStore.proxySettings,
-                    dnsResolver = network.dns,
-                    customDnsIps = network.customDns
+                    dnsResolver = app.settingsStore.dnsResolver,
+                    customDnsIps = app.settingsStore.customDnsIps
                 )
                 onStarted()
             }

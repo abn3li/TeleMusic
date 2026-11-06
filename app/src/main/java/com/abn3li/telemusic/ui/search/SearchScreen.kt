@@ -85,6 +85,7 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.LocalView
@@ -306,13 +307,36 @@ private fun ResultsScreen(
     }
     val backdrop = rememberFrostedBackdrop()
     val statusBar = frostedHeaderTopInset()
+    // The keyboard's height, read from the root window (Compose's own IME insets stay stuck on
+    // some Samsung builds after it closes - see SearchField). Reserved under the results so the
+    // last row can always be scrolled clear of the keyboard. Kept in pixels so a layout pass
+    // with the same keyboard height is a plain int compare and changes nothing.
+    val rootView = LocalView.current
+    val density = LocalDensity.current
+    var keyboardPx by remember { mutableIntStateOf(0) }
+    DisposableEffect(rootView) {
+        fun imeBottomPx(): Int {
+            val insets = ViewCompat.getRootWindowInsets(rootView) ?: return 0
+            return if (insets.isVisible(WindowInsetsCompat.Type.ime()))
+                insets.getInsets(WindowInsetsCompat.Type.ime()).bottom else 0
+        }
+        keyboardPx = imeBottomPx()
+        val listener = android.view.ViewTreeObserver.OnGlobalLayoutListener {
+            val px = imeBottomPx()
+            if (px != keyboardPx) keyboardPx = px
+        }
+        rootView.viewTreeObserver.addOnGlobalLayoutListener(listener)
+        onDispose { rootView.viewTreeObserver.removeOnGlobalLayoutListener(listener) }
+    }
     Box(Modifier.fillMaxSize().extendBehindStatusBar(statusBar).background(paper)) {
         val barsLayer = remember { PlayingBarsLayer() }
         CompositionLocalProvider(LocalPlayingBarsLayer provides barsLayer) {
         HorizontalPager(state = pagerState, modifier = Modifier.fillMaxSize().playingBarsLayer(barsLayer).then(
             if (!SystemBarsState.playerOpen) Modifier.frostedBackdropSource(backdrop, paper) else Modifier
         )) { page ->
-            LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(top = ResultsHeaderHeight + statusBar, bottom = LocalMiniPlayerInset.current + 24.dp)) {
+            LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(top = ResultsHeaderHeight + statusBar,
+                // The open keyboard covers the mini player, so it takes the mini player's place.
+                bottom = maxOf(LocalMiniPlayerInset.current, with(density) { keyboardPx.toDp() }) + 24.dp)) {
                 if (state.query.isBlank()) item("search_hint") {
                     Text(if (page == 0) "Search songs, artists, albums and playlists on YouTube Music."
                         else "Search songs, artists, albums and playlists in your library.", color = GroupLabelColor,
@@ -388,7 +412,11 @@ private fun ResultsHeader(query: String, source: SearchSource, onQuery: (String)
                         focusManager.clearFocus()
                         keyboard?.hide()
                     }))
-                Icon(Icons.Rounded.Cancel, "Clear", tint = ink.copy(.45f), modifier = Modifier.size(20.dp).clickable { onQuery("") })
+                // Only while there's something to clear: an empty field has nothing to reset.
+                if (fieldValue.text.isNotEmpty()) {
+                    Icon(Icons.Rounded.Cancel, "Clear", tint = ink.copy(.45f),
+                        modifier = Modifier.size(20.dp).clickable { onQuery("") })
+                }
             }
             Text("Cancel", color = AppAccent, fontSize = 16.sp, modifier = Modifier.clickable {
                 focusManager.clearFocus()
@@ -543,10 +571,15 @@ private fun YoutubeSongRow(result: YtDlpSearchResult, state: YouTubeDownloadUiSt
             Text(result.title, color = if (current) AppAccent else ink, fontSize = 16.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
             Text(prefix + result.artist, color = if (current) AppAccent.copy(alpha = 0.75f) else ink.copy(.56f), fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
-        if (showDownload) Box(Modifier.size(44.dp), contentAlignment = Alignment.Center) {
-            when { downloading -> CalmSpinner(Modifier.size(20.dp), AppAccent, 2.dp)
-                downloaded -> Icon(Icons.Rounded.Check, "Downloaded", tint = AppAccent, modifier = Modifier.size(22.dp))
-                else -> Icon(Icons.Rounded.Download, "Download", tint = AppAccent, modifier = Modifier.size(23.dp).clickable { download(result) }) }
+        // Quiet, and a full 44 dp target: a row of accent-pink arrows made every result shout,
+        // and the arrow itself was a 23 dp hit area.
+        if (showDownload) Box(
+            Modifier.size(44.dp).clickable(enabled = !downloading && !downloaded) { download(result) },
+            contentAlignment = Alignment.Center
+        ) {
+            when { downloading -> CalmSpinner(Modifier.size(20.dp), ink, 2.dp)
+                downloaded -> Icon(Icons.Rounded.Check, "Downloaded", tint = ink.copy(alpha = 0.5f), modifier = Modifier.size(22.dp))
+                else -> Icon(Icons.Rounded.Download, "Download", tint = ink.copy(alpha = 0.6f), modifier = Modifier.size(23.dp)) }
         }
 
     }
@@ -611,8 +644,13 @@ private fun ImportedCard(p: ImportedPlaylistEntity, open: () -> Unit, remove: ()
 @Composable
 private fun Header(title: String, seeAll: (() -> Unit)? = null, action: (@Composable () -> Unit)? = null, compact: Boolean = false) {
     Row(Modifier.fillMaxWidth().padding(horizontal = 18.dp).padding(top = if (compact) 16.dp else 22.dp, bottom = if (compact) 6.dp else 10.dp), verticalAlignment = Alignment.CenterVertically) {
-        Text(title, color = ink, fontSize = 21.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
-        seeAll?.let { Text("See All", color = AppAccent, fontSize = 15.sp, modifier = Modifier.clickable(onClick = it)) }; action?.invoke()
+        Text(title, color = ink, fontSize = 22.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+        seeAll?.let {
+            Text("See all", color = AppAccent, fontSize = 15.sp,
+                modifier = Modifier.heightIn(min = 48.dp)
+                    .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = it)
+                    .padding(start = 12.dp, top = 14.dp, bottom = 14.dp))
+        }; action?.invoke()
     }
 }
 

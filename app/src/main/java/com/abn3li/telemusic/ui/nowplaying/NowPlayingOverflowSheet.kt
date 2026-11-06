@@ -24,6 +24,7 @@ import androidx.compose.material.icons.rounded.ThumbUp
 import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.Lyrics
 import androidx.compose.material.icons.rounded.MusicNote
+import androidx.compose.material.icons.rounded.Share
 import androidx.compose.material.icons.rounded.SwapHoriz
 import androidx.compose.material3.BottomSheetDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -85,7 +86,8 @@ internal fun NowPlayingOverflowSheet(
     onOpenArtist: (String) -> Unit,
     onOpenAlbum: (String) -> Unit
 ) {
-    val app = LocalContext.current.applicationContext as com.abn3li.telemusic.TgMusicApp
+    val context = LocalContext.current
+    val app = context.applicationContext as com.abn3li.telemusic.TgMusicApp
     val youtubeLike = com.abn3li.telemusic.ui.library.rememberYouTubeLikeAction(song.youtubeVideoId)
     val flac by app.flacUpgradeStore.activeFlac.collectAsState()
     val hasActiveFlac = flac?.songId == song.telegramMessageId.toString()
@@ -224,6 +226,18 @@ internal fun NowPlayingOverflowSheet(
                             closeThen(onDownload)
                         }
                     )
+                    HorizontalDivider(color = Color.White.copy(alpha = 0.08f), modifier = Modifier.padding(start = 52.dp))
+                }
+                // Only a YouTube song has a link to send; Telegram and local songs have none.
+                song.youtubeVideoId?.takeIf { it.isNotBlank() }?.let { videoId ->
+                    SheetAction(icon = Icons.Rounded.Share, label = "Share", onClick = {
+                        closeThen {
+                            val link = "https://music.youtube.com/watch?v=${android.net.Uri.encode(videoId)}"
+                            context.startActivity(android.content.Intent.createChooser(
+                                android.content.Intent(android.content.Intent.ACTION_SEND).setType("text/plain")
+                                    .putExtra(android.content.Intent.EXTRA_TEXT, link), song.title))
+                        }
+                    })
                     HorizontalDivider(color = Color.White.copy(alpha = 0.08f), modifier = Modifier.padding(start = 52.dp))
                 }
                 SheetAction(icon = Icons.Rounded.Info, label = "Song info", onClick = { closeThen(onSongInfo) })

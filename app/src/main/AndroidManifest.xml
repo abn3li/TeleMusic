@@ -77,6 +77,25 @@
             </intent-filter>
         </activity>
 
+        <!-- The crash screen and its log file, in their own process so they work when the app can't. -->
+        <activity
+            android:name=".crash.CrashActivity"
+            android:exported="false"
+            android:launchMode="singleTask"
+            android:process=":crash"
+            android:taskAffinity="${applicationId}.crash"
+            android:theme="@android:style/Theme.Material.NoActionBar" />
+        <provider
+            android:name=".crash.CrashLogProvider"
+            android:authorities="${applicationId}.crashlog"
+            android:exported="false"
+            android:grantUriPermissions="true"
+            android:process=":crash">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/share_paths" />
+        </provider>
+
         <!-- Pictures shared from the app (lyrics cards), read by the app they're sent to. -->
         <provider
             android:name="androidx.core.content.FileProvider"

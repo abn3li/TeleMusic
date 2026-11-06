@@ -76,6 +76,16 @@ import com.abn3li.telemusic.data.telegram.TelegramChatCategory
 import com.abn3li.telemusic.data.telegram.TelegramChatInfo
 import com.abn3li.telemusic.ui.credentials.TelegramSetupStep
 import com.abn3li.telemusic.ui.library.AppAccent
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.rememberCoroutineScope
+import com.abn3li.telemusic.ui.settings.DnsResolverRows
+import com.abn3li.telemusic.ui.settings.ProxyRows
+import kotlinx.coroutines.launch
+import com.abn3li.telemusic.ui.settings.dnsAtLaunch
+import com.abn3li.telemusic.ui.settings.rememberTelegramNetworkForm
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
 import com.abn3li.telemusic.ui.library.ChevronIcon
 import com.abn3li.telemusic.ui.library.DestructiveRed
 import com.abn3li.telemusic.ui.library.FilterPill
@@ -144,31 +154,7 @@ fun SyncScreen(onBack: () -> Unit) {
         } else null
     ) {
         if (ready && connection != TelegramConnectionState.CONNECTED) {
-            item("connection") {
-                GroupHeader("Telegram")
-                GroupCard {
-                    Row(
-                        Modifier.fillMaxWidth().heightIn(min = 46.dp).padding(horizontal = 15.dp, vertical = 11.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        if (connection != TelegramConnectionState.DISCONNECTED) {
-                            CalmSpinner(color = AppAccent, strokeWidth = 2.dp, modifier = Modifier.size(18.dp))
-                            Spacer(Modifier.size(12.dp))
-                        }
-                        Text(
-                            when (connection) {
-                                TelegramConnectionState.CONNECTING_TO_PROXY -> "Connecting to proxy…"
-                                TelegramConnectionState.WAITING_FOR_NETWORK -> "Waiting for network…"
-                                TelegramConnectionState.UPDATING -> "Updating…"
-                                TelegramConnectionState.DISCONNECTED -> "Disconnected"
-                                else -> "Connecting…"
-                            },
-                            color = if (connection == TelegramConnectionState.DISCONNECTED) DestructiveRed else ink,
-                            fontSize = 15.sp
-                        )
-                    }
-                }
-            }
+            item("connection") { ConnectionStatus(connection) }
         }
         if (progress.isNotBlank()) {
             item("progress") {
@@ -190,8 +176,11 @@ fun SyncScreen(onBack: () -> Unit) {
         if (!configured) {
             item("setup") { TelegramSetupStep(onStarted = { configured = true }) }
         } else when (val auth = state.authState) {
-            TelegramAuthState.WaitingForPhoneNumber -> item("phone") { PhoneStep(viewModel) }
-            is TelegramAuthState.WaitingForCode -> item("code") { CodeStep(viewModel, auth.deliveryDescription) }
+            TelegramAuthState.WaitingForPhoneNumber -> item("phone") { PhoneStep(viewModel, connection) }
+            is TelegramAuthState.WaitingForCode -> item("code") {
+                ConnectionStatus(connection)
+                CodeStep(viewModel, auth.deliveryDescription)
+            }
             TelegramAuthState.WaitingForPassword -> item("password") { PasswordStep(viewModel) }
             TelegramAuthState.Ready -> chatPicker(
                 state = state,
@@ -217,15 +206,104 @@ fun SyncScreen(onBack: () -> Unit) {
     }
 }
 
+private val ConnectedGreen = Color(0xFF30D158)
+private const val DNS_SAVE_DELAY_MS = 400L
+private const val PROXY_CONNECT_DELAY_MS = 1_000L
+
+/** Whether the app can reach Telegram right now - shown through login, where no code arriving is
+ * otherwise the only sign of a blocked connection. */
 @Composable
-private fun PhoneStep(viewModel: SyncViewModel) {
+private fun ConnectionStatus(connection: TelegramConnectionState) {
+    val connected = connection == TelegramConnectionState.CONNECTED
+    GroupHeader("Telegram")
+    GroupCard {
+        Row(
+            Modifier.fillMaxWidth().heightIn(min = 46.dp).padding(horizontal = 15.dp, vertical = 11.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            if (connected) {
+                Box(Modifier.size(10.dp).background(ConnectedGreen, CircleShape))
+                Spacer(Modifier.size(12.dp))
+            } else if (connection != TelegramConnectionState.DISCONNECTED) {
+                CalmSpinner(color = AppAccent, strokeWidth = 2.dp, modifier = Modifier.size(18.dp))
+                Spacer(Modifier.size(12.dp))
+            }
+            Text(
+                when (connection) {
+                    TelegramConnectionState.CONNECTED -> "Connected"
+                    TelegramConnectionState.CONNECTING_TO_PROXY -> "Connecting to proxy…"
+                    TelegramConnectionState.WAITING_FOR_NETWORK -> "Waiting for network…"
+                    TelegramConnectionState.UPDATING -> "Updating…"
+                    TelegramConnectionState.DISCONNECTED -> "Disconnected"
+                    else -> "Connecting…"
+                },
+                color = if (connection == TelegramConnectionState.DISCONNECTED) DestructiveRed else ink,
+                fontSize = 15.sp
+            )
+        }
+    }
+}
+
+@Composable
+private fun PhoneStep(viewModel: SyncViewModel, connection: TelegramConnectionState) {
     val context = LocalContext.current
+    val app = context.applicationContext as TgMusicApp
+    val store = app.settingsStore
+    val network = rememberTelegramNetworkForm(store)
+    // TDLib reads DNS only when it starts, so a changed one needs a restart (as in Settings).
+    val startedDns = remember { dnsAtLaunch(store) }
+    // Saved to the same settings as Settings' DNS row, so the two always show the same. The write
+    // blocks (see AppSettingsStore.dnsResolver), so it's off the main thread, and typed servers
+    // wait for a pause in typing.
+    LaunchedEffect(network.dns, network.customDns) {
+        val resolver = network.dns
+        val custom = network.customDns
+        if (resolver == store.dnsResolver && custom.trim() == store.customDnsIps) return@LaunchedEffect
+        delay(DNS_SAVE_DELAY_MS)
+        withContext(Dispatchers.IO) {
+            store.dnsResolver = resolver
+            store.customDnsIps = custom
+        }
+        network.markSaved(store)
+    }
+    // The proxy shares Settings' saved values too, and connects as soon as it's filled in.
+    val scope = rememberCoroutineScope()
+    var proxyMessage by remember { mutableStateOf<String?>(null) }
+    var proxyEdits by remember { mutableIntStateOf(0) }
+    fun connectProxy() {
+        val enabled = network.proxyEnabled
+        val server = network.proxyServer
+        if (enabled && server.isBlank()) { proxyMessage = null; return }
+        val port = network.proxyPort
+        val secret = network.proxySecret
+        scope.launch {
+            proxyMessage = if (enabled) "Connecting…" else null
+            val success = app.tdlibManager.applyProxy(enabled, server, port, secret)
+            proxyMessage = when {
+                !enabled -> "Using a direct connection."
+                success -> "Proxy connected."
+                else -> "Couldn't connect to the proxy."
+            }
+        }
+    }
+    // Typed details connect after a pause, not on every keystroke.
+    LaunchedEffect(proxyEdits) {
+        if (proxyEdits == 0) return@LaunchedEffect
+        delay(PROXY_CONNECT_DELAY_MS)
+        connectProxy()
+    }
+    var error by remember { mutableStateOf<String?>(null) }
+    // A code can only be asked for over a working connection: the request would just wait.
+    val canSend = connection == TelegramConnectionState.CONNECTED || connection == TelegramConnectionState.UPDATING
     var selectedCountry by remember { mutableStateOf(defaultCountry(context)) }
     var nationalNumber by remember { mutableStateOf("") }
     var showCountryPicker by remember { mutableStateOf(false) }
     // Blocks a second tap sending a second code before Telegram answers; this step unmounts
     // once the auth state moves on.
     var isSubmitting by remember { mutableStateOf(false) }
+
+    ConnectionStatus(connection)
+    if (!canSend) GroupFooter("A login code can't be sent until this says Connected. If it stays like this, try another DNS below.")
 
     GroupHeader("Phone Number")
     GroupCard {
@@ -245,12 +323,43 @@ private fun PhoneStep(viewModel: SyncViewModel) {
             leading = { Text(selectedCountry.dialCode, color = ink, fontSize = 16.5.sp) }
         )
         GroupDivider()
-        GroupActionRow("Continue", enabled = nationalNumber.any { it.isDigit() }, loading = isSubmitting) {
+        GroupActionRow("Continue", enabled = canSend && nationalNumber.any { it.isDigit() }, loading = isSubmitting) {
             isSubmitting = true
-            viewModel.submitPhoneNumber("${selectedCountry.dialCode}${nationalNumber.filter { it.isDigit() }}")
+            error = null
+            viewModel.submitPhoneNumber("${selectedCountry.dialCode}${nationalNumber.filter { it.isDigit() }}") {
+                error = it
+                isSubmitting = false
+            }
         }
     }
-    GroupFooter("Telegram will send a login code to this number.")
+    error?.let { GroupFooter(it, color = DestructiveRed) } ?: GroupFooter("Telegram will send a login code to this number.")
+
+    GroupHeader("DNS")
+    GroupCard {
+        DnsResolverRows(network)
+        if ((network.dns to network.customDns) != startedDns) {
+            GroupDivider()
+            GroupActionRow("Restart to Apply DNS") {
+                // Written right here, synchronously: the process ends next.
+                store.dnsResolver = network.dns
+                store.customDnsIps = network.customDns
+                val intent = context.packageManager.getLaunchIntentForPackage(context.packageName)
+                context.startActivity(android.content.Intent.makeRestartActivityTask(intent?.component))
+                Runtime.getRuntime().exit(0)
+            }
+        }
+    }
+    GroupFooter("Helps if your network blocks Telegram's addresses.")
+
+    GroupHeader("MTProto Proxy")
+    GroupCard {
+        ProxyRows(network, onMessage = { proxyMessage = it }, onChange = { connectNow ->
+            store.updateProxy(network.proxyEnabled, network.proxyServer, network.proxyPort, network.proxySecret)
+            network.markSaved(store)
+            if (connectNow) connectProxy() else proxyEdits++
+        })
+    }
+    GroupFooter(proxyMessage ?: "Optional - only needed if Telegram is blocked where you are.")
 
     if (showCountryPicker) {
         CountryPickerDialog(
@@ -347,25 +456,45 @@ private fun CountryPickerDialog(selected: Country, onDismiss: () -> Unit, onSele
 @Composable
 private fun CodeStep(viewModel: SyncViewModel, deliveryDescription: String) {
     var code by remember { mutableStateOf("") }
+    var isSubmitting by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf<String?>(null) }
     GroupHeader("Login Code")
     GroupCard {
-        GroupTextField(value = code, onValueChange = { code = it }, placeholder = "12345", keyboardType = KeyboardType.Number)
+        GroupTextField(value = code, onValueChange = { code = it; error = null }, placeholder = "12345",
+            keyboardType = KeyboardType.Number, enabled = !isSubmitting)
         GroupDivider()
-        GroupActionRow("Verify", enabled = code.isNotBlank()) { viewModel.submitCode(code) }
+        GroupActionRow("Verify", enabled = code.isNotBlank(), loading = isSubmitting) {
+            isSubmitting = true
+            error = null
+            viewModel.submitCode(code) {
+                error = it
+                isSubmitting = false
+            }
+        }
     }
-    GroupFooter(deliveryDescription)
+    error?.let { GroupFooter(it, color = DestructiveRed) } ?: GroupFooter(deliveryDescription)
 }
 
 @Composable
 private fun PasswordStep(viewModel: SyncViewModel) {
     var password by remember { mutableStateOf("") }
+    var isSubmitting by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf<String?>(null) }
     GroupHeader("Two-Step Verification")
     GroupCard {
-        GroupTextField(value = password, onValueChange = { password = it }, placeholder = "Password", password = true)
+        GroupTextField(value = password, onValueChange = { password = it; error = null }, placeholder = "Password",
+            password = true, enabled = !isSubmitting)
         GroupDivider()
-        GroupActionRow("Unlock", enabled = password.isNotBlank()) { viewModel.submitPassword(password) }
+        GroupActionRow("Unlock", enabled = password.isNotBlank(), loading = isSubmitting) {
+            isSubmitting = true
+            error = null
+            viewModel.submitPassword(password) {
+                error = it
+                isSubmitting = false
+            }
+        }
     }
-    GroupFooter("Your account has a cloud password. Enter it to continue.")
+    error?.let { GroupFooter(it, color = DestructiveRed) } ?: GroupFooter("Your account has a cloud password. Enter it to continue.")
 }
 
 private fun LazyListScope.chatPicker(

@@ -714,6 +714,20 @@
     "empty_artifact": false
   },
   {
+    "coordinate": "androidx.media3:media3-exoplayer-hls:1.4.0",
+    "artifact_sha256": "43546b6b2ef0c2816f5d3af181c2179a5c1bddb9df85b7b84b3428cd37c887de",
+    "license": "Apache-2.0",
+    "declared_licenses": [
+      "The Apache Software License, Version 2.0"
+    ],
+    "notice": "licenses/maven/androidx.media3-media3-exoplayer-hls-1.4.0.txt",
+    "notice_sha256": "860bc565fe3c93bceae6113f117da5a2a0d305801dd2ea91aaaa70e9034a1824",
+    "source_url": "https://dl.google.com/dl/android/maven2/androidx/media3/media3-exoplayer-hls/1.4.0/media3-exoplayer-hls-1.4.0-sources.jar",
+    "source_sha256": "ecffc609b7e11875d4b3c5a6efb3f33a9d609de76430c9355334022f6bcc65cd",
+    "source_file": "build/licensing/sources/androidx.media3-media3-exoplayer-hls-1.4.0-sources.jar",
+    "empty_artifact": false
+  },
+  {
     "coordinate": "androidx.media3:media3-exoplayer:1.4.0",
     "artifact_sha256": "8740011806c480923c7cd05d9a403cbddbbeaff60a70edf2f4219e09c61473b6",
     "license": "Apache-2.0",

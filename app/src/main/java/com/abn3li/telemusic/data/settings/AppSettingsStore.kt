@@ -14,7 +14,9 @@ data class HomeFeeds(val telegram: Boolean = true, val youtube: Boolean = true)
 data class PlayerEffects(
     val lyricsGlow: Boolean = true,
     val lyricsBlur: Boolean = true,
-    val animatedBackground: Boolean = true
+    val animatedBackground: Boolean = true,
+    val animatedCovers: Boolean = true,
+    val animatedCoversOnMobileData: Boolean = false
 )
 
 enum class DnsResolver(
@@ -262,7 +264,9 @@ class AppSettingsStore(context: Context) {
         PlayerEffects(
             lyricsGlow = prefs.getBoolean(KEY_LYRICS_GLOW, true),
             lyricsBlur = prefs.getBoolean(KEY_LYRICS_BLUR, true),
-            animatedBackground = prefs.getBoolean(KEY_ANIMATED_BACKGROUND, true)
+            animatedBackground = prefs.getBoolean(KEY_ANIMATED_BACKGROUND, true),
+            animatedCovers = prefs.getBoolean(KEY_ANIMATED_COVERS, true),
+            animatedCoversOnMobileData = prefs.getBoolean(KEY_ANIMATED_COVERS_MOBILE, false)
         )
     )
     val playerEffects: StateFlow<PlayerEffects> = _playerEffects
@@ -273,6 +277,8 @@ class AppSettingsStore(context: Context) {
             .putBoolean(KEY_LYRICS_GLOW, updated.lyricsGlow)
             .putBoolean(KEY_LYRICS_BLUR, updated.lyricsBlur)
             .putBoolean(KEY_ANIMATED_BACKGROUND, updated.animatedBackground)
+            .putBoolean(KEY_ANIMATED_COVERS, updated.animatedCovers)
+            .putBoolean(KEY_ANIMATED_COVERS_MOBILE, updated.animatedCoversOnMobileData)
             .apply()
         _playerEffects.value = updated
     }
@@ -300,6 +306,8 @@ class AppSettingsStore(context: Context) {
         private const val KEY_LYRICS_GLOW = "player_lyrics_glow"
         private const val KEY_LYRICS_BLUR = "player_lyrics_blur"
         private const val KEY_ANIMATED_BACKGROUND = "player_animated_background"
+        private const val KEY_ANIMATED_COVERS = "player_animated_covers"
+        private const val KEY_ANIMATED_COVERS_MOBILE = "player_animated_covers_mobile"
         private const val KEY_DNS_RESOLVER = "dns_resolver"
         private const val KEY_CUSTOM_DNS_IPS = "custom_dns_ips"
         private const val KEY_PROXY_ENABLED = "proxy_enabled"

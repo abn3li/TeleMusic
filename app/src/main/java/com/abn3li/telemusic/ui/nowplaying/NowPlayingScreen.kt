@@ -19,7 +19,10 @@ import android.content.Context
 import android.net.Uri
 import android.os.SystemClock
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.SizeTransform
+import androidx.compose.animation.togetherWith
 import androidx.compose.animation.Crossfade
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Animatable
@@ -51,7 +54,6 @@ import androidx.compose.material.icons.rounded.MoreHoriz
 import androidx.compose.material.icons.rounded.Bedtime
 import androidx.compose.material.icons.rounded.MusicNote
 import androidx.compose.material.icons.rounded.Star
-import androidx.compose.material.icons.rounded.KeyboardArrowUp
 import androidx.compose.material.icons.rounded.StarBorder
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -143,11 +145,27 @@ private fun GraphicsLayerScope.flyFrom(
     return true
 }
 
-/** How far the artwork and title have flown: they wait on the dock's copies for [FLIGHT_START]. */
-private fun flightProgress(progress: Float): Float = ((progress - FLIGHT_START) / (1f - FLIGHT_START)).coerceIn(0f, 1f)
+/** How far the artwork has flown: it waits on the dock's copy for [FLIGHT_START] and lands at
+ * [FLIGHT_END], so the cover is in place before the title and controls arrive. */
+private fun flightProgress(progress: Float): Float =
+    ((progress - FLIGHT_START) / (FLIGHT_END - FLIGHT_START)).coerceIn(0f, 1f)
 
-// The part of the opening the dock's artwork and title take to fade away under their copies.
-private const val FLIGHT_START = 0.04f
+// The part of the opening the dock's artwork takes to fade away under its copy, and the point by
+// which the flying cover has landed in the player.
+// How much of the cover shows down its height: solid, then an S-curve to nothing. Straight lines
+// between a few stops left a visible edge where the fade stopped, so it eases out to flat instead.
+private const val COVER_FADE_START = 0.75f
+private val CoverFadeCurve: List<Pair<Float, Float>> = listOf(0f to 1f) + List(13) { i ->
+    val t = i / 12f
+    (COVER_FADE_START + (1f - COVER_FADE_START) * t) to 1f - t * t * t * (t * (t * 6f - 15f) + 10f)
+}
+
+private const val FLIGHT_START = 0.02f
+private const val FLIGHT_END = 0.44f
+
+/** The title and the controls arrive once the cover has landed, over this part of the opening. */
+private const val REVEAL_START = 0.55f
+private const val REVEAL_END = 0.88f
 
 /** The top [height] of a layer with rounded corners - the cover while it is still small. */
 private class FlightClipShape(private val height: Float, private val radius: Float) : Shape {
@@ -325,18 +343,13 @@ private fun NowPlayingContent(
     var showSongInfoDialog by remember { mutableStateOf(false) }
     var showManualLyricsDialog by remember { mutableStateOf(false) }
     var showLyricsSourceDialog by remember { mutableStateOf(false) }
-    var showRelated by remember { mutableStateOf(false) }
     var showQuality by remember { mutableStateOf(false) }
     var overflowSong by remember { mutableStateOf<SongEntity?>(null) }
 
-    val relatedVisible = showRelated && isExpanded && !state.song?.youtubeVideoId.isNullOrBlank()
-    // Keep the player mounted behind Related, but stop drawing its covered controls and lyrics.
-    // Expanded state still owns sheet navigation; audio and Related's footer stay live.
-    val visualsActive = playerVisible && !relatedVisible
+    val visualsActive = playerVisible
+    // The moving background rests while a clip plays: two moving layers would cost twice.
+    var clipShowing by remember { mutableStateOf(false) }
 
-    LaunchedEffect(state.song?.youtubeVideoId) {
-        if (state.song?.youtubeVideoId.isNullOrBlank()) showRelated = false
-    }
     LaunchedEffect(state.song?.telegramMessageId) { showQuality = false }
 
     val onInteraction: () -> Unit = {
@@ -355,14 +368,12 @@ private fun NowPlayingContent(
         snapshotFlow { expansionFraction.value }.first { it <= 0.001f }
         page = PlayerPage.ARTWORK
         showControls = true
-        showRelated = false
         showQuality = false
     }
 
     // On the Lyrics page the controls step aside after a few seconds without a touch, as long as
     // music is playing - a tap anywhere on the lyrics brings them back.
-    LaunchedEffect(page, lastInteractionMs, state.isPlaying, isExpanded, relatedVisible) {
-        if (relatedVisible) return@LaunchedEffect
+    LaunchedEffect(page, lastInteractionMs, state.isPlaying, isExpanded) {
         if (page == PlayerPage.LYRICS && state.isPlaying && isExpanded) {
             delay(CONTROLS_AUTO_HIDE_MS)
             showControls = false
@@ -421,7 +432,7 @@ private fun NowPlayingContent(
         ) {
             FloatingArtworkBackground(
                 artwork = state.song?.displayArtwork,
-                animate = isExpanded && visualsActive && state.isPlaying && effects.animatedBackground,
+                animate = isExpanded && visualsActive && state.isPlaying && effects.animatedBackground && !clipShowing,
                 dim = if (page == PlayerPage.LYRICS) 0.2f else 0.36f
             )
 
@@ -466,6 +477,8 @@ private fun NowPlayingContent(
                     transition = transition,
                     cardTop = cardTop,
                     cardCoordinates = cardCoordinates,
+                    onCollapse = onCollapse,
+                    onClipShowing = { clipShowing = it },
                     modifier = Modifier.weight(1f).fillMaxWidth()
                 )
 
@@ -478,70 +491,74 @@ private fun NowPlayingContent(
                         Modifier
                             .fillMaxWidth()
                             .graphicsLayer {
-                                val shown = easeOutCubic(transition.stage(0.55f, 1f))
+                                val shown = easeOutCubic(transition.stage(REVEAL_START, REVEAL_END))
                                 alpha = shown
                                 translationY = 12.dp.toPx() * (1f - shown)
                             }
                             .padding(horizontal = 26.dp)
-                            .padding(top = 6.dp, bottom = if (!state.song?.youtubeVideoId.isNullOrBlank()) 8.dp else 36.dp)
+                            .padding(top = 6.dp)
                     ) {
+                        // Queue and Lyrics swap the full controls for one compact row, so their
+                        // lists get the room the volume, times and second row take on the cover.
+                        val compact = page != PlayerPage.ARTWORK
+                        val onLyrics = {
+                            onInteraction()
+                            page = if (page == PlayerPage.LYRICS) PlayerPage.ARTWORK else PlayerPage.LYRICS
+                        }
+                        val onQueue = {
+                            onInteraction()
+                            page = if (page == PlayerPage.QUEUE) PlayerPage.ARTWORK else PlayerPage.QUEUE
+                        }
+                        val onPrevious = { onInteraction(); viewModel.previousSong() }
+                        val onPlayPause = { onInteraction(); viewModel.togglePlayPause() }
+                        val onNext = { onInteraction(); viewModel.nextSong() }
                         PlayerScrubber(viewModel = viewModel, active = visualsActive, onInteraction = onInteraction,
                             qualityStatus = {
                                 state.song?.let { song ->
                                     QualityUpgradeButton(song, active = isExpanded && visualsActive,
                                         onClick = { onInteraction(); showQuality = true })
                                 }
-                            })
-                        TransportRow(
-                            state = state,
-                            visualsActive = visualsActive,
-                            onPrevious = { onInteraction(); viewModel.previousSong() },
-                            onPlayPause = { onInteraction(); viewModel.togglePlayPause() },
-                            onNext = { onInteraction(); viewModel.nextSong() },
-                            modifier = Modifier.padding(vertical = 8.dp)
-                        )
-                        VolumeRow(onInteraction = onInteraction)
-                        Spacer(Modifier.height(10.dp))
-                        PlayerBottomRow(
-                            page = page,
-                            onLyrics = {
-                                onInteraction()
-                                page = if (page == PlayerPage.LYRICS) PlayerPage.ARTWORK else PlayerPage.LYRICS
                             },
-                            onQueue = {
-                                onInteraction()
-                                page = if (page == PlayerPage.QUEUE) PlayerPage.ARTWORK else PlayerPage.QUEUE
-                            }
-                        )
-                        if (!state.song?.youtubeVideoId.isNullOrBlank()) {
-                            Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-                                IconButton(
-                                    onClick = { onInteraction(); showRelated = true },
-                                    modifier = Modifier.pointerInput(Unit) {
-                                        val openDistance = 24.dp.toPx()
-                                        var dragDistance = 0f
-                                        // Keep small finger movements as taps; open only after an upward swipe.
-                                        detectVerticalDragGestures(
-                                            onDragStart = { dragDistance = 0f },
-                                            onDragEnd = {
-                                                if (dragDistance <= -openDistance) {
-                                                    onInteraction()
-                                                    showRelated = true
-                                                }
-                                            },
-                                            onDragCancel = { dragDistance = 0f },
-                                            onVerticalDrag = { change, dragAmount ->
-                                                change.consume()
-                                                dragDistance += dragAmount
-                                            }
-                                        )
-                                    }
-                                ) {
-                                    Icon(
-                                        androidx.compose.material.icons.Icons.Rounded.KeyboardArrowUp,
-                                        contentDescription = "Related songs",
-                                        tint = Color.White.copy(alpha = 0.7f),
-                                        modifier = Modifier.size(24.dp)
+                            compact = compact)
+                        AnimatedContent(
+                            targetState = compact,
+                            transitionSpec = {
+                                (fadeIn(tween(220, delayMillis = 60)) togetherWith fadeOut(tween(140)))
+                                    .using(SizeTransform(clip = false) { _, _ -> tween(320, easing = EaseOutQuart) })
+                            },
+                            label = "playerControls"
+                        ) { isCompact ->
+                            if (isCompact) {
+                                CompactControlsRow(
+                                    state = state,
+                                    visualsActive = visualsActive,
+                                    page = page,
+                                    onLyrics = onLyrics,
+                                    onPrevious = onPrevious,
+                                    onPlayPause = onPlayPause,
+                                    onNext = onNext,
+                                    onQueue = onQueue,
+                                    modifier = Modifier.padding(top = 4.dp, bottom = 14.dp)
+                                )
+                            } else {
+                                Column(Modifier.padding(bottom = 36.dp)) {
+                                    TransportRow(
+                                        state = state,
+                                        visualsActive = visualsActive,
+                                        onPrevious = onPrevious,
+                                        onPlayPause = onPlayPause,
+                                        onNext = onNext,
+                                        modifier = Modifier.padding(vertical = 6.dp)
+                                    )
+                                    VolumeRow(onInteraction = onInteraction)
+                                    Spacer(Modifier.height(8.dp))
+                                    PlayerBottomRow(
+                                        page = page,
+                                        onLyrics = onLyrics,
+                                        onQueue = onQueue,
+                                        // 26 dp of content margin + 8 dp here puts the three actions on the same
+                                        // columns as Previous / Play / Next above them.
+                                        modifier = Modifier.padding(horizontal = 8.dp)
                                     )
                                 }
                             }
@@ -556,9 +573,6 @@ private fun NowPlayingContent(
         val menuDim by animateFloatAsState(if (overflowSong != null) 0.32f else 0f, tween(250), label = "menuDim")
         if (menuDim > 0f) Box(Modifier.fillMaxSize().drawBehind { drawRect(Color.Black, alpha = menuDim) })
 
-        if (relatedVisible) {
-            RelatedSongsSheet(state, viewModel, onOpenPage = onCollapse, onDismiss = { showRelated = false })
-        }
         state.song?.takeIf { showQuality && isExpanded }?.let { song ->
             QualityUpgradeSheet(song, onDismiss = { showQuality = false; onInteraction() })
         }
@@ -634,6 +648,9 @@ private fun PlayerPageArea(
     transition: PlayerTransition,
     cardTop: () -> Float,
     cardCoordinates: Array<LayoutCoordinates?>,
+    // Closes the player before a suggestion's menu opens an artist or album page.
+    onCollapse: () -> Unit,
+    onClipShowing: (Boolean) -> Unit,
     modifier: Modifier = Modifier
     // On the artwork page, a drag anywhere (not just on the cover/title) closes the player, like
     // Apple Music. Lyrics and queue keep only the header, since their lists scroll.
@@ -650,23 +667,24 @@ private fun PlayerPageArea(
     val showCoverTitle by remember { derivedStateOf { morph.value < 0.99f } }
     val showHeaderTitle by remember { derivedStateOf { morph.value > 0.01f } }
 
-    val horizontalPadding = 28.dp
+    // The title and everything under it share one side margin.
+    val horizontalPadding = 26.dp
     // The cover fills the screen's width from its very top (behind the status bar and the
     // grabber, [coverLift] above this area) and has faded out into the player's colours by the
-    // title, which sits just above the controls like Apple Music. A square cover is shown at
-    // most a tenth taller than wide, so little of its sides is trimmed.
+    // title, which sits just above the controls like Apple Music. It runs right down to the
+    // title so no empty band separates them: a square cover is shown up to 1.22 times taller than
+    // wide, on a very tall screen the band comes back rather than trimming the sides further.
     val coverLift = WindowInsets.statusBars.asPaddingValues().calculateTopPadding() + 30.dp
     val titleTop = (maxHeight - 96.dp).coerceAtLeast(8.dp)
-    val coverHeight = minOf(maxWidth * 1.1f, coverLift + titleTop).coerceAtLeast(160.dp)
+    val coverHeight = minOf(maxWidth * 1.22f, coverLift + titleTop).coerceAtLeast(160.dp)
     val smallSide = 62.dp
     val smallLeft = 26.dp
     val smallTop = 10.dp
 
     val swipeThresholdPx = with(LocalDensity.current) { 72.dp.toPx() }
-    // Where the cover and the title rest inside the card (px), for flying them out of the dock's
-    // artwork and title as the player opens - see flyFrom.
+    // Where the cover rests inside the card (px), for flying it out of the dock's artwork as the
+    // player opens - see flyFrom.
     val coverRest = remember { floatArrayOf(Float.NaN, Float.NaN) }
-    val titleRest = remember { floatArrayOf(Float.NaN, Float.NaN) }
     fun rest(into: FloatArray): (LayoutCoordinates) -> Unit = { coordinates ->
         cardCoordinates[0]?.takeIf { it.isAttached }?.localPositionOf(coordinates, Offset.Zero)?.let {
             into[0] = it.x; into[1] = it.y
@@ -710,7 +728,7 @@ private fun PlayerPageArea(
                     onOpenLyricsSource = onOpenLyricsSource,
                     onUserInteraction = onInteraction
                 )
-                PlayerPage.QUEUE -> QueuePage(state = state, viewModel = viewModel)
+                PlayerPage.QUEUE -> QueuePage(state = state, viewModel = viewModel, onOpenPage = onCollapse)
                 PlayerPage.ARTWORK -> Spacer(Modifier.fillMaxSize())
             }
         }
@@ -728,11 +746,13 @@ private fun PlayerPageArea(
             verticalAlignment = Alignment.CenterVertically
         ) {
             Column(Modifier.weight(1f).padding(end = 14.dp)
-                .onPlaced(rest(titleRest))
                 .graphicsLayer {
-                    // From the dock's title (14 sp) to here (21 sp).
-                    flyFrom(transition.origin?.title, titleRest, transition.expansion.value, cardTop(),
-                        startScale = 14f / 21f, riseBy = transition.origin?.player?.top ?: 0f)
+                    // Fades and rises into place once the cover has landed, instead of flying as a
+                    // scaled copy: a 14 -> 21 sp scaling text looked soft and, mid-flight, crossed
+                    // the growing cover.
+                    val reveal = easeOutCubic(transition.stage(REVEAL_START, REVEAL_END))
+                    alpha = reveal
+                    translationY = (1f - reveal) * 10.dp.toPx()
                 }) {
                 Text(
                     text = song?.title ?: "Not Playing",
@@ -765,7 +785,9 @@ private fun PlayerPageArea(
                     )
                 }
             }
-            Box(Modifier.graphicsLayer { alpha = transition.stage(0.55f, 1f) }) {
+            // Past the side margin by the space inside the button, so the ••• itself ends where the
+            // seek bar does.
+            Box(Modifier.offset(x = 9.dp).graphicsLayer { alpha = easeOutCubic(transition.stage(REVEAL_START, REVEAL_END)) }) {
                 PlayerActionButtons(
                     isFavorite = song?.isFavorite == true,
                     overflowOpen = overflowOpen,
@@ -793,7 +815,7 @@ private fun PlayerPageArea(
                 .padding(horizontal = 26.dp)
                 .fillMaxWidth()
                 .height(26.dp)
-                .graphicsLayer { alpha = (1f - morph.value * 2f).coerceIn(0f, 1f) * transition.stage(0.55f, 1f) }
+                .graphicsLayer { alpha = (1f - morph.value * 2f).coerceIn(0f, 1f) * easeOutCubic(transition.stage(REVEAL_START, REVEAL_END)) }
         )
     }
 
@@ -834,6 +856,11 @@ private fun PlayerPageArea(
     }
 
     val onCover = page == PlayerPage.ARTWORK
+    val animatedCover = rememberAnimatedCover(
+        song = song,
+        wanted = effects.animatedCovers && isExpanded && visualsActive && onCover,
+        allowMobileData = effects.animatedCoversOnMobileData
+    )
     val hasArtwork = !song?.displayArtwork.isNullOrEmpty()
     // The large size missing (an old video has no 1280 px frame) or offline and not saved: the
     // saved link, then the small list thumbnail - each beats a blank.
@@ -876,9 +903,10 @@ private fun PlayerPageArea(
                     val shown = if (flying) lerpFloat(size.width, size.height, flightProgress(transition.expansion.value)).coerceAtMost(size.height) else size.height
                     drawRect(
                         Brush.verticalGradient(
-                            0f to Color.Black, 0.62f to Color.Black,
-                            0.85f to Color.Black.copy(alpha = lerpFloat(1f, 0.35f, fade)),
-                            1f to Color.Black.copy(alpha = 1f - fade),
+                            colorStops = Array(CoverFadeCurve.size) { i ->
+                                val (position, shade) = CoverFadeCurve[i]
+                                position to Color.Black.copy(alpha = lerpFloat(1f, shade, fade))
+                            },
                             startY = 0f, endY = shown
                         ),
                         blendMode = BlendMode.DstIn
@@ -930,6 +958,12 @@ private fun PlayerPageArea(
                     onError = { coverFailures++ }
                 )
             }
+            AnimatedCoverLayer(
+                cover = animatedCover,
+                playing = state.isPlaying,
+                onShowing = onClipShowing,
+                modifier = Modifier.fillMaxSize()
+            )
             // A soft shade under the status bar, so its clock and icons read on a bright cover.
             Box(
                 Modifier

@@ -127,5 +127,6 @@ class MainActivity : ComponentActivity() {
         super.onStart()
         val app = application as TgMusicApp
         app.tdlibManager.onAppForegrounded()
+        com.abn3li.telemusic.crash.CrashReporter.showPending(this)
     }
 }

@@ -161,14 +161,8 @@ fun LibraryHomeScreen(
 
 @Composable
 private fun LibraryShelfHeader(title: String, onSeeAll: (() -> Unit)? = null) {
-    Row(Modifier.fillMaxWidth().padding(start = 18.dp, end = 12.dp, top = 12.dp, bottom = 14.dp).heightIn(min = 48.dp), verticalAlignment = Alignment.CenterVertically) {
-        Text(title, color = ink, fontSize = 22.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
-        if (onSeeAll != null) Row(Modifier.heightIn(min = 48.dp).clickable(onClick = onSeeAll).padding(start = 8.dp, end = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text("See all", color = ink.copy(alpha = 0.5f), fontSize = 14.sp)
-            Spacer(Modifier.width(7.dp))
-            ChevronIcon()
-        }
-    }
+    // Same header as Home's shelves: one title size, one "See all" style, across the app.
+    HomeSectionHeader(title, onSeeAll = onSeeAll)
 }
 
 @Composable
