@@ -449,7 +449,7 @@ private fun LinkButton(label: String, onClick: () -> Unit) {
 private fun AppIcon() {
     Box(Modifier.size(76.dp), contentAlignment = Alignment.Center) {
         Image(
-            painterResource(R.drawable.ic_launcher_foreground),
+            painterResource(R.drawable.ic_launcher_tile),
             contentDescription = null,
             modifier = Modifier.requiredSize(114.dp)
         )
@@ -561,7 +561,7 @@ private fun PlayerNotificationPreview() {
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Box(Modifier.size(18.dp), contentAlignment = Alignment.Center) {
-                Image(painterResource(R.drawable.ic_launcher_foreground), contentDescription = null, modifier = Modifier.requiredSize(27.dp))
+                Image(painterResource(R.drawable.ic_launcher_tile), contentDescription = null, modifier = Modifier.requiredSize(27.dp))
             }
             Spacer(Modifier.width(8.dp))
             Text("TeleMusic · now", color = GroupLabelColor, fontSize = 13.sp)

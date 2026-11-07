@@ -36,6 +36,7 @@ import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MimeTypes
 import androidx.media3.common.PlaybackException
+import androidx.media3.common.Tracks
 import androidx.media3.common.Player
 import androidx.media3.common.VideoSize
 import androidx.media3.common.util.UnstableApi
@@ -53,6 +54,10 @@ private const val FADE_MS = 280
 // The clip comes in holding its first frame and only starts moving once it covers the artwork, so
 // the picture seems to come to life rather than swap for a video.
 private const val REVEAL_MS = 700
+// The cover is about 1080 px wide; clips run higher only to look the same. Past 30 fps a cover
+// gains little, and every extra frame redraws the player.
+private const val MAX_CLIP_SIDE = 1080
+private const val MAX_CLIP_FPS = 30
 // A clip's player stops at once but is let go after the player has closed: releasing a video
 // decoder can hold the main thread for a moment, and that shouldn't land mid-animation.
 private const val RELEASE_DELAY_MS = 700L
@@ -168,10 +173,24 @@ private fun ClipPlayer(
             override fun onSurfaceTextureDestroyed(texture: SurfaceTexture) = false
             override fun onSurfaceTextureUpdated(texture: SurfaceTexture) = Unit
         }
+        var frameRateCapped = false
         val listener = object : Player.Listener {
             override fun onRenderedFirstFrame() {
                 rendered = true
                 player.playWhenReady = false
+            }
+            // Caps a clip at 30 fps only when it has a 30 fps version: a cap nothing meets would
+            // fall back to the poorest version instead.
+            override fun onTracksChanged(tracks: Tracks) {
+                if (frameRateCapped) return
+                val rates = tracks.groups.filter { it.type == C.TRACK_TYPE_VIDEO }
+                    .flatMap { group -> (0 until group.length).map { group.getTrackFormat(it).frameRate } }
+                if (rates.any { it > MAX_CLIP_FPS + 1 } && rates.any { it > 0f && it <= MAX_CLIP_FPS + 1 }) {
+                    frameRateCapped = true
+                    player.trackSelectionParameters = player.trackSelectionParameters.buildUpon()
+                        .setMaxVideoFrameRate(MAX_CLIP_FPS)
+                        .build()
+                }
             }
             override fun onVideoSizeChanged(videoSize: VideoSize) {
                 if (videoSize.width > 0 && videoSize.height > 0) {
@@ -224,8 +243,12 @@ private fun clipPlayer(context: Context): ExoPlayer {
         .build()
         .apply {
             // Silent for good: its audio is never fetched, and it can't take focus from the music.
+            // One version, the best up to the cover's size, from the start: no blurry opening while
+            // it works its way up, and no second copy downloaded when it switches.
             trackSelectionParameters = trackSelectionParameters.buildUpon()
                 .setTrackTypeDisabled(C.TRACK_TYPE_AUDIO, true)
+                .setMaxVideoSize(MAX_CLIP_SIDE, MAX_CLIP_SIDE)
+                .setForceHighestSupportedBitrate(true)
                 .build()
             volume = 0f
             repeatMode = Player.REPEAT_MODE_ONE
