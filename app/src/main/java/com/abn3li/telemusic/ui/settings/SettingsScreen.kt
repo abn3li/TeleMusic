@@ -42,7 +42,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.PlayCircle
 import androidx.compose.material.icons.automirrored.rounded.OpenInNew
 import androidx.compose.material.icons.automirrored.rounded.Send
-import androidx.compose.material.icons.rounded.BlurOn
+import androidx.compose.material.icons.rounded.Opacity
 import androidx.compose.material.icons.rounded.CleaningServices
 import androidx.compose.material.icons.rounded.Code
 import androidx.compose.material.icons.rounded.Dns
@@ -54,9 +54,12 @@ import com.abn3li.telemusic.data.settings.DnsResolver
 import androidx.compose.material.icons.rounded.Folder
 import androidx.compose.material.icons.rounded.Groups
 import androidx.compose.material.icons.rounded.Info
+import androidx.compose.material.icons.rounded.Album
+import androidx.compose.material.icons.rounded.GraphicEq
+import androidx.compose.material.icons.rounded.Home
+import androidx.compose.material.icons.rounded.DarkMode
 import androidx.compose.material.icons.rounded.LibraryMusic
 import androidx.compose.material.icons.rounded.Movie
-import androidx.compose.material.icons.rounded.SignalCellularAlt
 import androidx.compose.material.icons.rounded.Lyrics
 import androidx.compose.material.icons.rounded.SdStorage
 import androidx.compose.material.icons.rounded.SystemUpdate
@@ -121,6 +124,7 @@ fun SettingsScreen(
     onOpenSpotifyPlaylist: (Long, String) -> Unit,
     onLoggedOut: () -> Unit,
     onYouTubeSignIn: () -> Unit,
+    onSpotifySignIn: () -> Unit,
     // True while a page that hides the tab bar (Spotify) is open over Settings.
     onTabsHidden: (Boolean) -> Unit = {}
 ) {
@@ -134,11 +138,23 @@ fun SettingsScreen(
     val homeFeeds by app.settingsStore.homeFeeds.collectAsState()
     val themeMode by app.settingsStore.themeMode.collectAsState()
     var cacheLimit by remember { mutableStateOf(app.settingsStore.maxCacheSizeBytes) }
-    // A list opened from a row (Lyrics Sources, Translate Lyrics To): its own page over Settings.
-    var settingsPage by rememberSaveable { mutableStateOf<SettingsPage?>(null) }
-    val pageTransition = updateTransition(settingsPage, label = "settingsPage")
+    // The pages open over Settings, innermost last: a section (Lyrics), then a list opened from it
+    // (Lyrics Sources). Back closes the innermost one.
+    var pageNames by rememberSaveable { mutableStateOf("") }
+    val pageStack = remember(pageNames) { pageNames.split(',').filter { it.isNotEmpty() }.map { SettingsPage.valueOf(it) } }
+    fun openPage(page: SettingsPage) { pageNames = (pageStack + page).joinToString(",") { it.name } }
+    fun closePage() { pageNames = pageStack.dropLast(1).joinToString(",") { it.name } }
+    val settingsPage = pageStack.lastOrNull()
+    val openSpotifyLibrary by app.spotifyAccount.openLibraryRequest.collectAsState()
+    androidx.compose.runtime.LaunchedEffect(openSpotifyLibrary) {
+        if (openSpotifyLibrary) {
+            pageNames = SettingsPage.SPOTIFY.name
+            app.spotifyAccount.consumeOpenLibrary()
+        }
+    }
+    val pageTransition = updateTransition(pageStack, label = "settingsPage")
     // A page fully slid in covers Settings: Settings stops drawing underneath it.
-    val pageCovers = pageTransition.currentState != null && pageTransition.targetState != null && !pageTransition.isRunning
+    val pageCovers = pageTransition.currentState.isNotEmpty() && pageTransition.targetState.isNotEmpty() && !pageTransition.isRunning
     val tabsHidden = settingsPage == SettingsPage.SPOTIFY
     DisposableEffect(tabsHidden) {
         onTabsHidden(tabsHidden)
@@ -272,6 +288,7 @@ fun SettingsScreen(
     var downloadOptionsOpen by remember { mutableStateOf(false) }
 
     val youtube by app.youtubeAccount.state.collectAsState()
+    val telegramAuth by app.tdlibManager.authState.collectAsState()
     var showYouTubeAccount by remember { mutableStateOf(false) }
     if (showYouTubeAccount) AppAlert(
         title = "YouTube Music",
@@ -290,7 +307,6 @@ fun SettingsScreen(
     Box(Modifier.fillMaxSize()) {
     Box(Modifier.fillMaxSize().drawWithContent { if (!pageCovers) drawContent() }) {
     LargeTitleList(title = "Settings", onBack = onBack, grouped = true) {
-        // Every service you sign in to, in one card.
         item("accounts") {
             GroupHeader("Accounts")
             GroupCard {
@@ -298,277 +314,51 @@ fun SettingsScreen(
                     onClick = { if (youtube.signedIn) showYouTubeAccount = true else onYouTubeSignIn() },
                     trailing = { GroupValue(if (youtube.signedIn) youtube.name ?: "Connected" else "Sign In") })
                 GroupDivider(start = 57.dp)
-                GroupRow(title = "Telegram", desc = "Sign in and sync a chat or channel",
-                    icon = { GroupIcon(Icons.AutoMirrored.Rounded.Send, TileBlue) }, onClick = { settingsPage = SettingsPage.TELEGRAM })
+                GroupRow(title = "Telegram",
+                    icon = { GroupIcon(Icons.AutoMirrored.Rounded.Send, TileBlue) }, onClick = { openPage(SettingsPage.TELEGRAM) },
+                    trailing = { GroupValue(telegramStatus(telegramAuth, app.credentialsStore.hasCredentials())) })
                 GroupDivider(start = 57.dp)
                 com.abn3li.telemusic.ui.spotify.SpotifyAccountRow(
-                    onOpenPlaylists = { settingsPage = SettingsPage.SPOTIFY },
+                    onOpenPlaylists = { openPage(SettingsPage.SPOTIFY) },
+                    onSignIn = onSpotifySignIn,
                     onHelp = { uriHandler.openUri("https://developer.spotify.com/dashboard") }
                 )
             }
         }
 
-        item("home_feeds") {
-            GroupHeader("Home Feeds")
+        // Everything else, one row per section; each opens its own page.
+        item("sections") {
+            Spacer(Modifier.height(16.dp))
             GroupCard {
-                GroupRow(title = "Telegram Feed", desc = "Library mixes, history, pinned playlists and artists",
-                    icon = { GroupIcon(Icons.AutoMirrored.Rounded.Send, TileBlue) },
-                    trailing = { GroupSwitch(homeFeeds.telegram, { enabled ->
-                        app.settingsStore.updateHomeFeeds { it.copy(telegram = enabled) }
-                    }) })
+                SectionRow("Appearance", Icons.Rounded.DarkMode, TileGrey, themeMode.label) { openPage(SettingsPage.APPEARANCE) }
                 GroupDivider(start = 57.dp)
-                GroupRow(title = "YouTube Feed", desc = "Recommendations, mixes, community playlists and new releases",
-                    icon = { GroupIcon(Icons.Rounded.PlayCircle, TilePink) },
-                    trailing = { GroupSwitch(homeFeeds.youtube, { enabled ->
-                        app.settingsStore.updateHomeFeeds { it.copy(youtube = enabled) }
-                    }) })
+                SectionRow("Home", Icons.Rounded.Home, TileOrange) { openPage(SettingsPage.HOME) }
+                GroupDivider(start = 57.dp)
+                SectionRow("Player", Icons.Rounded.Album, TilePurple) { openPage(SettingsPage.PLAYER) }
+                GroupDivider(start = 57.dp)
+                SectionRow("Lyrics", Icons.Rounded.Lyrics, TileOrange) { openPage(SettingsPage.LYRICS) }
+                GroupDivider(start = 57.dp)
+                SectionRow("Audio Quality", Icons.Rounded.GraphicEq, TileGreen) { openPage(SettingsPage.AUDIO) }
             }
-        }
-
-        item("appearance") {
-            GroupHeader("Appearance")
+            Spacer(Modifier.height(16.dp))
             GroupCard {
-                ThemeMode.entries.forEachIndexed { index, mode ->
-                    if (index > 0) GroupDivider()
-                    GroupOption(label = mode.label, selected = themeMode == mode, startPadding = 15) { app.settingsStore.setThemeMode(mode) }
-                }
-            }
-        }
-
-        item("audio_quality") { FlacQualitySettingsGroup() }
-
-        item("now_playing") {
-            GroupHeader("Now Playing")
-            GroupCard {
-                val sourcesOn = LyricsProvider.entries.count { it.name !in lyricsSourcesOff }
-                GroupRow(
-                    title = "Lyrics Sources",
-                    icon = { GroupIcon(Icons.Rounded.Lyrics, TileOrange) },
-                    onClick = { settingsPage = SettingsPage.LYRICS_SOURCES },
-                    trailing = { GroupValue(if (sourcesOn == LyricsProvider.entries.size) "All" else "$sourcesOn of ${LyricsProvider.entries.size}") }
-                )
+                SectionRow("Library", Icons.Rounded.LibraryMusic, TileBlue) { openPage(SettingsPage.LIBRARY) }
                 GroupDivider(start = 57.dp)
-                GroupRow(
-                    title = "Lyrics Translation",
-                    icon = { GroupIcon(Icons.Rounded.Translate, TileBlue) },
-                    trailing = { GroupSwitch(translationEnabled, { on -> app.settingsStore.setLyricsTranslationEnabled(on) }) }
-                )
-                AnimatedVisibility(translationEnabled) {
-                    Column {
-                        GroupDivider(start = 57.dp)
-                        GroupRow(
-                            title = "Translate Lyrics To",
-                            icon = { Spacer(Modifier.size(29.dp)) },
-                            onClick = { settingsPage = SettingsPage.TRANSLATE_TO },
-                            trailing = { GroupValue(LyricsTranslator.languageName(translationLanguage)) }
-                        )
-                    }
-                }
-                GroupDivider(start = 57.dp)
-                GroupRow(
-                    title = "Lyrics Glow",
-                    icon = { GroupIcon(Icons.Rounded.AutoAwesome, TilePink) },
-                    trailing = {
-                        GroupSwitch(playerEffects.lyricsGlow, { on -> app.settingsStore.updatePlayerEffects { it.copy(lyricsGlow = on) } })
-                    }
-                )
-                GroupDivider(start = 57.dp)
-                GroupRow(
-                    title = "Lyrics Blur",
-                    icon = { GroupIcon(Icons.Rounded.BlurOn, TileIndigo) },
-                    trailing = {
-                        GroupSwitch(playerEffects.lyricsBlur, { on -> app.settingsStore.updatePlayerEffects { it.copy(lyricsBlur = on) } })
-                    }
-                )
-                GroupDivider(start = 57.dp)
-                GroupRow(
-                    title = "Animated Background",
-                    icon = { GroupIcon(Icons.Rounded.Wallpaper, TilePurple) },
-                    trailing = {
-                        GroupSwitch(playerEffects.animatedBackground, { on -> app.settingsStore.updatePlayerEffects { it.copy(animatedBackground = on) } })
-                    }
-                )
-                GroupDivider(start = 57.dp)
-                GroupRow(
-                    title = "Animated Covers",
-                    icon = { GroupIcon(Icons.Rounded.Movie, TileOrange) },
-                    trailing = {
-                        GroupSwitch(playerEffects.animatedCovers, { on -> app.settingsStore.updatePlayerEffects { it.copy(animatedCovers = on) } })
-                    }
-                )
-                if (playerEffects.animatedCovers) {
-                    GroupDivider(start = 57.dp)
-                    GroupRow(
-                        title = "Covers on Mobile Data",
-                        icon = { GroupIcon(Icons.Rounded.SignalCellularAlt, TileGreen) },
-                        trailing = {
-                            GroupSwitch(playerEffects.animatedCoversOnMobileData, { on -> app.settingsStore.updatePlayerEffects { it.copy(animatedCoversOnMobileData = on) } })
-                        }
-                    )
-                }
-            }
-            SettingsNote("Lyrics are searched in the sources switched on, and only a song with the same name and artist is used. The Translate button on the lyrics shows each line in this language. Animated Covers look up the song's name and artist on Apple Music, Tidal and a community list. These effects may increase CPU and GPU usage.")
-        }
-
-        item("library") {
-            GroupHeader("Library")
-            GroupCard {
-                GroupRow(
-                    title = "Auto-fetch Song Info",
-                    icon = { GroupIcon(Icons.Rounded.Lyrics, TileBlue) },
-                    trailing = {
-                        GroupSwitch(enrichEnabled, { enrichEnabled = it; app.settingsStore.enrichMetadataOnSync = it })
-                    }
-                )
-                GroupDivider(start = 57.dp)
-                GroupRow(
-                    title = "Import Local Songs",
-                    icon = { GroupIcon(Icons.Rounded.LibraryMusic, TilePink) },
-                    onClick = { importFolderLauncher.launch(null) },
-                    trailing = { GroupValue(null) }
-                )
-                GroupDivider(start = 57.dp)
-                GroupRow(
-                    title = "Download Location",
-                    icon = { GroupIcon(Icons.Rounded.Folder, TileBlue) },
-                    onClick = { downloadOptionsOpen = !downloadOptionsOpen },
-                    trailing = { GroupValue(downloadFolderUri?.let { readableFolderName(it) } ?: "App Storage") }
-                )
-                if (downloadOptionsOpen) {
-                    GroupDivider(start = 57.dp)
-                    GroupOption(label = "App Storage", selected = downloadFolderUri == null, startPadding = 57) {
-                        app.settingsStore.downloadFolderUri = null
-                        app.settingsStore.downloadLocationChosen = true
-                        downloadFolderUri = null
-                        downloadOptionsOpen = false
-                    }
-                    GroupDivider(start = 57.dp)
-                    GroupOption(
-                        label = downloadFolderUri?.let { "Folder: ${readableFolderName(it)}" } ?: "Choose Folder…",
-                        selected = downloadFolderUri != null,
-                        startPadding = 57
-                    ) {
-                        downloadOptionsOpen = false
-                        downloadFolderLauncher.launch(null)
-                    }
-                }
-            }
-        }
-
-        item("storage") {
-            GroupHeader("Storage")
-            GroupCard {
                 val cacheLabel = AppSettingsStore.CACHE_PRESETS.firstOrNull { it.second == cacheLimit }?.first ?: "Custom"
-                GroupRow(
-                    title = "Cache Limit",
-                    icon = { GroupIcon(Icons.Rounded.SdStorage, TileOrange) },
-                    onClick = { settingsPage = SettingsPage.CACHE_LIMIT },
-                    trailing = { GroupValue(cacheLabel) }
-                )
+                SectionRow("Storage", Icons.Rounded.SdStorage, TileGrey, cacheLabel) { openPage(SettingsPage.STORAGE) }
                 GroupDivider(start = 57.dp)
-                GroupRow(
-                    title = "Clear Cache",
-                    icon = { GroupIcon(Icons.Rounded.CleaningServices, TileGrey) },
-                    titleColor = AppAccent,
-                    onClick = { showClearCacheConfirm = true }
-                )
-                GroupDivider()
-                GroupActionRow("Reset Library", color = DestructiveRed) { showClearLibraryConfirm = true }
+                SectionRow("Connection", Icons.Rounded.Dns, TileGreen, network.dns.displayName.substringBefore(" (")) { openPage(SettingsPage.CONNECTION) }
             }
-            storageActionStatus?.let { GroupFooter(it) }
-        }
-
-        item("connection") {
-            GroupHeader("Connection")
+            Spacer(Modifier.height(16.dp))
             GroupCard {
-                DnsResolverRows(network, icon = { GroupIcon(Icons.Rounded.Dns, TileGreen) }, title = "DNS",
-                    onOpenOptions = { settingsPage = SettingsPage.DNS }, onChange = ::saveDns)
-                GroupDivider(start = 57.dp)
-                ProxyRows(
-                    network,
-                    onMessage = { proxyStatusMessage = it },
-                    icon = { GroupIcon(Icons.Rounded.VpnKey, TileIndigo) },
-                    onChange = ::saveProxy
-                )
-                if (dnsNeedsRestart) {
-                    GroupDivider()
-                    GroupActionRow("Restart to Apply DNS") {
-                        // Written right here, synchronously: the process ends next.
-                        writeDns(network.dns, network.customDns)
-                        app.tdlibManager.applyDns(network.dns, network.customDns)
-                        // Restart the process so TDLib starts fresh with the new DNS.
-                        val intent = context.packageManager.getLaunchIntentForPackage(context.packageName)
-                        context.startActivity(Intent.makeRestartActivityTask(intent?.component))
-                        Runtime.getRuntime().exit(0)
-                    }
-                }
+                SectionRow("About", Icons.Rounded.Info, TileGrey, "v$versionName") { openPage(SettingsPage.ABOUT) }
             }
-            proxyStatusMessage?.let { message ->
-                GroupFooter(
-                    message,
-                    color = if (message.startsWith("Couldn't") || message.startsWith("That")) DestructiveRed else GroupLabelColor
-                )
-            }
-        }
-
-        // Nothing to log out of until Telegram is set up in Settings > Telegram.
-        if (app.credentialsStore.hasCredentials()) {
-            item("account") {
-                GroupHeader("Telegram Account")
-                GroupCard {
-                    GroupActionRow("Log Out", color = DestructiveRed) { showLogoutConfirm = true }
-                }
-            }
-        }
-
-        item("about") {
-            GroupHeader("About")
-            GroupCard {
-                GroupRow(
-                    title = "TeleMusic",
-                    icon = { GroupIcon(Icons.Rounded.Info, TileGrey) },
-                    trailing = { GroupValue("v$versionName", showChevron = false) }
-                )
-                GroupDivider(start = 57.dp)
-                GroupRow(
-                    title = if (isCheckingUpdate) "Checking…" else "Check for Updates",
-                    icon = { GroupIcon(Icons.Rounded.SystemUpdate, TileBlue) },
-                    titleColor = AppAccent,
-                    enabled = !isCheckingUpdate,
-                    onClick = {
-                        isCheckingUpdate = true
-                        updateCheckStatus = null
-                        scope.launch {
-                            when (val result = updateChecker.check(versionName)) {
-                                is UpdateCheckResult.UpdateAvailable -> availableUpdate = result
-                                UpdateCheckResult.UpToDate -> updateCheckStatus = "You're on the latest version."
-                                is UpdateCheckResult.Error -> updateCheckStatus = "Couldn't check for updates: ${result.message}"
-                            }
-                            isCheckingUpdate = false
-                        }
-                    }
-                )
-                GroupDivider(start = 57.dp)
-                LinkRow("GitHub", "abn3li/TeleMusic", Icons.Rounded.Code, TileGrey) { uriHandler.openUri("https://github.com/abn3li/TeleMusic") }
-                GroupDivider(start = 57.dp)
-                GroupRow(
-                    title = "Open-source Licenses",
-                    icon = { GroupIcon(Icons.Rounded.Code, TileGrey) },
-                    onClick = { licensesOpen = true },
-                    trailing = { GroupValue("GPLv3") }
-                )
-                GroupDivider(start = 57.dp)
-                LinkRow("Developer", "@hjil_l", Icons.AutoMirrored.Rounded.Send, TileBlue) { uriHandler.openUri("https://t.me/hjil_l") }
-                GroupDivider(start = 57.dp)
-                LinkRow("Community", "t.me/telemusicco", Icons.Rounded.Groups, TileGreen) { uriHandler.openUri("https://t.me/telemusicco") }
-            }
-            updateCheckStatus?.let { GroupFooter(it) }
             Spacer(Modifier.height(12.dp))
         }
     }
     }
 
-    BackHandler(settingsPage != null) { settingsPage = null }
+    BackHandler(pageStack.isNotEmpty()) { closePage() }
     // Over Settings, sliding in from the side like a pushed page; Back returns to Settings where it
     // was. A slide only: a fade draws the page into a layer its own size, cutting off the part it
     // draws up behind the status bar until the animation ends - that strip then popped in late.
@@ -576,19 +366,300 @@ fun SettingsScreen(
     @OptIn(ExperimentalAnimationApi::class)
     pageTransition.AnimatedContent(
         transitionSpec = {
-            (if (targetState != null) slideInHorizontally(tween(300, easing = FastOutSlowInEasing)) { it } togetherWith ExitTransition.None
+            // Only a page opened from Settings itself slides; a list opened inside a page (Cache
+            // Limit, Sources, Translate To, DNS) just takes its place, and Back just returns.
+            if (maxOf(targetState.size, initialState.size) > 1) (EnterTransition.None togetherWith ExitTransition.None).using(null)
+            else (if (targetState.size > initialState.size) slideInHorizontally(tween(300, easing = FastOutSlowInEasing)) { it } togetherWith ExitTransition.None
             else EnterTransition.None togetherWith slideOutHorizontally(tween(260, easing = FastOutSlowInEasing)) { it }).using(null)
         }
-    ) { shown ->
-        when (shown) {
+    ) { stack ->
+        when (stack.lastOrNull()) {
+            SettingsPage.HOME -> LargeTitleList(title = "Home", onBack = ::closePage, grouped = true) {
+                item("feeds") {
+                    GroupHeader("Feeds")
+                    GroupCard {
+                        GroupRow(title = "Telegram Feed", desc = "Library mixes, history, pinned playlists and artists",
+                            icon = { GroupIcon(Icons.AutoMirrored.Rounded.Send, TileBlue) },
+                            trailing = { GroupSwitch(homeFeeds.telegram, { enabled -> app.settingsStore.updateHomeFeeds { it.copy(telegram = enabled) } }) })
+                        GroupDivider(start = 57.dp)
+                        GroupRow(title = "YouTube Feed", desc = "Recommendations, mixes, community playlists and new releases",
+                            icon = { GroupIcon(Icons.Rounded.PlayCircle, TilePink) },
+                            trailing = { GroupSwitch(homeFeeds.youtube, { enabled -> app.settingsStore.updateHomeFeeds { it.copy(youtube = enabled) } }) })
+                    }
+                }
+            }
+            SettingsPage.APPEARANCE -> LargeTitleList(title = "Appearance", onBack = ::closePage, grouped = true) {
+                item("theme") {
+                    GroupHeader("Theme")
+                    GroupCard {
+                        ThemeMode.entries.forEachIndexed { index, mode ->
+                            if (index > 0) GroupDivider()
+                            GroupOption(label = mode.label, selected = themeMode == mode, startPadding = 15) { app.settingsStore.setThemeMode(mode) }
+                        }
+                    }
+                }
+            }
+            SettingsPage.PLAYER -> LargeTitleList(title = "Player", onBack = ::closePage, grouped = true) {
+                item("background") {
+                    GroupHeader("Background")
+                    GroupCard {
+                        GroupRow(
+                            title = "Animated Background",
+                            icon = { GroupIcon(Icons.Rounded.Wallpaper, TilePurple) },
+                            trailing = { GroupSwitch(playerEffects.animatedBackground, { on -> app.settingsStore.updatePlayerEffects { it.copy(animatedBackground = on) } }) }
+                        )
+                    }
+                }
+                item("covers") {
+                    GroupHeader("Animated Covers")
+                    GroupCard {
+                        GroupRow(
+                            title = "Animated Covers",
+                            icon = { GroupIcon(Icons.Rounded.Movie, TileOrange) },
+                            trailing = { GroupSwitch(playerEffects.animatedCovers, { on -> app.settingsStore.updatePlayerEffects { it.copy(animatedCovers = on) } }) }
+                        )
+                        // Belongs to Animated Covers, so it sits under it like Translate To does.
+                        AnimatedVisibility(playerEffects.animatedCovers) {
+                            Column {
+                                GroupDivider(start = 57.dp)
+                                GroupRow(
+                                    title = "Use Mobile Data",
+                                    icon = { Spacer(Modifier.size(29.dp)) },
+                                    trailing = { GroupSwitch(playerEffects.animatedCoversOnMobileData, { on -> app.settingsStore.updatePlayerEffects { it.copy(animatedCoversOnMobileData = on) } }) }
+                                )
+                            }
+                        }
+                    }
+                    SettingsNote("The song is looked up on Apple Music, Tidal and a community list. Effects use more battery.")
+                }
+            }
+            SettingsPage.LYRICS -> LargeTitleList(title = "Lyrics", onBack = ::closePage, grouped = true) {
+                item("lyrics") {
+                    GroupHeader("Lyrics")
+                    GroupCard {
+                        val sourcesOn = LyricsProvider.entries.count { it.name !in lyricsSourcesOff }
+                        GroupRow(
+                            title = "Sources",
+                            icon = { GroupIcon(Icons.Rounded.Lyrics, TileOrange) },
+                            onClick = { openPage(SettingsPage.LYRICS_SOURCES) },
+                            trailing = { GroupValue(if (sourcesOn == LyricsProvider.entries.size) "All" else "$sourcesOn of ${LyricsProvider.entries.size}") }
+                        )
+                        GroupDivider(start = 57.dp)
+                        GroupRow(
+                            title = "Translation",
+                            icon = { GroupIcon(Icons.Rounded.Translate, TileBlue) },
+                            trailing = { GroupSwitch(translationEnabled, { on -> app.settingsStore.setLyricsTranslationEnabled(on) }) }
+                        )
+                        AnimatedVisibility(translationEnabled) {
+                            Column {
+                                GroupDivider(start = 57.dp)
+                                GroupRow(
+                                    title = "Translate To",
+                                    icon = { Spacer(Modifier.size(29.dp)) },
+                                    onClick = { openPage(SettingsPage.TRANSLATE_TO) },
+                                    trailing = { GroupValue(LyricsTranslator.languageName(translationLanguage)) }
+                                )
+                            }
+                        }
+                    }
+                    SettingsNote("Only lyrics with the same song name and artist are used.")
+                }
+                item("look") {
+                    GroupHeader("Effects")
+                    GroupCard {
+                        GroupRow(
+                            title = "Lyrics Glow",
+                            icon = { GroupIcon(Icons.Rounded.AutoAwesome, TilePink) },
+                            trailing = { GroupSwitch(playerEffects.lyricsGlow, { on -> app.settingsStore.updatePlayerEffects { it.copy(lyricsGlow = on) } }) }
+                        )
+                        GroupDivider(start = 57.dp)
+                        GroupRow(
+                            title = "Lyrics Blur",
+                            icon = { GroupIcon(Icons.Rounded.Opacity, TileIndigo) },
+                            trailing = { GroupSwitch(playerEffects.lyricsBlur, { on -> app.settingsStore.updatePlayerEffects { it.copy(lyricsBlur = on) } }) }
+                        )
+                    }
+                    SettingsNote("Lyrics Glow and Lyrics Blur use more battery.")
+                }
+            }
+            SettingsPage.AUDIO -> LargeTitleList(title = "Audio Quality", onBack = ::closePage, grouped = true) {
+                item("audio") {
+                    Spacer(Modifier.height(8.dp))
+                    FlacQualitySettingsGroup(showHeader = false)
+                }
+            }
+            SettingsPage.LIBRARY -> LargeTitleList(title = "Library", onBack = ::closePage, grouped = true) {
+                item("library") {
+                    Spacer(Modifier.height(8.dp))
+                    GroupCard {
+                        GroupRow(
+                            title = "Auto-fetch Song Info",
+                            icon = { GroupIcon(Icons.Rounded.Lyrics, TileBlue) },
+                            trailing = { GroupSwitch(enrichEnabled, { enrichEnabled = it; app.settingsStore.enrichMetadataOnSync = it }) }
+                        )
+                        GroupDivider(start = 57.dp)
+                        GroupRow(
+                            title = "Import Local Songs",
+                            icon = { GroupIcon(Icons.Rounded.LibraryMusic, TilePink) },
+                            onClick = { importFolderLauncher.launch(null) },
+                            trailing = { GroupValue(null) }
+                        )
+                        GroupDivider(start = 57.dp)
+                        GroupRow(
+                            title = "Download Location",
+                            icon = { GroupIcon(Icons.Rounded.Folder, TileBlue) },
+                            onClick = { downloadOptionsOpen = !downloadOptionsOpen },
+                            trailing = { GroupValue(downloadFolderUri?.let { readableFolderName(it) } ?: "App Storage") }
+                        )
+                        if (downloadOptionsOpen) {
+                            GroupDivider(start = 57.dp)
+                            GroupOption(label = "App Storage", selected = downloadFolderUri == null, startPadding = 57) {
+                                app.settingsStore.downloadFolderUri = null
+                                app.settingsStore.downloadLocationChosen = true
+                                downloadFolderUri = null
+                                downloadOptionsOpen = false
+                            }
+                            GroupDivider(start = 57.dp)
+                            GroupOption(
+                                label = downloadFolderUri?.let { "Folder: ${readableFolderName(it)}" } ?: "Choose Folder…",
+                                selected = downloadFolderUri != null,
+                                startPadding = 57
+                            ) {
+                                downloadOptionsOpen = false
+                                downloadFolderLauncher.launch(null)
+                            }
+                        }
+                    }
+                    storageActionStatus?.let { GroupFooter(it) }
+                }
+            }
+            SettingsPage.STORAGE -> LargeTitleList(title = "Storage", onBack = ::closePage, grouped = true) {
+                item("cache") {
+                    GroupHeader("Cache")
+                    GroupCard {
+                        val cacheLabel = AppSettingsStore.CACHE_PRESETS.firstOrNull { it.second == cacheLimit }?.first ?: "Custom"
+                        GroupRow(
+                            title = "Cache Limit",
+                            icon = { GroupIcon(Icons.Rounded.SdStorage, TileOrange) },
+                            onClick = { openPage(SettingsPage.CACHE_LIMIT) },
+                            trailing = { GroupValue(cacheLabel) }
+                        )
+                        GroupDivider(start = 57.dp)
+                        GroupRow(
+                            title = "Clear Cache",
+                            icon = { GroupIcon(Icons.Rounded.CleaningServices, TileGrey) },
+                            titleColor = AppAccent,
+                            onClick = { showClearCacheConfirm = true }
+                        )
+                    }
+                    storageActionStatus?.let { GroupFooter(it) }
+                }
+                // On its own, away from everyday rows: it deletes the whole library.
+                item("reset") {
+                    Spacer(Modifier.height(24.dp))
+                    GroupCard {
+                        GroupActionRow("Reset Library", color = DestructiveRed) { showClearLibraryConfirm = true }
+                    }
+                }
+            }
+            SettingsPage.CONNECTION -> LargeTitleList(title = "Connection", onBack = ::closePage, grouped = true) {
+                item("network") {
+                    GroupHeader("Telegram Network")
+                    GroupCard {
+                        DnsResolverRows(network, icon = { GroupIcon(Icons.Rounded.Dns, TileGreen) }, title = "DNS",
+                            onOpenOptions = { openPage(SettingsPage.DNS) }, onChange = ::saveDns)
+                        GroupDivider(start = 57.dp)
+                        ProxyRows(
+                            network,
+                            onMessage = { proxyStatusMessage = it },
+                            icon = { GroupIcon(Icons.Rounded.VpnKey, TileIndigo) },
+                            onChange = ::saveProxy
+                        )
+                        if (dnsNeedsRestart) {
+                            GroupDivider()
+                            GroupActionRow("Restart to Apply DNS") {
+                                // Written right here, synchronously: the process ends next.
+                                writeDns(network.dns, network.customDns)
+                                app.tdlibManager.applyDns(network.dns, network.customDns)
+                                // Restart the process so TDLib starts fresh with the new DNS.
+                                val intent = context.packageManager.getLaunchIntentForPackage(context.packageName)
+                                context.startActivity(Intent.makeRestartActivityTask(intent?.component))
+                                Runtime.getRuntime().exit(0)
+                            }
+                        }
+                    }
+                    proxyStatusMessage?.let { message ->
+                        GroupFooter(message, color = if (message.startsWith("Couldn't") || message.startsWith("That")) DestructiveRed else GroupLabelColor)
+                    }
+                }
+                // Nothing to log out of until Telegram is set up.
+                if (app.credentialsStore.hasCredentials()) {
+                    item("telegram_account") {
+                        Spacer(Modifier.height(24.dp))
+                        GroupCard {
+                            GroupActionRow("Log Out of Telegram", color = DestructiveRed) { showLogoutConfirm = true }
+                        }
+                    }
+                }
+            }
+            SettingsPage.ABOUT -> LargeTitleList(title = "About", onBack = ::closePage, grouped = true) {
+                item("about") {
+                    Spacer(Modifier.height(8.dp))
+                    GroupCard {
+                        GroupRow(
+                            title = "TeleMusic",
+                            icon = { GroupIcon(Icons.Rounded.Info, TileGrey) },
+                            trailing = { GroupValue("v$versionName", showChevron = false) }
+                        )
+                        GroupDivider(start = 57.dp)
+                        GroupRow(
+                            title = if (isCheckingUpdate) "Checking…" else "Check for Updates",
+                            icon = { GroupIcon(Icons.Rounded.SystemUpdate, TileBlue) },
+                            titleColor = AppAccent,
+                            enabled = !isCheckingUpdate,
+                            onClick = {
+                                isCheckingUpdate = true
+                                updateCheckStatus = null
+                                scope.launch {
+                                    when (val result = updateChecker.check(versionName)) {
+                                        is UpdateCheckResult.UpdateAvailable -> availableUpdate = result
+                                        UpdateCheckResult.UpToDate -> updateCheckStatus = "You're on the latest version."
+                                        is UpdateCheckResult.Error -> updateCheckStatus = "Couldn't check for updates: ${result.message}"
+                                    }
+                                    isCheckingUpdate = false
+                                }
+                            }
+                        )
+                    }
+                    updateCheckStatus?.let { GroupFooter(it) }
+                }
+                item("links") {
+                    Spacer(Modifier.height(24.dp))
+                    GroupCard {
+                        LinkRow("GitHub", "abn3li/TeleMusic", Icons.Rounded.Code, TileGrey) { uriHandler.openUri("https://github.com/abn3li/TeleMusic") }
+                        GroupDivider(start = 57.dp)
+                        LinkRow("Developer", "@hjil_l", Icons.AutoMirrored.Rounded.Send, TileBlue) { uriHandler.openUri("https://t.me/hjil_l") }
+                        GroupDivider(start = 57.dp)
+                        LinkRow("Community", "t.me/telemusicco", Icons.Rounded.Groups, TileGreen) { uriHandler.openUri("https://t.me/telemusicco") }
+                        GroupDivider(start = 57.dp)
+                        GroupRow(
+                            title = "Open-source Licenses",
+                            icon = { GroupIcon(Icons.Rounded.Code, TileGrey) },
+                            onClick = { licensesOpen = true },
+                            trailing = { GroupValue("GPLv3") }
+                        )
+                    }
+                    Spacer(Modifier.height(12.dp))
+                }
+            }
             SettingsPage.LYRICS_SOURCES -> LyricsSourcesPage(
                 off = lyricsSourcesOff,
                 onChange = { lyricsSourcesOff = it; app.settingsStore.lyricsSourcesOff = it },
-                onBack = { settingsPage = null }
+                onBack = { closePage() }
             )
-            SettingsPage.TELEGRAM -> com.abn3li.telemusic.ui.sync.SyncScreen(onBack = { settingsPage = null })
+            SettingsPage.TELEGRAM -> com.abn3li.telemusic.ui.sync.SyncScreen(onBack = { closePage() })
             SettingsPage.SPOTIFY -> com.abn3li.telemusic.ui.spotify.SpotifyLibraryScreen(
-                onBack = { settingsPage = null },
+                onBack = { closePage() },
                 onOpenPlaylist = onOpenSpotifyPlaylist
             )
             SettingsPage.CACHE_LIMIT -> OptionsPage(
@@ -601,9 +672,9 @@ fun SettingsScreen(
                     cacheLimit = bytes
                     app.settingsStore.maxCacheSizeBytes = bytes
                     scope.launch { app.musicRepository.enforceCacheLimit() }
-                    settingsPage = null
+                    closePage()
                 },
-                onBack = { settingsPage = null }
+                onBack = { closePage() }
             )
             SettingsPage.DNS -> OptionsPage(
                 title = "DNS",
@@ -613,14 +684,14 @@ fun SettingsScreen(
                 onPick = { picked ->
                     network.dns = DnsResolver.valueOf(picked)
                     saveDns(false)
-                    settingsPage = null
+                    closePage()
                 },
-                onBack = { settingsPage = null }
+                onBack = { closePage() }
             )
             SettingsPage.TRANSLATE_TO -> TranslateToPage(
                 selected = translationLanguage,
-                onPick = { app.settingsStore.setLyricsTranslationLanguage(it); settingsPage = null },
-                onBack = { settingsPage = null }
+                onPick = { app.settingsStore.setLyricsTranslationLanguage(it); closePage() },
+                onBack = { closePage() }
             )
             null -> Unit
         }
@@ -752,6 +823,27 @@ internal fun SettingsNote(text: String) {
 
 /** The DNS Telegram started with in this process - see SettingsScreen's restart row. */
 
+/** Telegram's row on Settings: signed in, waiting to be, or nothing while it's still connecting -
+ * a saved sign-in reads "Connecting" for a moment as the app starts, which isn't worth showing. */
+private fun telegramStatus(state: com.abn3li.telemusic.data.telegram.TelegramAuthState, hasCredentials: Boolean): String? {
+    return when {
+        state is com.abn3li.telemusic.data.telegram.TelegramAuthState.Ready -> "Connected"
+        !hasCredentials -> "Set Up"
+        state is com.abn3li.telemusic.data.telegram.TelegramAuthState.WaitingForPhoneNumber ||
+            state is com.abn3li.telemusic.data.telegram.TelegramAuthState.WaitingForCode ||
+            state is com.abn3li.telemusic.data.telegram.TelegramAuthState.WaitingForPassword ||
+            state is com.abn3li.telemusic.data.telegram.TelegramAuthState.Error -> "Sign In"
+        else -> null
+    }
+}
+
+/** A row on the main Settings page that opens a section, with what it's set to when that says
+ * something useful (the theme, the cache size). */
+@Composable
+private fun SectionRow(title: String, icon: androidx.compose.ui.graphics.vector.ImageVector, tile: Color, value: String? = null, onClick: () -> Unit) {
+    GroupRow(title = title, icon = { GroupIcon(icon, tile) }, onClick = onClick, trailing = { GroupValue(value) })
+}
+
 @Composable
 private fun LinkRow(title: String, value: String, icon: androidx.compose.ui.graphics.vector.ImageVector, tile: Color, onClick: () -> Unit) {
     GroupRow(
@@ -767,8 +859,13 @@ private fun LinkRow(title: String, value: String, icon: androidx.compose.ui.grap
     )
 }
 
-/** Lists opened from a Settings row, each on its own page. */
-private enum class SettingsPage { LYRICS_SOURCES, TRANSLATE_TO, CACHE_LIMIT, DNS, TELEGRAM, SPOTIFY }
+/** Pages opened over Settings, each its own large-title list. */
+private enum class SettingsPage {
+    // Sections, opened from Settings.
+    HOME, APPEARANCE, PLAYER, LYRICS, AUDIO, LIBRARY, STORAGE, CONNECTION, ABOUT,
+    // Lists and accounts, opened from a section or from Settings.
+    LYRICS_SOURCES, TRANSLATE_TO, CACHE_LIMIT, DNS, TELEGRAM, SPOTIFY
+}
 
 /** One choice out of [options] (key, label, detail), on its own page; picking one returns. */
 @Composable

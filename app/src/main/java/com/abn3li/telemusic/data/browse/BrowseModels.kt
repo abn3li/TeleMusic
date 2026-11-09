@@ -83,6 +83,7 @@ data class ArtistPage(
  * returns audio tracks; the rest return albums, artists or playlists to open. */
 enum class SearchFilter(val params: String) {
     SONGS("EgWKAQIIAWoKEAkQBRAKEAMQBA%3D%3D"),
+    VIDEOS("EgWKAQIQAWoKEAkQChAFEAMQBA%3D%3D"),
     ALBUMS("EgWKAQIYAWoKEAkQChAFEAMQBA=="),
     ARTISTS("EgWKAQIgAWoKEAkQChAFEAMQBA=="),
     PLAYLISTS("EgWKAQIoAWoKEAkQChAFEAMQBA==")

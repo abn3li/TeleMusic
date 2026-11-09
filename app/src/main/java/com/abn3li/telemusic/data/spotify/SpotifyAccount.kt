@@ -10,6 +10,11 @@ import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -22,6 +27,7 @@ import kotlinx.coroutines.withContext
 import okhttp3.FormBody
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import org.json.JSONArray
 import org.json.JSONObject
 import java.security.MessageDigest
 import java.security.SecureRandom
@@ -45,10 +51,13 @@ data class SpotifyLibrary(
 class SpotifyException(message: String, val code: Int = 0) : Exception(message)
 
 /**
- * Sign-in with your own Spotify developer app (its Client ID), using the phone-app flow (PKCE):
- * no secret is stored or needed. Access is read-only - Liked Songs and playlists. Tokens are kept
- * encrypted on the phone and refreshed only when a request needs one; nothing here runs in the
- * background.
+ * Your Spotify account, read-only - Liked Songs and playlists. Two ways in:
+ * - signing in to Spotify itself, inside the app ([SpotifyWebSession]): works for free accounts
+ *   and needs nothing set up;
+ * - your own Spotify developer app (its Client ID), using the phone-app flow (PKCE): no secret is
+ *   stored or needed.
+ * Everything is kept encrypted on the phone and refreshed only when a request needs it; nothing
+ * here runs in the background.
  */
 class SpotifyAccount(context: Context, private val scope: CoroutineScope) {
     private val appContext = context.applicationContext
@@ -67,6 +76,9 @@ class SpotifyAccount(context: Context, private val scope: CoroutineScope) {
         .readTimeout(20, TimeUnit.SECONDS)
         .build()
     private val tokenLock = Mutex()
+    private val web by lazy { SpotifyWebSession(prefs, http) }
+    /** Signed in to Spotify itself rather than through a developer app. */
+    val usesWebSignIn: Boolean get() = web.cookie != null
     // Synchronous account changes and asynchronous responses share this monitor.
     private var accountGeneration = 0L
     private fun checkSession(expected: Long) {
@@ -74,11 +86,17 @@ class SpotifyAccount(context: Context, private val scope: CoroutineScope) {
     }
 
     /** Display name while signed in, else null. */
-    private val _accountName by lazy { MutableStateFlow(if (prefs.contains(KEY_REFRESH)) prefs.getString(KEY_NAME, "Spotify") else null) }
+    private val _accountName by lazy { MutableStateFlow(if (prefs.contains(KEY_REFRESH) || web.cookie != null) prefs.getString(KEY_NAME, "Spotify") else null) }
     val accountName: StateFlow<String?> get() = _accountName
 
     private val _library = MutableStateFlow(SpotifyLibrary())
     val library: StateFlow<SpotifyLibrary> = _library
+
+    // Set when a sign-in finished, so Settings opens the Spotify library straight away.
+    private val _openLibrary = MutableStateFlow(false)
+    val openLibraryRequest: StateFlow<Boolean> = _openLibrary
+    fun requestOpenLibrary() { _openLibrary.value = true }
+    fun consumeOpenLibrary() { _openLibrary.value = false }
 
     var clientId: String
         get() = prefs.getString(KEY_CLIENT_ID, "").orEmpty()
@@ -164,8 +182,41 @@ class SpotifyAccount(context: Context, private val scope: CoroutineScope) {
         }
     }
 
+    /** Signs in with the cookie Spotify's own login page set ([spDc]): returns the account's name
+     * once Spotify has accepted it, or throws with what went wrong. */
+    suspend fun signInWithWebCookie(spDc: String): String {
+        val generation = synchronized(this) {
+            accountGeneration++
+            // One account at a time: a developer-app sign-in gives way to this one.
+            prefs.edit().remove(KEY_ACCESS).remove(KEY_EXPIRES).remove(KEY_REFRESH).apply()
+            web.cookie = spDc
+            _library.value = SpotifyLibrary()
+            accountGeneration
+        }
+        try {
+            web.accessToken(forceRefresh = true)
+            val name = web.displayName() ?: "Spotify"
+            synchronized(this) {
+                checkSession(generation)
+                prefs.edit().putString(KEY_NAME, name).apply()
+                _accountName.value = name
+            }
+            return name
+        } catch (e: Exception) {
+            if (e !is CancellationException) Log.w(TAG, "Spotify web sign-in failed", e)
+            synchronized(this) {
+                if (generation == accountGeneration) { web.clear(); _accountName.value = null }
+            }
+            throw e
+        }
+    }
+
     @Synchronized fun signOut() {
         accountGeneration++
+        if (web.cookie != null) {
+            web.clear()
+            forgetWebCookies()
+        }
         prefs.edit().remove(KEY_ACCESS).remove(KEY_EXPIRES).remove(KEY_REFRESH).remove(KEY_NAME)
             .remove(KEY_VERIFIER).remove(KEY_STATE).apply()
         _accountName.value = null
@@ -182,6 +233,22 @@ class SpotifyAccount(context: Context, private val scope: CoroutineScope) {
         val generation = accountGeneration
         scope.launch {
             try {
+                if (usesWebSignIn) {
+                    val loaded = webCall(generation) { webLibrary() }
+                    synchronized(this@SpotifyAccount) {
+                        checkSession(generation)
+                        _library.value = loaded
+                    }
+                    // The library list doesn't say how many songs a playlist has; each is asked
+                    // after the list shows, and the counts fill in together.
+                    val counts = runCatching { webCall(generation) { webPlaylistCounts(loaded.playlists) } }.getOrNull().orEmpty()
+                    if (counts.isNotEmpty()) synchronized(this@SpotifyAccount) {
+                        if (generation == accountGeneration) _library.update { library ->
+                            library.copy(playlists = library.playlists.map { p -> counts[p.id]?.let { p.copy(total = it) } ?: p })
+                        }
+                    }
+                    return@launch
+                }
                 val liked = getJson("https://api.spotify.com/v1/me/tracks?limit=1", generation).optInt("total")
                 val playlists = mutableListOf<SpotifyPlaylist>()
                 var url: String? = "https://api.spotify.com/v1/me/playlists?limit=50"
@@ -221,12 +288,14 @@ class SpotifyAccount(context: Context, private val scope: CoroutineScope) {
 
     /** Every song in your Liked Songs, newest first. */
     suspend fun likedTracks(): List<SpotifyTrack> =
-        pagedTracks("https://api.spotify.com/v1/me/tracks?limit=50")
+        if (usesWebSignIn) webCall { webLikedTracks() }
+        else pagedTracks("https://api.spotify.com/v1/me/tracks?limit=50")
 
     /** Every song in a playlist, in the playlist's order. Spotify is replacing the old
      * /playlists/{id}/tracks address with /playlists/{id}/items and refuses newer developer apps
      * on the old one - so the new one is asked first, the old one only if that isn't available. */
     suspend fun playlistTracks(playlistId: String): List<SpotifyTrack> {
+        if (usesWebSignIn) return webCall { webPlaylistTracks(playlistId) }
         val first = try {
             return pagedTracks("https://api.spotify.com/v1/playlists/$playlistId/items?limit=100&additional_types=track")
         } catch (e: SpotifyException) {
@@ -267,6 +336,130 @@ class SpotifyAccount(context: Context, private val scope: CoroutineScope) {
         }
         return tracks
     }
+
+    // ---- Signed in to Spotify itself ----
+
+    /** Runs a request on the web sign-in; a sign-in Spotify no longer accepts signs out, so the
+     * app asks to sign in again instead of failing every time. */
+    private suspend fun <T> webCall(generation: Long = synchronized(this) { accountGeneration }, block: suspend () -> T): T {
+        val result = try {
+            block()
+        } catch (e: SpotifyException) {
+            if (e.code == 401) synchronized(this) { if (generation == accountGeneration) signOut() }
+            throw if (e.code == 401) SpotifyException("Spotify sign-in expired - sign in again in Settings", 401) else e
+        }
+        synchronized(this) { checkSession(generation) }
+        return result
+    }
+
+    private suspend fun webLibrary(): SpotifyLibrary {
+        val liked = web.query(SpotifyWebSession.OP_LIKED, """{"offset":0,"limit":1}""")
+            .path("data", "me", "library", "tracks")?.optInt("totalCount")
+        val playlists = mutableListOf<SpotifyPlaylist>()
+        var offset = 0
+        while (offset < MAX_WEB_ITEMS) {
+            val library = web.query(
+                SpotifyWebSession.OP_PLAYLISTS,
+                """{"filters":["Playlists"],"order":null,"textFilter":null,"features":[],"limit":50,"offset":$offset,""" +
+                    """"flatten":true,"expandedFolders":[],"folderUri":null,"includeFoldersWhenFlattening":false}"""
+            ).path("data", "me", "libraryV3") ?: break
+            val items = library.optJSONArray("items") ?: JSONArray()
+            for (i in 0 until items.length()) {
+                val wrapper = items.optJSONObject(i)?.optJSONObject("item") ?: continue
+                if (wrapper.optString("__typename") != "PlaylistResponseWrapper") continue
+                val data = wrapper.optJSONObject("data") ?: continue
+                val id = data.optString("uri").removePrefix("spotify:playlist:").takeIf { it.isNotBlank() } ?: continue
+                playlists += SpotifyPlaylist(
+                    id = id,
+                    name = data.optString("name").ifBlank { "Playlist" },
+                    imageUrl = data.optJSONObject("images")?.optJSONArray("items")?.optJSONObject(0)
+                        ?.optJSONArray("sources")?.optJSONObject(0)?.optString("url")?.takeIf { it.isNotBlank() },
+                    total = data.optJSONObject("content")?.optInt("totalCount") ?: 0,
+                    owner = data.path("ownerV2", "data")?.optString("name")?.takeIf { it.isNotBlank() }
+                )
+            }
+            offset += items.length()
+            if (items.length() == 0 || offset >= library.optInt("totalCount", 0)) break
+        }
+        return SpotifyLibrary(loaded = true, likedTotal = liked, playlists = playlists)
+    }
+
+    /** Song counts for [playlists] that don't have one yet, a few requests at a time. */
+    private suspend fun webPlaylistCounts(playlists: List<SpotifyPlaylist>): Map<String, Int> = coroutineScope {
+        val gate = Semaphore(4)
+        playlists.filter { it.total == 0 }.map { playlist ->
+            async {
+                gate.withPermit {
+                    runCatching {
+                        web.query(
+                            SpotifyWebSession.OP_PLAYLIST,
+                            """{"uri":"spotify:playlist:${playlist.id}","offset":0,"limit":1,"enableWatchFeedEntrypoint":false}"""
+                        ).path("data", "playlistV2", "content")?.optInt("totalCount")
+                    }.getOrNull()?.let { playlist.id to it }
+                }
+            }
+        }.awaitAll().filterNotNull().toMap()
+    }
+
+    private suspend fun webLikedTracks(): List<SpotifyTrack> {
+        val tracks = mutableListOf<SpotifyTrack>()
+        var offset = 0
+        while (offset < MAX_WEB_ITEMS) {
+            val page = web.query(SpotifyWebSession.OP_LIKED, """{"offset":$offset,"limit":50}""")
+                .path("data", "me", "library", "tracks") ?: break
+            val items = page.optJSONArray("items") ?: JSONArray()
+            for (i in 0 until items.length()) {
+                val track = items.optJSONObject(i)?.optJSONObject("track") ?: continue
+                webTrack(track.optJSONObject("data") ?: track, track.optString("_uri"))?.let(tracks::add)
+            }
+            offset += items.length()
+            if (items.length() == 0 || offset >= page.optInt("totalCount", 0)) break
+        }
+        return tracks
+    }
+
+    private suspend fun webPlaylistTracks(playlistId: String): List<SpotifyTrack> {
+        val tracks = mutableListOf<SpotifyTrack>()
+        var offset = 0
+        while (offset < MAX_WEB_ITEMS) {
+            val content = web.query(
+                SpotifyWebSession.OP_PLAYLIST,
+                """{"uri":"spotify:playlist:$playlistId","offset":$offset,"limit":100,"enableWatchFeedEntrypoint":false}"""
+            ).path("data", "playlistV2", "content") ?: break
+            val items = content.optJSONArray("items") ?: JSONArray()
+            for (i in 0 until items.length()) {
+                val item = items.optJSONObject(i)?.optJSONObject("itemV2") ?: continue
+                // Podcast episodes sit in playlists too; only songs are imported.
+                if (item.optString("__typename", "TrackResponseWrapper") != "TrackResponseWrapper") continue
+                webTrack(item.optJSONObject("data"), null)?.let(tracks::add)
+            }
+            offset += items.length()
+            if (items.length() == 0 || offset >= content.optInt("totalCount", 0)) break
+        }
+        return tracks
+    }
+
+    private fun webTrack(data: JSONObject?, uri: String?): SpotifyTrack? {
+        data ?: return null
+        val title = data.optString("name").replace('\u00a0', ' ').trim().takeIf { it.isNotBlank() } ?: return null
+        val artists = data.optJSONObject("artists")?.optJSONArray("items")?.let { a ->
+            (0 until a.length()).mapNotNull { i ->
+                val artist = a.optJSONObject(i) ?: return@mapNotNull null
+                (artist.optJSONObject("profile")?.optString("name") ?: artist.optString("name"))
+                    .replace('\u00a0', ' ').trim().takeIf { it.isNotBlank() }
+            }
+        }.orEmpty().joinToString(", ")
+        val id = data.optString("uri").ifBlank { uri.orEmpty() }.substringAfterLast(':')
+        val duration = (data.optJSONObject("trackDuration") ?: data.optJSONObject("duration"))?.optLong("totalMilliseconds") ?: 0L
+        val album = data.optJSONObject("albumOfTrack")?.optString("name")?.takeIf { it.isNotBlank() }
+        return SpotifyTrack(id, title, artists, duration, album)
+    }
+
+    private fun JSONObject.path(vararg keys: String): JSONObject? =
+        keys.fold(this as JSONObject?) { node, key -> node?.optJSONObject(key) }
+
+    /** Spotify's login page set cookies in the app's web view; signing out clears them too. */
+    private fun forgetWebCookies() = SpotifyWebCookies.clear()
 
     // ---- HTTP ----
 
@@ -363,5 +556,7 @@ class SpotifyAccount(context: Context, private val scope: CoroutineScope) {
         private const val KEY_NAME = "display_name"
         private const val KEY_VERIFIER = "pkce_verifier"
         private const val KEY_STATE = "pkce_state"
+        /** Items read at most from one list on the web sign-in, so a fault can't page forever. */
+        private const val MAX_WEB_ITEMS = 20_000
     }
 }

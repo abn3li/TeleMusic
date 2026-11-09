@@ -94,13 +94,14 @@ private sealed interface SpotifyItem {
  * [SpotifyLibraryScreen]. Not signed in: Client ID, Connect and how to get a Client ID.
  */
 /** Spotify's row in Settings' Accounts card: signed in, it opens your Spotify library; signed
- * out, a short dialog takes the Client ID and connects. */
+ * out, it offers signing in to Spotify itself, or a developer app's Client ID. */
 @Composable
-fun SpotifyAccountRow(onOpenPlaylists: () -> Unit, onHelp: () -> Unit) {
+fun SpotifyAccountRow(onOpenPlaylists: () -> Unit, onSignIn: () -> Unit, onHelp: () -> Unit) {
     val context = LocalContext.current
     val account = (context.applicationContext as TgMusicApp).spotifyAccount
     val accountName by account.accountName.collectAsState()
     var connecting by remember { mutableStateOf(false) }
+    var usingClientId by remember { mutableStateOf(false) }
     var clientId by remember { mutableStateOf(account.clientId) }
 
     GroupRow(
@@ -111,13 +112,26 @@ fun SpotifyAccountRow(onOpenPlaylists: () -> Unit, onHelp: () -> Unit) {
     )
     if (connecting) AppAlert(
         title = "Connect Spotify",
-        message = "Create a free app at developer.spotify.com (Dashboard → Create app). Set its Redirect URI to telemusic://spotify, tick Web API, and add your Spotify email under User Management. Then paste its Client ID here. TeleMusic can only read your Liked Songs and playlists.",
+        message = "Sign in to Spotify here - free accounts work, nothing to set up. TeleMusic only reads your Liked Songs and playlists.",
         onDismiss = { connecting = false },
+        actions = listOf(
+            AlertAction("Sign In", bold = true) {
+                connecting = false
+                onSignIn()
+            },
+            AlertAction("Use a Developer App") { connecting = false; usingClientId = true },
+            AlertAction("Cancel") { connecting = false }
+        )
+    )
+    if (usingClientId) AppAlert(
+        title = "Developer App",
+        message = "Create a free app at developer.spotify.com (Dashboard → Create app). Set its Redirect URI to telemusic://spotify, tick Web API, and add your Spotify email under User Management. Then paste its Client ID here. TeleMusic can only read your Liked Songs and playlists.",
+        onDismiss = { usingClientId = false },
         actions = listOf(
             AlertAction("Help") { onHelp() },
             AlertAction("Connect", bold = true, enabled = clientId.isNotBlank()) {
                 account.clientId = clientId
-                connecting = false
+                usingClientId = false
                 account.startSignIn(context)
             }
         )
@@ -193,12 +207,34 @@ fun SpotifyLibraryScreen(onBack: () -> Unit, onOpenPlaylist: (Long, String) -> U
         item("account") {
             GroupHeader("Account")
             GroupCard {
-                GroupRow(title = "Client ID", trailing = { GroupValue(maskedClientId(account.clientId), showChevron = false) })
+                if (account.usesWebSignIn) {
+                    GroupRow(title = "Signed In", trailing = { GroupValue("Spotify account", showChevron = false) })
+                } else {
+                    GroupRow(title = "Client ID", trailing = { GroupValue(maskedClientId(account.clientId), showChevron = false) })
+                }
                 GroupDivider()
                 GroupActionRow("Sign Out", color = DestructiveRed) { confirmSignOut = true }
             }
             Spacer(Modifier.height(12.dp))
         }
+    }
+
+    // The last import left songs it couldn't find: they're listed on the playlist, which keeps
+    // the list current as you add or skip them, so this only points there.
+    (importState.value as? SpotifyImportState.Finished)?.takeIf { it.missing.isNotEmpty() }?.let { finished ->
+        val dismiss = { app.spotifyImporter.acknowledge() }
+        AppAlert(
+            title = "${finished.missing.size} Not Found",
+            message = finished.summary + " Find them on the playlist: search for each one and pick it.",
+            onDismiss = dismiss,
+            actions = listOf(
+                AlertAction("Open Playlist", bold = true) {
+                    dismiss()
+                    onOpenPlaylist(finished.playlistId, finished.name)
+                },
+                AlertAction("Later", onClick = dismiss)
+            )
+        )
     }
 
     importChoice?.let { item ->

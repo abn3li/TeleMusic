@@ -191,7 +191,8 @@ private fun ImportPlaylistDialog(
         )
         is SpotifyImportState.Finished -> AppAlert(
             title = "Imported",
-            message = spotifyState.summary + " It's in Library > Playlists.",
+            message = spotifyState.summary + " It's in Library > Playlists." +
+                if (spotifyState.missing.isNotEmpty()) " Open it to find the rest." else "",
             onDismiss = onDismiss,
             actions = listOf(AlertAction("Done", bold = true, onClick = onDismiss))
         )

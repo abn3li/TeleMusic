@@ -1,6 +1,8 @@
 package com.abn3li.telemusic.data.local
 
 import androidx.room.Dao
+import androidx.room.Index
+import androidx.room.Transaction
 import androidx.room.Entity
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
@@ -25,6 +27,20 @@ data class SpotifyLinkEntity(
 data class SpotifyTrackMapEntity(
     @PrimaryKey val spotifyTrackId: String,
     val songId: Long
+)
+
+/** A Spotify song an import couldn't find on YouTube Music, kept with its playlist so it can be
+ * looked up by hand later. [orderAt] is where it belongs in the playlist (see SpotifyImporter). */
+@Entity(tableName = "spotify_missing", indices = [Index("playlistId")])
+data class SpotifyMissingEntity(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val playlistId: Long,
+    val spotifyTrackId: String,
+    val title: String,
+    val artists: String,
+    val album: String?,
+    val durationMs: Long,
+    val orderAt: Long
 )
 
 /** How many songs each imported Spotify source's playlist holds right now (a deleted
@@ -60,9 +76,31 @@ interface SpotifyDao {
     @Query("UPDATE spotify_track_map SET songId = :to WHERE songId = :from")
     suspend fun remapSong(from: Long, to: Long)
 
+    @Query("SELECT * FROM spotify_missing WHERE playlistId = :playlistId ORDER BY orderAt DESC")
+    fun observeMissing(playlistId: Long): Flow<List<SpotifyMissingEntity>>
+
+    @Query("DELETE FROM spotify_missing WHERE playlistId = :playlistId")
+    suspend fun clearMissing(playlistId: Long)
+
+    @Insert
+    suspend fun insertMissing(rows: List<SpotifyMissingEntity>)
+
+    /** An import's songs not found, in place of the last import's. */
+    @Transaction
+    suspend fun replaceMissing(playlistId: Long, rows: List<SpotifyMissingEntity>) {
+        clearMissing(playlistId)
+        if (rows.isNotEmpty()) insertMissing(rows)
+    }
+
+    @Query("DELETE FROM spotify_missing WHERE id = :id")
+    suspend fun deleteMissing(id: Long)
+
     @Query("DELETE FROM spotify_links")
     suspend fun deleteAllLinks()
 
     @Query("DELETE FROM spotify_track_map")
     suspend fun deleteAllMatches()
+
+    @Query("DELETE FROM spotify_missing")
+    suspend fun deleteAllMissing()
 }

@@ -30,7 +30,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 @Composable
-internal fun FlacQualitySettingsGroup() {
+internal fun FlacQualitySettingsGroup(showHeader: Boolean = true) {
     val app = LocalContext.current.applicationContext as TgMusicApp
     val preferences by app.flacUpgradeStore.preferences.collectAsState()
     val scope = rememberCoroutineScope()
@@ -39,7 +39,7 @@ internal fun FlacQualitySettingsGroup() {
     var password by remember { mutableStateOf("") }
     var saving by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
-    GroupHeader("Audio Quality")
+    if (showHeader) GroupHeader("Audio Quality")
     GroupCard {
         GroupRow(title = "Automatic FLAC Upgrade",
             icon = { GroupIcon(Icons.Rounded.GraphicEq, Color(0xFF30D158)) },

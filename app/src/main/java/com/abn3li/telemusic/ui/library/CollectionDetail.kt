@@ -379,6 +379,10 @@ fun PlaylistDetailScreen(playlistId: Long, playlistName: String, viewModel: Libr
     // Only a playlist with YouTube songs (one imported from YouTube) gets Download All.
     val notDownloaded = remember(list) { list.count { it.youtubeVideoId != null && it.localFilePath == null && !it.isExplicitDownload } }
     val downloadProgress = viewModel.playlistDownloads.collectAsState().value[playlistId]
+    // Songs a Spotify import couldn't find, to look up by hand.
+    val notFound by remember(playlistId) { (context.applicationContext as TgMusicApp).spotifyDao.observeMissing(playlistId) }
+        .collectAsState(initial = emptyList())
+    var showNotFound by remember { mutableStateOf(false) }
 
     Box(Modifier.fillMaxSize()) {
     PlaylistLikePage(
@@ -390,6 +394,9 @@ fun PlaylistDetailScreen(playlistId: Long, playlistName: String, viewModel: Libr
         callbacks = callbacks,
         titleOrderByDefault = false,
         covers = covers,
+        heroFooter = if (notFound.isEmpty()) null else { {
+            com.abn3li.telemusic.ui.spotify.NotFoundButton(notFound.size) { showNotFound = true }
+        } },
         onPickSong = if (!pickingCoverSong) null else { song ->
             pickingCoverSong = false
             scope.launch { repository.setPlaylistCoverSong(playlistId, song.telegramMessageId) }
@@ -423,6 +430,10 @@ fun PlaylistDetailScreen(playlistId: Long, playlistName: String, viewModel: Libr
         }
     )
     if (pickingCoverSong) CoverPickBar { pickingCoverSong = false }
+    }
+
+    if (showNotFound && notFound.isNotEmpty()) {
+        com.abn3li.telemusic.ui.spotify.NotFoundSongs(notFound, onDismiss = { showNotFound = false })
     }
 
     if (coverOptions) {

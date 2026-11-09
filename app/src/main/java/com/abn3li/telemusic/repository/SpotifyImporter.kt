@@ -7,9 +7,11 @@ import com.abn3li.telemusic.data.browse.BrowseParser
 import com.abn3li.telemusic.data.browse.BrowseTrack
 import com.abn3li.telemusic.data.browse.InnertubeBrowseClient
 import com.abn3li.telemusic.data.browse.SAVED_ARTWORK_SIZE
+import com.abn3li.telemusic.data.browse.SearchFilter
 import com.abn3li.telemusic.data.browse.googleArtworkAtSize
 import com.abn3li.telemusic.data.local.SpotifyDao
 import com.abn3li.telemusic.data.local.SpotifyLinkEntity
+import com.abn3li.telemusic.data.local.SpotifyMissingEntity
 import com.abn3li.telemusic.data.local.SpotifyTrackMapEntity
 import com.abn3li.telemusic.data.spotify.SpotifyAccount
 import com.abn3li.telemusic.data.spotify.SpotifyPlaylist
@@ -39,14 +41,16 @@ sealed interface SpotifyImportState {
         val total: Int,
         val playlistId: Long = 0L,
         val added: Int = 0,
-        val updated: Boolean = false
+        val updated: Boolean = false,
+        /** "Title - Artist" of each song that couldn't be found, in the source's order. */
+        val missing: List<String> = emptyList()
     ) : SpotifyImportState {
         /** One line for a dialog or a toast. */
         val summary: String
             get() = if (updated) {
                 if (added == 0) "\"$name\" is up to date." else "Added $added new ${if (added == 1) "song" else "songs"} to \"$name\"."
             } else {
-                "Added $matched of $total songs to \"$name\"." + if (matched < total) " The rest couldn't be found on YouTube Music." else ""
+                "Added $matched of $total songs to \"$name\"." + if (matched < total) " ${total - matched} couldn't be found on YouTube Music." else ""
             }
     }
     data class Failed(val message: String) : SpotifyImportState
@@ -176,6 +180,8 @@ class SpotifyImporter(
                 var matched = 0
                 var added = 0
                 var odesliAllowed = true
+                val missing = mutableListOf<String>()
+                val missingRows = mutableListOf<SpotifyMissingEntity>()
                 // Matches are written in batches: every write to the library makes open screens
                 // reload it, so one transaction per batch instead of two writes per song.
                 val pending = mutableListOf<PendingTrack>()
@@ -205,7 +211,7 @@ class SpotifyImporter(
                         matched++
                         pending += PendingTrack(index, track.id, knownId, null, track.album)
                     } else {
-                        var found = runCatching { matchOnYouTubeMusic(track) }.getOrNull()
+                        var found = runCatching { findOnYouTube(track) }.getOrNull()
                         if (found == null && odesliAllowed) {
                             val result = runCatching { matchWithOdesli(track) }.getOrNull()
                             if (result == OdesliResult.RateLimited) odesliAllowed = false
@@ -214,15 +220,24 @@ class SpotifyImporter(
                         if (found != null) {
                             matched++
                             pending += PendingTrack(index, track.id, null, found, track.album)
+                        } else {
+                            missing += listOf(track.title, track.artists).filter { it.isNotBlank() }.joinToString(" - ")
+                            missingRows += SpotifyMissingEntity(
+                                playlistId = playlistId, spotifyTrackId = track.id, title = track.title,
+                                artists = track.artists, album = track.album, durationMs = track.durationMs,
+                                orderAt = base - index
+                            )
                         }
                     }
                     if (pending.size >= WRITE_BATCH) flush()
                     _state.value = SpotifyImportState.Running(name, index + 1, total, key)
                 }
                 flush()
+                // Kept with the playlist, to look up by hand from its page.
+                dao.replaceMissing(playlistId, missingRows)
                 // A song you already have from Telegram keeps whichever copy is better.
                 musicRepository.mergeCrossSourceDuplicates()
-                val finished = SpotifyImportState.Finished(name, matched, total, playlistId, added, updated = existing != null)
+                val finished = SpotifyImportState.Finished(name, matched, total, playlistId, added, updated = existing != null, missing = missing)
                 _state.value = finished
                 if (downloadAll) _pendingDownload.value = playlistId
                 if (announce) toast(finished.summary)
@@ -235,6 +250,34 @@ class SpotifyImporter(
             }
         }
     }
+
+    // ---- Songs an import couldn't find ----
+
+    /** YouTube Music's songs for [query], then its videos - for picking a not-found song by hand. */
+    suspend fun searchForMissing(query: String): List<BrowseTrack> = withContext(Dispatchers.IO) {
+        val songs = runCatching { BrowseParser.parseBrowseContent(innertube.search(query, SearchFilter.SONGS)).tracks.take(8) }.getOrDefault(emptyList())
+        val videos = runCatching { BrowseParser.parseBrowseContent(innertube.search(query, SearchFilter.VIDEOS)).tracks.take(5) }.getOrDefault(emptyList())
+        (songs + videos).distinctBy { it.videoId }
+    }
+
+    /** Adds [picked] to the playlist in [missing]'s place, remembers the match for later
+     * updates, and takes the song off the not-found list. */
+    suspend fun resolveMissing(missing: SpotifyMissingEntity, picked: BrowseTrack) = withContext(Dispatchers.IO) {
+        musicRepository.inTransaction {
+            val song = musicRepository.importPlaylistTrackAsStreamable(
+                // Spotify's spelling of the title, as automatic matches keep it.
+                picked.copy(title = missing.title, thumbnailUrl = googleArtworkAtSize(picked.thumbnailUrl, SAVED_ARTWORK_SIZE)), missing.album
+            )
+            if (missing.spotifyTrackId.isNotBlank()) dao.saveMatch(SpotifyTrackMapEntity(missing.spotifyTrackId, song.telegramMessageId))
+            if (musicRepository.playlistExists(missing.playlistId)) {
+                musicRepository.addSongToPlaylistAt(missing.playlistId, song.telegramMessageId, missing.orderAt)
+            }
+            dao.deleteMissing(missing.id)
+        }
+    }
+
+    /** Takes a song off the not-found list without adding anything. */
+    suspend fun skipMissing(missing: SpotifyMissingEntity) = withContext(Dispatchers.IO) { dao.deleteMissing(missing.id) }
 
     private suspend fun fail(message: String, announce: Boolean) {
         _state.value = SpotifyImportState.Failed(message)
@@ -290,10 +333,35 @@ class SpotifyImporter(
 
     // ---- Matching ----
 
-    private fun matchOnYouTubeMusic(track: SpotifyTrack): BrowseTrack? {
+    /**
+     * The song on YouTube Music, searched a few ways until one fits: as Spotify spells it, then
+     * without the "(feat. ...)" / "- Remastered" extras, with every artist, and last among videos
+     * (a song that's only up as a music video). Only a miss pays for the next search.
+     */
+    private fun findOnYouTube(track: SpotifyTrack): BrowseTrack? {
         val firstArtist = track.artists.split(",").first().trim()
-        val response = innertube.searchSongs("${track.title} $firstArtist")
+        val plainTitle = plainTitle(track.title)
+        val allArtists = track.artists.split(",").joinToString(" ") { it.trim() }
+        val queries = listOf("${track.title} $firstArtist", "$plainTitle $firstArtist", "$plainTitle $allArtists")
+            .map { it.trim() }.filter { it.isNotBlank() }.distinct()
+        for (query in queries) {
+            matchOnYouTubeMusic(track, query, SearchFilter.SONGS)?.let { return it }
+        }
+        return matchOnYouTubeMusic(track, queries.first(), SearchFilter.VIDEOS)
+    }
+
+    /** The title without what Spotify adds and YouTube Music usually leaves off. */
+    private fun plainTitle(title: String): String = title
+        .replace(Regex("""\s*[(\[][^)\]]*[)\]]"""), "")
+        .replace(Regex("""\s+-\s+.*$"""), "")
+        .trim()
+        .ifBlank { title }
+
+    private fun matchOnYouTubeMusic(track: SpotifyTrack, query: String, filter: SearchFilter): BrowseTrack? {
+        val firstArtist = track.artists.split(",").first().trim()
+        val response = innertube.search(query, filter)
         val candidates = BrowseParser.parseBrowseContent(response).tracks.take(6)
+        val video = filter == SearchFilter.VIDEOS
         val wantSeconds = track.durationMs / 1000
         val wantTitle = normalize(track.title)
         val wantArtist = normalize(firstArtist)
@@ -305,12 +373,20 @@ class SpotifyImporter(
                 val candidateTitle = normalize(c.title)
                 val titleOk = candidateTitle.isNotBlank() &&
                     (candidateTitle == wantTitle || candidateTitle.contains(wantTitle) || wantTitle.contains(candidateTitle))
-                val artistOk = wantArtist.isNotBlank() && normalize(c.artist).contains(wantArtist)
+                // A video's channel is often not the artist; its title usually names them.
+                val artistOk = wantArtist.isNotBlank() &&
+                    (normalize(c.artist).contains(wantArtist) || (video && normalize(c.title).contains(wantArtist)))
                 val diff = if (c.durationSeconds > 0 && wantSeconds > 0) abs(c.durationSeconds - wantSeconds) else 999L
                 // Same artist, same length, nearly the same spelling: a transliteration
                 // ("Zayak Ana" / "Zayek Ana") rather than a different song.
                 val spellingOk = artistOk && diff <= 5 && candidateTitle.isNotBlank() && similarity(candidateTitle, wantTitle) >= 0.8
-                Triple(c, (titleOk && (diff <= 7 || (artistOk && diff <= 15))) || spellingOk, diff)
+                // The same title in another alphabet ("تلاحق" / "Telaheq"): the spelling can't be
+                // compared, so it takes the same artist and a length within two seconds.
+                val otherScript = artistOk && diff <= 2 && candidateTitle.isNotBlank() && script(candidateTitle) != script(wantTitle)
+                // A music video runs longer than the song (an intro, an ending), so it's given more room.
+                val fits = if (video) titleOk && artistOk && diff <= 25
+                    else (titleOk && (diff <= 7 || (artistOk && diff <= 15))) || spellingOk || otherScript
+                Triple(c, fits, diff)
             }
             .filter { it.second }
             .minByOrNull { it.third }
@@ -364,6 +440,12 @@ class SpotifyImporter(
             .replace(Regex("""[^\p{L}\p{N} ]"""), "")
             .replace(Regex("""\s+"""), " ")
             .trim()
+    }
+
+    /** Whether a title is written mostly in Latin letters or another alphabet (Arabic, ...). */
+    private fun script(title: String): Boolean {
+        val letters = title.filter { it.isLetter() }
+        return letters.isNotEmpty() && letters.count { it.code < 0x250 } * 2 >= letters.length
     }
 
     /** 1 - (edit distance / longer length): 1.0 identical, 0.8 = about one letter in five differs. */

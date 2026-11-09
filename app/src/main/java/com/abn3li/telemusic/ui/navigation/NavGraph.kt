@@ -111,6 +111,7 @@ object Routes {
     const val SEARCH = "search"
     const val DISCOVER = "discover"
     const val YOUTUBE_SIGN_IN = "youtube_sign_in"
+    const val SPOTIFY_SIGN_IN = "spotify_sign_in"
     const val YOUTUBE_BROWSE = "youtube_browse/{browseId}/{title}/{params}"
 
     fun album(name: String) = "album/${Uri.encode(name)}"
@@ -439,10 +440,14 @@ fun TgMusicNavGraph(navController: NavHostController = rememberNavController()) 
                 composable(Routes.YOUTUBE_SIGN_IN) {
                     com.abn3li.telemusic.ui.youtube.YouTubeSignInScreen(onDone = { navController.popBackStack() })
                 }
+                composable(Routes.SPOTIFY_SIGN_IN) {
+                    com.abn3li.telemusic.ui.spotify.SpotifySignInScreen(onDone = { navController.popBackStack() })
+                }
                 composable(Routes.SETTINGS) {
                     SettingsScreen(
                         onOpenSpotifyPlaylist = { id, name -> navController.navigate(Routes.playlist(id, name)) },
                         onYouTubeSignIn = { navController.navigate(Routes.YOUTUBE_SIGN_IN) },
+                        onSpotifySignIn = { navController.navigate(Routes.SPOTIFY_SIGN_IN) },
                         onTabsHidden = { settingsHidesTabs = it },
                         onBack = { navController.popBackStack() },
                         onLoggedOut = {

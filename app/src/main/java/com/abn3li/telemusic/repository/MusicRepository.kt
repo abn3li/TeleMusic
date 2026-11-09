@@ -860,6 +860,8 @@ class MusicRepository(
         val songIds = playlistDao.songIdsInPlaylist(playlistId)
         playlistDao.removeEntriesForPlaylist(playlistId)
         playlistDao.delete(playlistId)
+        // Songs a Spotify import couldn't find were kept for this playlist only.
+        database.spotifyDao().clearMissing(playlistId)
         if (removeSongs) removeSongsOnlyFromPlaylists(songIds)
     }
 
@@ -1731,6 +1733,7 @@ class MusicRepository(
         database.importedPlaylistDao().deleteAll()
         database.spotifyDao().deleteAllLinks()
         database.spotifyDao().deleteAllMatches()
+        database.spotifyDao().deleteAllMissing()
         ytDlpRepository.clearStreamCache()
         withContext(Dispatchers.IO) {
             for (dir in listOf("thumbnails", "artwork", "local_imports", "flac_downloads")) {
