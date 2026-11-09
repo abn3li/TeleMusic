@@ -62,6 +62,9 @@ import androidx.compose.material.icons.rounded.Cancel
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Download
+import androidx.compose.material.icons.rounded.History
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material3.Icon
@@ -156,6 +159,16 @@ private data class LibraryMatches(
     val playlists: List<PlaylistSummary> = emptyList()
 ) { val isEmpty get() = songs.isEmpty() && albums.isEmpty() && artists.isEmpty() && playlists.isEmpty() }
 
+/** The empty Search page: recent searches and the categories offered under them. */
+private class SearchStart(
+    val recents: List<String>, val genres: List<BrowseCollection>,
+    val onPick: (String) -> Unit, val onRemove: (String) -> Unit, val onClear: () -> Unit
+)
+
+private const val SEARCH_BROWSE_CHIPS = 12
+// Categories shown first among the chips.
+private val FirstChips = listOf("arab", "iraq", "khaleej", "عرب", "عراق", "خليج")
+
 @Composable
 fun SearchScreen(
     libraryViewModel: LibraryViewModel,
@@ -216,11 +229,27 @@ fun SearchScreen(
     BackHandler(query.isNotEmpty()) {
         if (section != ResultSection.OVERVIEW) section = ResultSection.OVERVIEW else search.onQueryChange("")
     }
+    val settings = app.settingsStore
+    val recents by settings.recentSearches.collectAsState()
+    // Already in memory on any phone that has opened Discover once; otherwise read one time.
+    val genres by produceState(app.discoveryRepository.genresIfLoaded().orEmpty()) {
+        if (value.isEmpty()) value = app.discoveryRepository.genres()
+    }
+    val chips = remember(genres) {
+        genres.sortedBy { genre -> if (FirstChips.any { genre.title.contains(it, true) }) 0 else 1 }.take(SEARCH_BROWSE_CHIPS)
+    }
+    val start = SearchStart(recents, chips, { picked ->
+        search.onQueryChange(picked); settings.addRecentSearch(picked)
+        if (source == SearchSource.YOUTUBE) search.search(true)
+    }, settings::removeRecentSearch, settings::clearRecentSearches)
     ResultsScreen(state, source, section, library, actions, callbacks,
-        { source = it }, { section = it }, search::onQueryChange, { if (source == SearchSource.YOUTUBE) search.search(true) },
-        { if (startInLibrary) callbacks.onBack() else search.onQueryChange("") }, onOpenPlaylist, onOpenCollection,
+        { source = it }, { section = it }, search::onQueryChange,
+        { settings.addRecentSearch(query); if (source == SearchSource.YOUTUBE) search.search(true) },
+        { if (startInLibrary) callbacks.onBack() else search.onQueryChange("") }, onOpenPlaylist,
+        { collection -> settings.addRecentSearch(query); onOpenCollection(collection) },
         // Queues every song result from the tapped one, so Next / Previous walk the results.
         { result ->
+            settings.addRecentSearch(query)
             val tracks = state.results.map { BrowseTrack(it.videoId, it.title, it.artist, it.thumbnailUrl, it.durationSeconds) }
             onPlayTracks(tracks, state.results.indexOfFirst { it.videoId == result.videoId }.coerceAtLeast(0), false)
         },
@@ -231,7 +260,7 @@ fun SearchScreen(
         },
         { result -> app.downloadGate.run { search.onDownloadIconClick(result) } },
         focusResultsField,
-        { focusResultsField = false })
+        { focusResultsField = false }, start, startInLibrary)
 }
 
 @Composable
@@ -292,7 +321,7 @@ private fun ResultsScreen(
     onQuery: (String) -> Unit, onSearch: () -> Unit, onCancel: () -> Unit,
     openPlaylist: (Long, String) -> Unit, openCollection: (BrowseCollection) -> Unit,
     play: (YtDlpSearchResult) -> Unit, playNext: (YtDlpSearchResult) -> Unit, download: (YtDlpSearchResult) -> Unit,
-    requestFocus: Boolean, onFocusHandled: () -> Unit
+    requestFocus: Boolean, onFocusHandled: () -> Unit, start: SearchStart, cancelAlways: Boolean
 ) {
     val loading = state.isSearching || state.searchedQuery != state.query.trim()
     val pagerState = rememberPagerState(
@@ -337,25 +366,68 @@ private fun ResultsScreen(
             LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(top = ResultsHeaderHeight + statusBar,
                 // The open keyboard covers the mini player, so it takes the mini player's place.
                 bottom = maxOf(LocalMiniPlayerInset.current, with(density) { keyboardPx.toDp() }) + 24.dp)) {
-                if (state.query.isBlank()) item("search_hint") {
-                    Text(if (page == 0) "Search songs, artists, albums and playlists on YouTube Music."
-                        else "Search songs, artists, albums and playlists in your library.", color = GroupLabelColor,
-                        fontSize = 16.sp, modifier = Modifier.padding(20.dp))
-                } else if (page == 0) youtubeResults(section, state, loading, onSection, openCollection, play, playNext, download)
+                if (state.query.isBlank()) searchStart(page, start, openCollection)
+                else if (page == 0) youtubeResults(section, state, loading, onSection, openCollection, play, playNext, download)
                 else libraryResults(section, library, actions, callbacks, onSection, openPlaylist)
             }
         }
         }
         ResultsHeader(state.query, pagerSource, onQuery, onSearch, onCancel, { selected ->
             scope.launch { pagerState.animateScrollToPage(selected.ordinal) }
-        }, requestFocus, onFocusHandled, backdrop, statusBar)
+        }, requestFocus, onFocusHandled, backdrop, statusBar, cancelAlways)
+    }
+}
+
+/** What Search shows before anything is typed: the last searches, and on the YouTube Music page
+ * a few categories to open straight away. */
+@OptIn(ExperimentalLayoutApi::class)
+private fun LazyListScope.searchStart(page: Int, start: SearchStart, openCollection: (BrowseCollection) -> Unit) {
+    if (start.recents.isEmpty()) item("search_hint") {
+        Text(if (page == 0) "Search songs, artists, albums and playlists on YouTube Music."
+            else "Search songs, artists, albums and playlists in your library.", color = GroupLabelColor,
+            fontSize = 16.sp, modifier = Modifier.padding(start = 20.dp, end = 20.dp, top = 20.dp, bottom = 4.dp))
+    } else {
+        item("recent_header") { Header("Recent", compact = true, action = {
+            Text("Clear", color = AppAccent, fontSize = 15.sp, modifier = Modifier
+                .clickable(remember { MutableInteractionSource() }, null, onClick = start.onClear)
+                .padding(start = 12.dp, top = 8.dp, bottom = 8.dp))
+        }) }
+        itemsIndexed(start.recents, key = { _, it -> "recent_$it" }) { index, text ->
+            val focusManager = LocalFocusManager.current
+            Row(Modifier.fillMaxWidth().heightIn(min = 48.dp).clickable { focusManager.clearFocus(); start.onPick(text) }
+                .padding(start = 18.dp, end = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Rounded.History, null, tint = ink.copy(.5f), modifier = Modifier.size(20.dp))
+                Text(text, color = ink, fontSize = 16.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f).padding(horizontal = 14.dp))
+                Box(Modifier.size(44.dp).clickable(remember { MutableInteractionSource() }, null) { start.onRemove(text) },
+                    contentAlignment = Alignment.Center) {
+                    Icon(Icons.Rounded.Close, "Remove", tint = ink.copy(.4f), modifier = Modifier.size(17.dp))
+                }
+            }
+            if (index < start.recents.lastIndex) LibraryDivider(52.dp)
+        }
+    }
+    if (page == 0 && start.genres.isNotEmpty()) {
+        item("browse_header") { Header("Browse", compact = true) }
+        item("browse_chips") {
+            FlowRow(Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                start.genres.forEach { genre ->
+                    Box(Modifier.clip(CircleShape).background(LibraryFieldColor)
+                        .youtubeCollectionActions(genre) { openCollection(genre) }
+                        .padding(horizontal = 15.dp, vertical = 9.dp)) {
+                        Text(genre.title, color = ink.copy(.9f), fontSize = 14.sp, fontWeight = FontWeight.Medium, maxLines = 1)
+                    }
+                }
+            }
+        }
     }
 }
 
 @Composable
 private fun ResultsHeader(query: String, source: SearchSource, onQuery: (String) -> Unit,
     onSearch: () -> Unit, onCancel: () -> Unit, onSource: (SearchSource) -> Unit,
-    requestFocus: Boolean, onFocusHandled: () -> Unit, backdrop: FrostedBackdrop, statusBar: Dp) {
+    requestFocus: Boolean, onFocusHandled: () -> Unit, backdrop: FrostedBackdrop, statusBar: Dp, cancelAlways: Boolean) {
     val focus = remember { FocusRequester() }
     val focusManager = LocalFocusManager.current
     val keyboard = LocalSoftwareKeyboardController.current
@@ -418,7 +490,8 @@ private fun ResultsHeader(query: String, source: SearchSource, onQuery: (String)
                         modifier = Modifier.size(20.dp).clickable { onQuery("") })
                 }
             }
-            Text("Cancel", color = AppAccent, fontSize = 16.sp, modifier = Modifier.clickable {
+            // With nothing typed there is nothing to cancel - unless Cancel is the way back out.
+            if (cancelAlways || fieldValue.text.isNotEmpty()) Text("Cancel", color = AppAccent, fontSize = 16.sp, modifier = Modifier.clickable {
                 focusManager.clearFocus()
                 keyboard?.hide()
                 onCancel()

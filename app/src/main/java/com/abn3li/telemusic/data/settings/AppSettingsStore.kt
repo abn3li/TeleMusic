@@ -296,7 +296,31 @@ class AppSettingsStore(context: Context) {
         _homeFeeds.value = updated
     }
 
+    // What was last searched for, newest first; Search shows them while its field is empty.
+    // Written only when a search is committed (the keyboard's Search key, or a result opened).
+    private val _recentSearches = MutableStateFlow(
+        prefs.getString(KEY_RECENT_SEARCHES, "").orEmpty().split('\n').filter { it.isNotBlank() }
+    )
+    val recentSearches: StateFlow<List<String>> = _recentSearches
+
+    fun addRecentSearch(query: String) {
+        val text = query.trim().replace('\n', ' ')
+        if (text.isEmpty() || _recentSearches.value.firstOrNull() == text) return
+        saveRecentSearches((listOf(text) + _recentSearches.value.filterNot { it.equals(text, true) }).take(MAX_RECENT_SEARCHES))
+    }
+
+    fun removeRecentSearch(query: String) = saveRecentSearches(_recentSearches.value - query)
+
+    fun clearRecentSearches() = saveRecentSearches(emptyList())
+
+    private fun saveRecentSearches(values: List<String>) {
+        prefs.edit().putString(KEY_RECENT_SEARCHES, values.joinToString("\n")).apply()
+        _recentSearches.value = values
+    }
+
     companion object {
+        private const val KEY_RECENT_SEARCHES = "recent_searches"
+        private const val MAX_RECENT_SEARCHES = 8
         private const val KEY_LYRICS_SOURCES_OFF = "lyrics_sources_off"
         private const val KEY_LYRICS_TRANSLATION_ENABLED = "lyrics_translation_enabled"
         private const val KEY_LYRICS_TRANSLATION_LANGUAGE = "lyrics_translation_language"

@@ -6,6 +6,8 @@ import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.draw.drawWithCache
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.zIndex
 import com.abn3li.telemusic.ui.theme.SystemBarsState
 import androidx.compose.runtime.SideEffect
@@ -110,6 +112,34 @@ private val EaseOutQuart = CubicBezierEasing(0.25f, 1f, 0.5f, 1f)
 private const val CONTROLS_AUTO_HIDE_MS = 2500L
 
 private fun lerpFloat(start: Float, stop: Float, fraction: Float) = start + (stop - start) * fraction
+
+/**
+ * A title that scrolls once when it's too long, dissolving at both ends instead of being cut. The
+ * text starts [fade] inside the scrolling strip, which reaches that far out to the left, so a
+ * resting title sits where it always did and is whole; only text that has scrolled past its
+ * starting edge, or runs off the far one, fades. Waits before moving so the start can be read.
+ */
+@OptIn(ExperimentalFoundationApi::class)
+private fun Modifier.softEdgedMarquee(fade: Dp = 16.dp): Modifier = this
+    .layout { measurable, constraints ->
+        val reach = fade.roundToPx()
+        val widest = if (constraints.hasBoundedWidth) constraints.maxWidth + reach else constraints.maxWidth
+        val placeable = measurable.measure(constraints.copy(maxWidth = widest))
+        layout((placeable.width - reach).coerceAtLeast(0), placeable.height) { placeable.placeRelative(-reach, 0) }
+    }
+    .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
+    .drawWithCache {
+        val edge = (fade.toPx() / size.width).coerceIn(0f, 0.5f)
+        val mask = Brush.horizontalGradient(
+            0f to Color.Transparent, edge to Color.Black, 1f - edge to Color.Black, 1f to Color.Transparent
+        )
+        onDrawWithContent {
+            drawContent()
+            drawRect(mask, blendMode = BlendMode.DstIn)
+        }
+    }
+    .basicMarquee(iterations = 1, initialDelayMillis = 1800)
+    .padding(horizontal = fade)
 
 /**
  * Places a layer between [from] (on screen, where the movement starts - the dock's artwork or
@@ -763,7 +793,7 @@ private fun PlayerPageArea(
                     overflow = TextOverflow.Ellipsis,
                     // A long title scrolls once, then rests: the scroll redraws the whole screen
                     // every frame (~45% CPU while it runs), so it shouldn't repeat.
-                    modifier = if (isExpanded && visualsActive) Modifier.basicMarquee(iterations = 1) else Modifier
+                    modifier = if (isExpanded && visualsActive) Modifier.softEdgedMarquee() else Modifier
                 )
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
