@@ -612,8 +612,6 @@ private fun QuickPicks(tracks: List<BrowseTrack>, onPlay: (List<BrowseTrack>, In
                             Text(track.title, color = if (current) AppAccent else ink, fontSize = 15.sp, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
                             Text(track.artist, color = if (current) AppAccent.copy(alpha = 0.75f) else ink.copy(alpha = 0.55f), fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         }
-                        Icon(Icons.Rounded.PlayArrow, contentDescription = null, tint = ink.copy(alpha = 0.45f),
-                            modifier = Modifier.padding(start = 8.dp).size(20.dp))
                     }
                     if (rowIndex < columns[column].lastIndex) Box(Modifier.fillMaxWidth().padding(start = 58.dp)
                         .height(1.dp).background(ink.copy(alpha = 0.07f)))

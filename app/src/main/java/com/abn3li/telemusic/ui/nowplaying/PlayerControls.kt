@@ -60,6 +60,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -73,6 +74,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
@@ -184,8 +186,21 @@ internal fun PlayerScrubber(
             },
             onInteraction = onInteraction
         )
-        AnimatedVisibility(!compact, enter = fadeIn() + expandVertically(), exit = fadeOut() + shrinkVertically()) {
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        // Compact drops this line's height at once and lets it fade out under the bar, so the
+        // controls change height in one step rather than over many frames.
+        val timesAlpha = animateFloatAsState(if (compact) 0f else 1f, tween(if (compact) 120 else 220), label = "scrubberTimes")
+        val timesShown by remember { derivedStateOf { timesAlpha.value > 0.01f } }
+        if (!compact || timesShown) {
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .layout { measurable, constraints ->
+                    val placeable = measurable.measure(constraints)
+                    layout(placeable.width, if (compact) 0 else placeable.height) { placeable.place(0, 0) }
+                }
+                .graphicsLayer { alpha = timesAlpha.value },
+            verticalAlignment = Alignment.CenterVertically
+        ) {
             Text(
                 formatMs(shownPositionMs),
                 color = Color.White.copy(alpha = 0.45f),
@@ -413,7 +428,7 @@ internal fun PlayerBottomRow(
             Icon(
                 if (outputName != null) Icons.Rounded.Headphones else Icons.Rounded.Airplay,
                 contentDescription = "Audio output",
-                tint = Color.White.copy(alpha = if (outputName != null) 0.9f else 0.5f),
+                tint = Color.White.copy(alpha = if (outputName != null) 1f else 0.85f),
                 modifier = Modifier.size(26.dp)
             )
             if (outputName != null) {
@@ -448,7 +463,7 @@ private fun BottomRowButton(
     val scale = rememberPressScale(interaction)
     val haptics = LocalHapticFeedback.current
     val pillAlpha by animateFloatAsState(if (active) 0.9f else 0f, label = "bottomRowPill")
-    val tintAlpha by animateFloatAsState(if (active) 1f else 0.5f, label = "bottomRowTint")
+    val tintAlpha by animateFloatAsState(if (active) 1f else 0.85f, label = "bottomRowTint")
     Box(modifier.height(40.dp), contentAlignment = Alignment.Center) {
         Box(
             Modifier

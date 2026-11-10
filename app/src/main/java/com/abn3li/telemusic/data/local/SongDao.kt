@@ -141,12 +141,13 @@ interface SongDao {
     @Query("SELECT * FROM songs WHERE isExplicitDownload = 1")
     fun observeDownloaded(): Flow<List<SongEntity>>
 
-    /** How many songs are in Liked, Telegram and Downloaded - the same filters as above, counted
+    /** How many songs are in Liked, Telegram, Downloaded and Local music - the same filters as their pages, counted
      * in one query instead of loading every row (the Library page's buttons). */
     @Query("""SELECT
         (SELECT COUNT(*) FROM songs WHERE isFavorite = 1) AS liked,
         (SELECT COUNT(*) FROM songs WHERE telegramFileId != 0) AS telegram,
-        (SELECT COUNT(*) FROM songs WHERE isExplicitDownload = 1) AS downloaded""")
+        (SELECT COUNT(*) FROM songs WHERE isExplicitDownload = 1) AS downloaded,
+        (SELECT COUNT(*) FROM songs WHERE isLocalImport = 1 AND localFilePath IS NOT NULL) AS local""")
     fun observeSmartPlaylistCounts(): Flow<SmartPlaylistCounts>
 
     @Query(

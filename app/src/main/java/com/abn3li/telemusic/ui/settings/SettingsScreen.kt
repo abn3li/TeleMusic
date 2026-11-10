@@ -328,7 +328,7 @@ fun SettingsScreen(
 
         // Everything else, one row per section; each opens its own page.
         item("sections") {
-            Spacer(Modifier.height(16.dp))
+            GroupHeader("Look and Playback")
             GroupCard {
                 SectionRow("Appearance", Icons.Rounded.DarkMode, TileGrey, themeMode.label) { openPage(SettingsPage.APPEARANCE) }
                 GroupDivider(start = 57.dp)
@@ -340,7 +340,7 @@ fun SettingsScreen(
                 GroupDivider(start = 57.dp)
                 SectionRow("Audio Quality", Icons.Rounded.GraphicEq, TileGreen) { openPage(SettingsPage.AUDIO) }
             }
-            Spacer(Modifier.height(16.dp))
+            GroupHeader("Library and Data")
             GroupCard {
                 SectionRow("Library", Icons.Rounded.LibraryMusic, TileBlue) { openPage(SettingsPage.LIBRARY) }
                 GroupDivider(start = 57.dp)
@@ -349,7 +349,7 @@ fun SettingsScreen(
                 GroupDivider(start = 57.dp)
                 SectionRow("Connection", Icons.Rounded.Dns, TileGreen, network.dns.displayName.substringBefore(" (")) { openPage(SettingsPage.CONNECTION) }
             }
-            Spacer(Modifier.height(16.dp))
+            GroupHeader("App")
             GroupCard {
                 SectionRow("About", Icons.Rounded.Info, TileGrey, "v$versionName") { openPage(SettingsPage.ABOUT) }
             }

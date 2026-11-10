@@ -31,6 +31,7 @@ import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.ui.draw.drawBehind
@@ -67,6 +68,7 @@ import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.GraphicsLayerScope
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.layout.onPlaced
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
@@ -98,6 +100,7 @@ import androidx.compose.ui.graphics.Outline
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.LayoutDirection
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
@@ -517,9 +520,26 @@ private fun NowPlayingContent(
                     enter = fadeIn(tween(260)) + expandVertically(tween(320, easing = EaseOutQuart), expandFrom = Alignment.Top),
                     exit = fadeOut(tween(200)) + shrinkVertically(tween(320, easing = EaseOutQuart), shrinkTowards = Alignment.Top)
                 ) {
+                    // The controls take their new height at once, so the page above them is laid
+                    // out a single time; the seek bar then glides from where it was to where it
+                    // now belongs as a layer move.
+                    val seekBarSlide = remember { Animatable(0f) }
+                    val controlsHeight = remember { intArrayOf(0) }
+                    val slideScope = rememberCoroutineScope()
                     Column(
                         Modifier
                             .fillMaxWidth()
+                            .onSizeChanged { size ->
+                                val before = controlsHeight[0]
+                                controlsHeight[0] = size.height
+                                if (before != 0 && before != size.height) {
+                                    // Undispatched: the bar is already offset when this frame draws.
+                                    slideScope.launch(start = CoroutineStart.UNDISPATCHED) {
+                                        seekBarSlide.snapTo(seekBarSlide.value + (size.height - before))
+                                        seekBarSlide.animateTo(0f, tween(320, easing = EaseOutQuart))
+                                    }
+                                }
+                            }
                             .graphicsLayer {
                                 val shown = easeOutCubic(transition.stage(REVEAL_START, REVEAL_END))
                                 alpha = shown
@@ -549,13 +569,18 @@ private fun NowPlayingContent(
                                         onClick = { onInteraction(); showQuality = true })
                                 }
                             },
+                            modifier = Modifier.graphicsLayer { translationY = seekBarSlide.value },
                             compact = compact)
                         AnimatedContent(
                             targetState = compact,
                             transitionSpec = {
-                                (fadeIn(tween(220, delayMillis = 60)) togetherWith fadeOut(tween(140)))
-                                    .using(SizeTransform(clip = false) { _, _ -> tween(320, easing = EaseOutQuart) })
+                                // The outgoing buttons fade where they stand and are gone before
+                                // the incoming ones show, so the two sets never sit on each other.
+                                (fadeIn(tween(200, delayMillis = 110)) togetherWith fadeOut(tween(120)))
+                                    .using(SizeTransform(clip = false) { _, _ -> snap() })
                             },
+                            // Both sets hang from the bottom edge, which is the one that stays put.
+                            contentAlignment = Alignment.BottomCenter,
                             label = "playerControls"
                         ) { isCompact ->
                             if (isCompact) {
@@ -705,7 +730,11 @@ private fun PlayerPageArea(
     // title so no empty band separates them: a square cover is shown up to 1.22 times taller than
     // wide, on a very tall screen the band comes back rather than trimming the sides further.
     val coverLift = WindowInsets.statusBars.asPaddingValues().calculateTopPadding() + 30.dp
-    val titleTop = (maxHeight - 96.dp).coerceAtLeast(8.dp)
+    // Lyrics and Queue make this area taller. The cover and title keep the place they had on the
+    // cover page while they fade, instead of following the new height down the screen.
+    val coverPageHeight = remember { arrayOf(maxHeight) }
+    if (page == PlayerPage.ARTWORK) coverPageHeight[0] = maxHeight
+    val titleTop = (coverPageHeight[0] - 96.dp).coerceAtLeast(8.dp)
     val coverHeight = minOf(maxWidth * 1.22f, coverLift + titleTop).coerceAtLeast(160.dp)
     val smallSide = 62.dp
     val smallLeft = 26.dp
@@ -740,10 +769,17 @@ private fun PlayerPageArea(
             .build()
     }
 
-    // Lyrics / Queue body, below the small header.
+    // Lyrics / Queue body, below the small header. Going back to the cover makes this area
+    // shorter at once; the body keeps the height it had while it fades, so its list neither
+    // shifts nor loses its lower part on the way out.
+    val listPageHeight = remember { arrayOf(maxHeight) }
+    if (page != PlayerPage.ARTWORK) listPageHeight[0] = maxHeight
+    val bodyHeight = if (page == PlayerPage.ARTWORK) maxOf(listPageHeight[0], maxHeight) else maxHeight
     Box(
         Modifier
-            .fillMaxSize()
+            .fillMaxWidth()
+            .wrapContentHeight(Alignment.Top, unbounded = true)
+            .height(bodyHeight)
             .padding(top = smallTop + smallSide + 8.dp)
             .graphicsLayer { alpha = morph.value }
     ) {

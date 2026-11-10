@@ -6,7 +6,9 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -49,7 +51,8 @@ fun LibraryHomeScreen(
     onOpenDownloads: () -> Unit,
     onOpenLocalMusic: () -> Unit,
     onOpenRecentlyAdded: () -> Unit,
-    onOpenYouTubePlaylist: (String, String, String?) -> Unit
+    onOpenYouTubePlaylist: (String, String, String?) -> Unit,
+    onOpenYouTubePlaylists: () -> Unit
 ) {
     val app = LocalContext.current.applicationContext as TgMusicApp
     val account by app.youtubeAccount.state.collectAsState()
@@ -88,15 +91,17 @@ fun LibraryHomeScreen(
         // Where the songs come from: the built-in playlists and the phone's own music.
         item("collections", contentType = "library_shortcuts") {
             Column(Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 22.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    LibraryCollectionButton("Liked", smartCounts.liked, SmartPlaylistKind.LIKED.icon(),
-                        { onOpenSmartPlaylist(SmartPlaylistKind.LIKED) }, Modifier.weight(1f))
-                    LibraryCollectionButton("Telegram", smartCounts.telegram, SmartPlaylistKind.TELEGRAM.icon(),
-                        { onOpenSmartPlaylist(SmartPlaylistKind.TELEGRAM) }, Modifier.weight(1f))
-                }
-                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    LibraryCollectionButton("Downloads", smartCounts.downloaded, Icons.Rounded.FileDownload, onOpenDownloads, Modifier.weight(1f))
-                    LibraryCollectionButton("Local music", null, Icons.Outlined.Folder, onOpenLocalMusic, Modifier.weight(1f))
+                // The sources that hold songs come first; an empty one steps back and dims.
+                val tiles = listOf(
+                    CollectionTile("Liked", smartCounts.liked, SmartPlaylistKind.LIKED.icon()) { onOpenSmartPlaylist(SmartPlaylistKind.LIKED) },
+                    CollectionTile("Telegram", smartCounts.telegram, SmartPlaylistKind.TELEGRAM.icon()) { onOpenSmartPlaylist(SmartPlaylistKind.TELEGRAM) },
+                    CollectionTile("Downloads", smartCounts.downloaded, Icons.Rounded.FileDownload, onOpenDownloads),
+                    CollectionTile("Local music", smartCounts.local, Icons.Outlined.Folder, onOpenLocalMusic)
+                ).sortedBy { it.count == 0 }
+                tiles.chunked(2).forEach { pair ->
+                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        pair.forEach { LibraryCollectionButton(it.label, it.count, it.icon, it.onClick, Modifier.weight(1f)) }
+                    }
                 }
             }
         }
@@ -132,7 +137,7 @@ fun LibraryHomeScreen(
             }
         }
         if (followedPlaylists.isNotEmpty()) {
-            item("youtube_header", contentType = "section_header") { LibraryShelfHeader("YouTube Playlists") }
+            item("youtube_header", contentType = "section_header") { LibraryShelfHeader("YouTube Playlists", onOpenYouTubePlaylists) }
             item("youtube_shelf", contentType = "playlist_shelf") {
                 LazyRow(Modifier.graphicsLayer(), contentPadding = PaddingValues(horizontal = 18.dp),
                     horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -159,6 +164,35 @@ fun LibraryHomeScreen(
     )
 }
 
+private class CollectionTile(val label: String, val count: Int, val icon: ImageVector, val onClick: () -> Unit)
+
+/** Every playlist of the signed-in YouTube Music account, as a grid: "See all" of the Library shelf. */
+@Composable
+fun LibraryYouTubePlaylistsScreen(onBack: () -> Unit, onOpenYouTubePlaylist: (String, String, String?) -> Unit) {
+    val app = LocalContext.current.applicationContext as TgMusicApp
+    // The Library page loaded the same list for its shelf, so this is answered from memory.
+    val playlists by produceState(emptyList<com.abn3li.telemusic.data.browse.BrowseCollection>()) {
+        value = app.discoveryRepository.accountPlaylists().orEmpty()
+    }
+    LargeTitleGrid(title = "YouTube Playlists", onBack = onBack) {
+        items(playlists, key = { it.browseId }) { playlist ->
+            Column(Modifier.fillMaxWidth().clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) {
+                onOpenYouTubePlaylist(playlist.browseId, playlist.title, playlist.params)
+            }) {
+                CoverTile(playlist.thumbnailUrl, Modifier.fillMaxWidth().aspectRatio(1f)
+                    .feedArtworkBorder(RoundedCornerShape(9.dp)), corner = 9,
+                    placeholder = if (playlist.browseId == "VLLM") Icons.Rounded.Star else Icons.AutoMirrored.Rounded.QueueMusic)
+                Spacer(Modifier.height(7.dp))
+                Text(playlist.title, color = ink, fontSize = 14.sp, fontWeight = FontWeight.Medium,
+                    maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Spacer(Modifier.height(2.dp))
+                Text(playlist.subtitle ?: "YouTube Music", color = ink.copy(alpha = 0.5f),
+                    fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+        }
+    }
+}
+
 @Composable
 private fun LibraryShelfHeader(title: String, onSeeAll: (() -> Unit)? = null) {
     // Same header as Home's shelves: one title size, one "See all" style, across the app.
@@ -178,18 +212,19 @@ private fun LibraryCategoryRow(icon: ImageVector, label: String, count: Int, onC
     }
 }
 
-/** A source of songs under the Library rows: red icon, name, and how many songs (when known). */
+/** A source of songs under the Library rows: icon, name, and how many songs; dimmed while it holds none. */
 @Composable
-private fun LibraryCollectionButton(label: String, count: Int?, icon: ImageVector, onClick: () -> Unit, modifier: Modifier) {
+private fun LibraryCollectionButton(label: String, count: Int, icon: ImageVector, onClick: () -> Unit, modifier: Modifier) {
     val shape = RoundedCornerShape(12.dp)
     Row(modifier.heightIn(min = 54.dp).border(0.75.dp, ink.copy(alpha = 0.18f), shape)
         .clip(shape).background(ink.copy(alpha = 0.025f)).clickable(onClick = onClick).padding(horizontal = 14.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically) {
-        Icon(icon, null, tint = AppAccent, modifier = Modifier.size(22.dp))
+        val empty = count == 0
+        Icon(icon, null, tint = if (empty) ink.copy(alpha = 0.35f) else AppAccent, modifier = Modifier.size(22.dp))
         Spacer(Modifier.width(11.dp))
-        Text(label, color = ink, fontSize = 15.sp, fontWeight = FontWeight.Medium, maxLines = 1,
+        Text(label, color = if (empty) ink.copy(alpha = 0.5f) else ink, fontSize = 15.sp, fontWeight = FontWeight.Medium, maxLines = 1,
             overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
-        if (count != null) Text(count.toString(), color = ink.copy(alpha = 0.45f), fontSize = 13.sp, modifier = Modifier.padding(start = 6.dp))
+        Text(count.toString(), color = ink.copy(alpha = if (empty) 0.3f else 0.45f), fontSize = 13.sp, modifier = Modifier.padding(start = 6.dp))
     }
 }
 

@@ -50,6 +50,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.outlined.ChatBubbleOutline
 import androidx.compose.material.icons.rounded.SwapHoriz
 import androidx.compose.material.icons.rounded.Translate
 import androidx.compose.foundation.layout.offset
@@ -253,7 +254,10 @@ internal fun LyricsPage(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.Center
             ) {
-                Text("No lyrics found", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+                Icon(androidx.compose.material.icons.Icons.Outlined.ChatBubbleOutline, contentDescription = null,
+                    tint = Color.White.copy(alpha = 0.35f), modifier = Modifier.size(40.dp))
+                Spacer(Modifier.height(14.dp))
+                Text("No lyrics for this song", color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
                 Spacer(Modifier.height(6.dp))
                 Text(
                     "Try again, or search with a different title and artist.",
@@ -426,6 +430,8 @@ private fun SyncedLyrics(
     val listState = rememberLazyListState()
     val cascade = remember(lines) { LyricCascade() }
     var autoFollow by remember { mutableStateOf(true) }
+    // The page opens already resting on the line being sung; only later lines glide into place.
+    val opened = remember(lines) { booleanArrayOf(false) }
     val latestOnInteraction by rememberUpdatedState(onUserInteraction)
     val haptics = LocalHapticFeedback.current
 
@@ -469,6 +475,12 @@ private fun SyncedLyrics(
         LaunchedEffect(activeIndex, autoFollow, active, selecting) {
             if (!active || !autoFollow || selecting || activeIndex < 0) return@LaunchedEffect
             val itemIndex = activeIndex + 1
+            if (!opened[0]) {
+                opened[0] = true
+                cascade.steps.clear()
+                listState.scrollToItem(itemIndex, -anchorPx.toInt())
+                return@LaunchedEffect
+            }
             val target = listState.layoutInfo.visibleItemsInfo.firstOrNull { it.index == itemIndex }
             if (target == null) {
                 cascade.steps.clear()

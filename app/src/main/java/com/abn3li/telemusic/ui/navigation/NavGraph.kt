@@ -70,6 +70,7 @@ import com.abn3li.telemusic.ui.library.LibraryCallbacks
 import com.abn3li.telemusic.ui.library.LibraryHomeScreen
 import com.abn3li.telemusic.ui.library.LibraryLocalMusicScreen
 import com.abn3li.telemusic.ui.library.LibraryRecentlyAddedScreen
+import com.abn3li.telemusic.ui.library.LibraryYouTubePlaylistsScreen
 import com.abn3li.telemusic.ui.library.LibraryPlaylistsScreen
 import com.abn3li.telemusic.ui.library.LibrarySongsScreen
 import com.abn3li.telemusic.ui.library.LibraryViewModel
@@ -88,7 +89,7 @@ import com.abn3li.telemusic.ui.theme.LocalPalette
 private val LibraryRoutes = setOf(
     Routes.LIBRARY, Routes.LIBRARY_SONGS, Routes.LIBRARY_ALBUMS, Routes.LIBRARY_ARTISTS, Routes.LIBRARY_PLAYLISTS,
     Routes.ALBUM, Routes.ARTIST, Routes.ARTIST_SONGS, Routes.PLAYLIST, Routes.SMART_PLAYLIST,
-    Routes.LIBRARY_LOCAL_MUSIC, Routes.LIBRARY_RECENTLY_ADDED, Routes.LIBRARY_SEARCH
+    Routes.LIBRARY_LOCAL_MUSIC, Routes.LIBRARY_RECENTLY_ADDED, Routes.LIBRARY_YOUTUBE_PLAYLISTS, Routes.LIBRARY_SEARCH
 )
 
 object Routes {
@@ -101,6 +102,7 @@ object Routes {
     const val LIBRARY_PLAYLISTS = "library/playlists"
     const val LIBRARY_LOCAL_MUSIC = "library/local_music"
     const val LIBRARY_RECENTLY_ADDED = "library/recently_added"
+    const val LIBRARY_YOUTUBE_PLAYLISTS = "library/youtube_playlists"
     const val LIBRARY_SEARCH = "library/search"
     const val ARTIST_SONGS = "artist_songs/{artist}"
     const val SETTINGS = "settings"
@@ -376,8 +378,14 @@ fun TgMusicNavGraph(navController: NavHostController = rememberNavController()) 
                         onOpenDownloads = { navController.navigate(Routes.smartPlaylist(SmartPlaylistKind.DOWNLOADED)) },
                         onOpenLocalMusic = { navController.navigate(Routes.LIBRARY_LOCAL_MUSIC) },
                         onOpenRecentlyAdded = { navController.navigate(Routes.LIBRARY_RECENTLY_ADDED) },
-                        onOpenYouTubePlaylist = { browseId, title, params -> navController.navigate(Routes.youtubeBrowse(browseId, title, params)) }
+                        onOpenYouTubePlaylist = { browseId, title, params -> navController.navigate(Routes.youtubeBrowse(browseId, title, params)) },
+                        onOpenYouTubePlaylists = { navController.navigate(Routes.LIBRARY_YOUTUBE_PLAYLISTS) }
                     )
+                }
+                composable(Routes.LIBRARY_YOUTUBE_PLAYLISTS) {
+                    LibraryYouTubePlaylistsScreen(libraryCallbacks.onBack) { browseId, title, params ->
+                        navController.navigate(Routes.youtubeBrowse(browseId, title, params))
+                    }
                 }
                 composable(Routes.LIBRARY_LOCAL_MUSIC) {
                     LibraryLocalMusicScreen(libraryViewModel, libraryCallbacks)
