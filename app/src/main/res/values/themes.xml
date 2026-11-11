@@ -8,8 +8,8 @@
          until the app's first frame is ready (no extra delay), then Theme.TgMusic takes over. -->
     <style name="Theme.TgMusic.Starting" parent="Theme.SplashScreen">
         <item name="windowSplashScreenBackground">@android:color/black</item>
-        <item name="windowSplashScreenAnimatedIcon">@drawable/splash_bars</item>
-        <item name="windowSplashScreenAnimationDuration">1000</item>
+        <item name="windowSplashScreenAnimatedIcon">@drawable/splash_logo</item>
+        <item name="windowSplashScreenAnimationDuration">1550</item>
         <item name="postSplashScreenTheme">@style/Theme.TgMusic</item>
     </style>
 </resources>

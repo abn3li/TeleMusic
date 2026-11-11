@@ -1,0 +1,160 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The loading screen's icon (Theme.TgMusic.Starting): the app's pink T on black. The top bar
+     opens out, the stem drops, then the note falls in, squashes as it lands and sends out three
+     sound rings. 288dp with no icon background, as Android's splash screen expects; everything
+     stays inside its middle 192dp circle. Before Android 12 it shows still, as the whole T.
+
+     The T is drawn in the same 1024 units as the launcher icon, scaled to 0.2 and placed so the
+     rings have room to spread around the note. -->
+<animated-vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt">
+    <aapt:attr name="android:drawable">
+        <vector
+            android:width="288dp" android:height="288dp"
+            android:viewportWidth="288" android:viewportHeight="288">
+            <group android:translateX="50" android:translateY="20" android:scaleX="0.2" android:scaleY="0.2">
+                <group android:name="ring1" android:pivotX="428" android:pivotY="738">
+                    <path android:name="ring1Line" android:strokeColor="#E64366" android:strokeWidth="12" android:strokeAlpha="0"
+                        android:pathData="M288,738 A140,140 0 1 0 568,738 A140,140 0 1 0 288,738 Z" />
+                </group>
+                <group android:name="ring2" android:pivotX="428" android:pivotY="738">
+                    <path android:name="ring2Line" android:strokeColor="#E64366" android:strokeWidth="12" android:strokeAlpha="0"
+                        android:pathData="M288,738 A140,140 0 1 0 568,738 A140,140 0 1 0 288,738 Z" />
+                </group>
+                <group android:name="ring3" android:pivotX="428" android:pivotY="738">
+                    <path android:name="ring3Line" android:strokeColor="#E64366" android:strokeWidth="12" android:strokeAlpha="0"
+                        android:pathData="M288,738 A140,140 0 1 0 568,738 A140,140 0 1 0 288,738 Z" />
+                </group>
+                <group android:name="bar" android:pivotX="512" android:pivotY="298">
+                    <path android:fillColor="#E64366" android:pathData="M310,250 H714 A48,48 0 0 1 714,346 H310 A48,48 0 0 1 310,250 Z" />
+                </group>
+                <group android:name="stem" android:pivotX="512" android:pivotY="296">
+                    <path android:fillColor="#E64366" android:pathData="M512,250 A46,46 0 0 1 558,296 V684 A46,46 0 0 1 466,684 V296 A46,46 0 0 1 512,250 Z" />
+                </group>
+                <group android:name="head" android:pivotX="428" android:pivotY="820">
+                    <group android:pivotX="428" android:pivotY="738" android:rotation="-22">
+                        <path android:name="headFill" android:fillColor="#E64366" android:pathData="M290,738 A138,104 0 1 1 566,738 A138,104 0 1 1 290,738 Z" />
+                    </group>
+                </group>
+            </group>
+        </vector>
+    </aapt:attr>
+
+    <!-- Top bar opens out from the middle. -->
+    <target android:name="bar">
+        <aapt:attr name="android:animation">
+            <objectAnimator android:propertyName="scaleX" android:valueFrom="0" android:valueTo="1"
+                android:duration="280" android:interpolator="@android:interpolator/decelerate_cubic" />
+        </aapt:attr>
+    </target>
+
+    <!-- Stem drops down from the bar. -->
+    <target android:name="stem">
+        <aapt:attr name="android:animation">
+            <set android:ordering="sequentially">
+                <objectAnimator android:propertyName="scaleY" android:valueFrom="0" android:valueTo="0" android:duration="150" />
+                <objectAnimator android:propertyName="scaleY" android:valueFrom="0" android:valueTo="1"
+                    android:duration="250" android:interpolator="@android:interpolator/fast_out_slow_in" />
+            </set>
+        </aapt:attr>
+    </target>
+
+    <!-- The note shows once it starts falling. -->
+    <target android:name="headFill">
+        <aapt:attr name="android:animation">
+            <set android:ordering="sequentially">
+                <objectAnimator android:propertyName="fillAlpha" android:valueFrom="0" android:valueTo="0" android:duration="330" />
+                <objectAnimator android:propertyName="fillAlpha" android:valueFrom="0" android:valueTo="1" android:duration="120" />
+            </set>
+        </aapt:attr>
+    </target>
+
+    <!-- Falls, squashes on landing, springs back and settles. -->
+    <target android:name="head">
+        <aapt:attr name="android:animation">
+            <set android:ordering="sequentially">
+                <set>
+                    <objectAnimator android:propertyName="translateY" android:valueFrom="-420" android:valueTo="-420" android:duration="330" />
+                    <objectAnimator android:propertyName="scaleX" android:valueFrom="0.6" android:valueTo="0.6" android:duration="330" />
+                    <objectAnimator android:propertyName="scaleY" android:valueFrom="0.6" android:valueTo="0.6" android:duration="330" />
+                </set>
+                <set>
+                    <objectAnimator android:propertyName="translateY" android:valueFrom="-420" android:valueTo="0"
+                        android:duration="230" android:interpolator="@android:interpolator/accelerate_quad" />
+                    <objectAnimator android:propertyName="scaleX" android:valueFrom="0.6" android:valueTo="1.25"
+                        android:duration="230" android:interpolator="@android:interpolator/accelerate_quad" />
+                    <objectAnimator android:propertyName="scaleY" android:valueFrom="0.6" android:valueTo="0.7"
+                        android:duration="230" android:interpolator="@android:interpolator/accelerate_quad" />
+                </set>
+                <set>
+                    <objectAnimator android:propertyName="scaleX" android:valueFrom="1.25" android:valueTo="0.9" android:duration="110" />
+                    <objectAnimator android:propertyName="scaleY" android:valueFrom="0.7" android:valueTo="1.12" android:duration="110" />
+                </set>
+                <set>
+                    <objectAnimator android:propertyName="scaleX" android:valueFrom="0.9" android:valueTo="1.04" android:duration="90" />
+                    <objectAnimator android:propertyName="scaleY" android:valueFrom="1.12" android:valueTo="0.97" android:duration="90" />
+                </set>
+                <set>
+                    <objectAnimator android:propertyName="scaleX" android:valueFrom="1.04" android:valueTo="1" android:duration="110" />
+                    <objectAnimator android:propertyName="scaleY" android:valueFrom="0.97" android:valueTo="1" android:duration="110" />
+                </set>
+            </set>
+        </aapt:attr>
+    </target>
+
+    <!-- Three sound rings spread from the note as it lands, each a little later. -->
+    <target android:name="ring1">
+        <aapt:attr name="android:animation">
+            <set>
+                <objectAnimator android:propertyName="scaleX" android:valueFrom="0.6" android:valueTo="2.5" android:startOffset="520"
+                    android:duration="750" android:interpolator="@android:interpolator/decelerate_quad" />
+                <objectAnimator android:propertyName="scaleY" android:valueFrom="0.6" android:valueTo="2.5" android:startOffset="520"
+                    android:duration="750" android:interpolator="@android:interpolator/decelerate_quad" />
+            </set>
+        </aapt:attr>
+    </target>
+    <target android:name="ring1Line">
+        <aapt:attr name="android:animation">
+            <set android:ordering="sequentially">
+                <objectAnimator android:propertyName="strokeAlpha" android:valueFrom="0" android:valueTo="0" android:duration="520" />
+                <objectAnimator android:propertyName="strokeAlpha" android:valueFrom="0.8" android:valueTo="0" android:duration="750" />
+            </set>
+        </aapt:attr>
+    </target>
+    <target android:name="ring2">
+        <aapt:attr name="android:animation">
+            <set>
+                <objectAnimator android:propertyName="scaleX" android:valueFrom="0.6" android:valueTo="2.5" android:startOffset="660"
+                    android:duration="750" android:interpolator="@android:interpolator/decelerate_quad" />
+                <objectAnimator android:propertyName="scaleY" android:valueFrom="0.6" android:valueTo="2.5" android:startOffset="660"
+                    android:duration="750" android:interpolator="@android:interpolator/decelerate_quad" />
+            </set>
+        </aapt:attr>
+    </target>
+    <target android:name="ring2Line">
+        <aapt:attr name="android:animation">
+            <set android:ordering="sequentially">
+                <objectAnimator android:propertyName="strokeAlpha" android:valueFrom="0" android:valueTo="0" android:duration="660" />
+                <objectAnimator android:propertyName="strokeAlpha" android:valueFrom="0.8" android:valueTo="0" android:duration="750" />
+            </set>
+        </aapt:attr>
+    </target>
+    <target android:name="ring3">
+        <aapt:attr name="android:animation">
+            <set>
+                <objectAnimator android:propertyName="scaleX" android:valueFrom="0.6" android:valueTo="2.5" android:startOffset="800"
+                    android:duration="750" android:interpolator="@android:interpolator/decelerate_quad" />
+                <objectAnimator android:propertyName="scaleY" android:valueFrom="0.6" android:valueTo="2.5" android:startOffset="800"
+                    android:duration="750" android:interpolator="@android:interpolator/decelerate_quad" />
+            </set>
+        </aapt:attr>
+    </target>
+    <target android:name="ring3Line">
+        <aapt:attr name="android:animation">
+            <set android:ordering="sequentially">
+                <objectAnimator android:propertyName="strokeAlpha" android:valueFrom="0" android:valueTo="0" android:duration="800" />
+                <objectAnimator android:propertyName="strokeAlpha" android:valueFrom="0.8" android:valueTo="0" android:duration="750" />
+            </set>
+        </aapt:attr>
+    </target>
+</animated-vector>

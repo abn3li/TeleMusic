@@ -33,7 +33,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         // The loading screen (Theme.TgMusic.Starting). On a cold start it stays until the first
-        // screen has its data, but at least SPLASH_MIN_MS - long enough for the bars to bounce
+        // screen has its data, but at least SPLASH_MIN_MS - long enough for the logo to land
         // instead of flashing past - and never more than SPLASH_MAX_MS. When the app was
         // already running (reopened from recents) it goes as soon as the screen is drawn.
         val splash = installSplashScreen()
