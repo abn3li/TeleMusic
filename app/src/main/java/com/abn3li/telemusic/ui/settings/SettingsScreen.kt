@@ -766,17 +766,11 @@ fun SettingsScreen(
     }
 
     availableUpdate?.let { update ->
-        AppAlert(
-            title = "Update Available",
-            message = update.title + "\n\n" + (update.notes?.trim()?.takeIf { it.isNotBlank() } ?: "A newer version is available on GitHub."),
-            onDismiss = { availableUpdate = null },
-            actions = listOf(
-                AlertAction("Later") { availableUpdate = null },
-                AlertAction("View", bold = true) {
-                    uriHandler.openUri(update.releaseUrl)
-                    availableUpdate = null
-                }
-            )
+        com.abn3li.telemusic.ui.update.UpdateDialog(
+            update = update,
+            currentVersion = versionName,
+            onUpdate = { uriHandler.openUri(update.releaseUrl); availableUpdate = null },
+            onLater = { availableUpdate = null }
         )
     }
 

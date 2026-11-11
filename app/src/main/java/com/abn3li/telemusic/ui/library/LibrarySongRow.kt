@@ -66,6 +66,7 @@ import androidx.compose.material.icons.rounded.Image
 import androidx.compose.material.icons.rounded.MicExternalOn
 import androidx.compose.material.icons.rounded.MusicNote
 import androidx.compose.material.icons.rounded.QueuePlayNext
+import androidx.compose.material.icons.rounded.Share
 import androidx.compose.material.icons.rounded.Star
 import androidx.compose.material.icons.rounded.StarBorder
 import androidx.compose.material3.Icon
@@ -498,6 +499,7 @@ private fun SongContextCard(
     val hasArtwork = song.listArtwork != null
     val album = song.album?.takeIf { it.isNotBlank() }
     val editing = LocalLibraryEditing.current
+    val context = LocalContext.current
 
     Column(
         Modifier
@@ -567,6 +569,10 @@ private fun SongContextCard(
                     if (song.isExplicitDownload) Icons.Rounded.CloudDone else Icons.Rounded.Download,
                     enabled = !song.isExplicitDownload && !downloading
                 ) { onAction { actions.onDownload(song) } }
+            }
+            if (song.hasShareableFile) {
+                CardDivider()
+                CardItem("Share Song File", Icons.Rounded.Share) { onAction { shareSongFile(context, song) } }
             }
             if (!hasArtwork) {
                 CardDivider()

@@ -27,6 +27,7 @@ import androidx.core.content.ContextCompat
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import com.abn3li.telemusic.ui.navigation.TgMusicNavGraph
 import com.abn3li.telemusic.ui.theme.TgMusicTheme
+import com.abn3li.telemusic.ui.update.StartupUpdatePrompt
 
 class MainActivity : ComponentActivity() {
     private val notificationRequest = registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
@@ -97,6 +98,7 @@ class MainActivity : ComponentActivity() {
                 Surface(modifier = Modifier.fillMaxSize()) {
                     TgMusicNavGraph()
                 }
+                StartupUpdatePrompt()
             }
         }
     }
