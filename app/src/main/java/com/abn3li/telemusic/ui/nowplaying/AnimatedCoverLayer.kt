@@ -175,7 +175,10 @@ private fun ClipPlayer(
         }
         var frameRateCapped = false
         val listener = object : Player.Listener {
+            // Fires again each time the clip loops back to its start; only the very first one
+            // holds the frame for the reveal, or every loop would stop the clip for good.
             override fun onRenderedFirstFrame() {
+                if (rendered) return
                 rendered = true
                 player.playWhenReady = false
             }
