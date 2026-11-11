@@ -64,12 +64,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.RectangleShape
-import androidx.compose.ui.graphics.TransformOrigin
-import androidx.compose.ui.graphics.GraphicsLayerScope
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.layout.onPlaced
 import androidx.compose.ui.layout.onSizeChanged
-import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
@@ -92,14 +87,7 @@ import com.abn3li.telemusic.data.local.SongEntity
 import com.abn3li.telemusic.data.local.displayArtwork
 import com.abn3li.telemusic.TgMusicApp
 import com.abn3li.telemusic.data.settings.PlayerEffects
-import androidx.compose.ui.geometry.CornerRadius
-import androidx.compose.ui.geometry.Rect
-import androidx.compose.ui.geometry.RoundRect
 import androidx.compose.ui.geometry.Size
-import androidx.compose.ui.graphics.Outline
-import androidx.compose.ui.graphics.Shape
-import androidx.compose.ui.unit.Density
-import androidx.compose.ui.unit.LayoutDirection
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
@@ -107,8 +95,12 @@ import kotlinx.coroutines.launch
 import java.io.File
 import kotlin.math.roundToInt
 
-/** Open/close motion of the whole player sheet - quick, no overshoot. */
-private val SHEET_TRANSITION_SPEC = spring<Float>(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = 550f)
+/** Opening and closing from a tap or Back: one even movement that starts gently and lands without
+ * a slow last stretch, so every staged part (see the constants below) gets real time on screen. */
+private val SHEET_OPEN_SPEC = tween<Float>(340, easing = CubicBezierEasing(0.3f, 0f, 0.15f, 1f))
+private val SHEET_CLOSE_SPEC = tween<Float>(300, easing = CubicBezierEasing(0.4f, 0f, 0.3f, 1f))
+/** Settling after a finger lets go mid-way: carries on from the finger's own speed, no overshoot. */
+private val SHEET_RELEASE_SPEC = spring<Float>(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = 550f)
 /** The artwork's move between the big cover and the small header on the Lyrics/Queue pages. */
 private val ARTWORK_MORPH_SPEC = spring<Float>(dampingRatio = 0.86f, stiffness = 360f)
 private val EaseOutQuart = CubicBezierEasing(0.25f, 1f, 0.5f, 1f)
@@ -144,66 +136,12 @@ private fun Modifier.softEdgedMarquee(fade: Dp = 16.dp): Modifier = this
     .basicMarquee(iterations = 1, initialDelayMillis = 1800)
     .padding(horizontal = fade)
 
-/**
- * Places a layer between [from] (on screen, where the movement starts - the dock's artwork or
- * title) and where it rests inside the card ([rest], card px), by [progress] of the opening;
- * [cardTop] is where the card's top edge is on screen. Scales from [startScale] (or [from]'s width
- * over the layer's), and with [squareClip] shows the layer as a rounded square at first, growing
- * to its whole height. False (and the layer left as it is) when there's nothing to fly from.
- */
-private fun GraphicsLayerScope.flyFrom(
-    from: Rect?, rest: FloatArray, progress: Float, cardTop: Float,
-    startScale: Float? = null, squareClip: Boolean = false, riseBy: Float = 0f
-): Boolean {
-    if (from == null || progress >= 0.999f || rest[0].isNaN() || size.width <= 0f) {
-        scaleX = 1f; scaleY = 1f; translationY = 0f
-        if (squareClip) { clip = false; shape = RectangleShape }
-        return false
-    }
-    // Sits exactly on the dock's copy (which rides up [riseBy] with the card's top edge) until
-    // that copy has faded out, then flies - the two are never seen apart, so never doubled.
-    val flight = flightProgress(progress)
-    val scale = lerpFloat(startScale ?: (from.width / size.width), 1f, flight)
-    transformOrigin = TransformOrigin(0f, 0f)
-    scaleX = scale
-    scaleY = scale
-    translationX = lerpFloat(from.left, rest[0], flight) - rest[0]
-    // Measured from the card's own top edge, so the flying copy stays inside the card as it grows
-    // (aimed at the screen, it outran the card's edge and was cut off).
-    translationY = lerpFloat(from.top - riseBy * progress - cardTop, rest[1], flight) - rest[1]
-    if (squareClip) {
-        shape = FlightClipShape(lerpFloat(size.width, size.height, flight), lerpFloat(8.dp.toPx(), 0f, flight) / scale)
-        clip = true
-    }
-    return true
-}
-
-/** How far the artwork has flown: it waits on the dock's copy for [FLIGHT_START] and lands at
- * [FLIGHT_END], so the cover is in place before the title and controls arrive. */
-private fun flightProgress(progress: Float): Float =
-    ((progress - FLIGHT_START) / (FLIGHT_END - FLIGHT_START)).coerceIn(0f, 1f)
-
-// The part of the opening the dock's artwork takes to fade away under its copy, and the point by
-// which the flying cover has landed in the player.
 // How much of the cover shows down its height: solid, then an S-curve to nothing. Straight lines
 // between a few stops left a visible edge where the fade stopped, so it eases out to flat instead.
 private const val COVER_FADE_START = 0.75f
 private val CoverFadeCurve: List<Pair<Float, Float>> = listOf(0f to 1f) + List(13) { i ->
     val t = i / 12f
     (COVER_FADE_START + (1f - COVER_FADE_START) * t) to 1f - t * t * t * (t * (t * 6f - 15f) + 10f)
-}
-
-private const val FLIGHT_START = 0.02f
-private const val FLIGHT_END = 0.44f
-
-/** The title and the controls arrive once the cover has landed, over this part of the opening. */
-private const val REVEAL_START = 0.55f
-private const val REVEAL_END = 0.88f
-
-/** The top [height] of a layer with rounded corners - the cover while it is still small. */
-private class FlightClipShape(private val height: Float, private val radius: Float) : Shape {
-    override fun createOutline(size: Size, layoutDirection: LayoutDirection, density: Density): Outline =
-        Outline.Rounded(RoundRect(0f, 0f, size.width, height.coerceAtMost(size.height), CornerRadius(radius)))
 }
 
 /**
@@ -216,11 +154,10 @@ fun PlayerSheetOverlay(
     viewModel: NowPlayingViewModel,
     // The movement, shared with the page behind and the dock (see PlayerTransition).
     transition: PlayerTransition,
-    bottomOffset: Dp = 84.dp,
     onOpenArtist: (String) -> Unit = {},
     onOpenAlbum: (String) -> Unit = {},
-    // The mini player (the dock): state, open, drag-to-open, drag released, its modifier.
-    miniPlayerContent: @Composable (NowPlayingUiState, () -> Unit, (Float) -> Unit, (Float) -> Unit, Modifier) -> Unit,
+    // The mini player (the dock): state, open, its modifier.
+    miniPlayerContent: @Composable (NowPlayingUiState, () -> Unit, Modifier) -> Unit,
     modifier: Modifier = Modifier
 ) = BoxWithConstraints(modifier.fillMaxSize()) {
     val stableState by viewModel.stableUiState.collectAsState()
@@ -229,38 +166,24 @@ fun PlayerSheetOverlay(
     val expansionFraction = transition.expansion
     var isExpanded by remember { mutableStateOf(false) }
 
-    val density = LocalDensity.current
     val parentHeightPx = constraints.maxHeight.toFloat()
-    // Where the card starts before the dock's player has been measured (it grows out of and
-    // shrinks back into the dock's own player once it has - see PlayerTransition.dockPlayer).
-    val miniHeightPx = with(density) { MiniPlayerBarHeight.toPx() }
-    val miniSidePx = with(density) { MiniPlayerSideMargin.toPx() }
-    val miniCornerPx = with(density) { MiniPlayerCorner.toPx() }
-    val miniTopPx = parentHeightPx - with(density) { bottomOffset.toPx() } - miniHeightPx
-    val cardShadowPx = with(density) { 18.dp.toPx() }
-    // The card's top edge on screen: from the dock's player up to the top of the screen.
-    val cardTop: () -> Float = {
-        lerpFloat(transition.origin?.player?.top ?: transition.dockPlayer?.top ?: miniTopPx, 0f, expansionFraction.value)
-    }
+    // Rounded at the top while it moves; square once it fills the screen.
+    val sheetShape = remember { RoundedCornerShape(topStart = 22.dp, topEnd = 22.dp) }
 
-    fun expand() {
-        if (!isExpanded) transition.captureOrigin()
+    // [releaseVelocity] (of the expansion, per second) when a finger let go: the movement then
+    // carries on at that speed instead of starting again from rest.
+    fun expand(releaseVelocity: Float? = null) {
         isExpanded = true
-        coroutineScope.launch { expansionFraction.animateTo(1f, SHEET_TRANSITION_SPEC) }
-    }
-    fun collapse() {
-        isExpanded = false
         coroutineScope.launch {
-            expansionFraction.animateTo(0f, SHEET_TRANSITION_SPEC)
-            if (!isExpanded) transition.clearOrigin()
+            if (releaseVelocity == null) expansionFraction.animateTo(1f, SHEET_OPEN_SPEC)
+            else expansionFraction.animateTo(1f, SHEET_RELEASE_SPEC, releaseVelocity)
         }
     }
-
-    // Closed again (by any path - a tap, a drag, back): the next opening measures the dock anew.
-    LaunchedEffect(isExpanded) {
-        if (!isExpanded) {
-            snapshotFlow { expansionFraction.value }.first { it <= 0.001f }
-            transition.clearOrigin()
+    fun collapse(releaseVelocity: Float? = null) {
+        isExpanded = false
+        coroutineScope.launch {
+            if (releaseVelocity == null) expansionFraction.animateTo(0f, SHEET_CLOSE_SPEC)
+            else expansionFraction.animateTo(0f, SHEET_RELEASE_SPEC, releaseVelocity)
         }
     }
 
@@ -275,78 +198,35 @@ fun PlayerSheetOverlay(
         state = stableState,
         viewModel = viewModel,
         expansionFraction = expansionFraction,
-        transition = transition,
-        cardTop = cardTop,
         screenHeightPx = parentHeightPx,
         isExpanded = isExpanded,
         onCollapse = { collapse() },
+        onDragRelease = { open, velocity -> if (open) expand(velocity) else collapse(velocity) },
         onOpenArtist = { artist -> collapse(); onOpenArtist(artist) },
         onOpenAlbum = { album -> collapse(); onOpenAlbum(album) },
         modifier = Modifier
+            // Above the dock: the rising player covers it.
+            .zIndex(1f)
             .fillMaxSize()
             .offset {
                 // Parked off-screen while collapsed so it never intercepts touches meant for the
-                // screen underneath. Applied before graphicsLayer so the layer itself moves -
-                // otherwise the layer's outline shadow stayed behind, drawing a faint ghost of the
-                // mini player's rectangle above the nav bar even with no song loaded.
+                // screen underneath.
                 if (expansionFraction.value <= 0.001f) IntOffset(0, parentHeightPx.roundToInt() + 100) else IntOffset.Zero
             }
             .graphicsLayer {
-                // The whole card is one layer: it starts as the dock's player capsule and grows to
-                // fill the screen. Content is laid out full size and revealed by the growing clip,
-                // riding up with the card's top edge.
+                // The whole player is one layer that slides up from the bottom edge of the screen,
+                // over the page and the dock, and back down again. Its content is laid out full
+                // size and simply rides with it, so every frame shows a finished player.
                 val progress = expansionFraction.value
-                val origin = transition.origin?.player ?: transition.dockPlayer
-                val originHeight = origin?.height ?: miniHeightPx
-                // The dock's player is a capsule; before it has been measured, the default shape.
-                val originCorner = if (origin != null) originHeight / 2f else miniCornerPx
-                val side = lerpFloat(origin?.left ?: miniSidePx, 0f, progress)
-                val right = lerpFloat(origin?.let { size.width - it.right } ?: miniSidePx, 0f, progress)
-                val cardHeight = lerpFloat(originHeight, size.height, progress)
-                translationY = cardTop()
-                shape = RevealCardShape(side, cardHeight, lerpFloat(originCorner, 0f, progress), right)
-                clip = true
-                shadowElevation = if (progress > 0.001f && progress < 0.999f) cardShadowPx else 0f
+                translationY = size.height * (1f - progress)
+                val moving = progress > 0.001f && progress < 0.999f
+                shape = if (moving) sheetShape else RectangleShape
+                clip = moving
             }
     )
     }
 
-    // Out of the way once mostly open, so its invisible bounds can't catch taps meant for the
-    // player's own header. The dock moves its own parts with the transition (see ClassicDock).
-    val miniModifier = Modifier
-        .align(Alignment.BottomCenter)
-        .offset {
-            if (expansionFraction.value >= 0.5f) IntOffset(0, parentHeightPx.roundToInt() + 100) else IntOffset.Zero
-        }
-    val onExpandDrag: (Float) -> Unit = { delta ->
-        if (expansionFraction.value <= 0.001f) transition.captureOrigin()
-        coroutineScope.launch {
-            expansionFraction.snapTo((expansionFraction.value - delta / parentHeightPx).coerceIn(0f, 1f))
-        }
-    }
-    val onExpandDragEnd: (Float) -> Unit = { velocity ->
-        if (velocity < -600f || expansionFraction.value > 0.25f) expand() else collapse()
-    }
-    miniPlayerContent(stableState, { expand() }, onExpandDrag, onExpandDragEnd, miniModifier)
-}
-
-/** Rounded-rect clip covering [height] px from the top, inset [side] px on both sides. */
-private class RevealCardShape(
-    private val side: Float,
-    private val height: Float,
-    private val radius: Float,
-    private val right: Float = side
-) : Shape {
-    override fun createOutline(size: Size, layoutDirection: LayoutDirection, density: Density): Outline =
-        Outline.Rounded(
-            RoundRect(
-                left = side,
-                top = 0f,
-                right = size.width - right,
-                bottom = height.coerceAtMost(size.height),
-                cornerRadius = CornerRadius(radius)
-            )
-        )
+    miniPlayerContent(stableState, { expand() }, Modifier.align(Alignment.BottomCenter))
 }
 
 @Composable
@@ -354,18 +234,16 @@ private fun NowPlayingContent(
     state: NowPlayingUiState,
     viewModel: NowPlayingViewModel,
     expansionFraction: Animatable<Float, *>,
-    transition: PlayerTransition,
-    cardTop: () -> Float,
     screenHeightPx: Float,
     isExpanded: Boolean,
     onCollapse: () -> Unit,
+    // A drag on the player let go: settle open or closed, from that speed (expansion per second).
+    onDragRelease: (open: Boolean, velocity: Float) -> Unit,
     onOpenArtist: (String) -> Unit,
     onOpenAlbum: (String) -> Unit,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
-    // The card's own layout, for where the cover and title rest inside it (see PlayerPageArea).
-    val cardCoordinates = remember { arrayOfNulls<LayoutCoordinates>(1) }
     val coroutineScope = rememberCoroutineScope()
     val effects by (context.applicationContext as TgMusicApp).settingsStore.playerEffects.collectAsState()
 
@@ -439,12 +317,12 @@ private fun NowPlayingContent(
             onDragEnd = {
                 val elapsedMs = (SystemClock.uptimeMillis() - gestureStartMs).coerceAtLeast(1L)
                 val averageVelocity = totalDragPx / (elapsedMs / 1000f)
-                coroutineScope.launch {
-                    if (expansionFraction.value < 0.6f || averageVelocity > 500f) onCollapse()
-                    else expansionFraction.animateTo(1f, SHEET_TRANSITION_SPEC)
-                }
+                onDragRelease(
+                    !(expansionFraction.value < 0.6f || averageVelocity > 500f),
+                    -averageVelocity / screenHeightPx
+                )
             },
-            onDragCancel = { coroutineScope.launch { expansionFraction.animateTo(1f, SHEET_TRANSITION_SPEC) } },
+            onDragCancel = { onDragRelease(true, 0f) },
             onVerticalDrag = { change, dragAmount ->
                 change.consume()
                 totalDragPx += dragAmount
@@ -455,7 +333,7 @@ private fun NowPlayingContent(
         )
     }
 
-    Box(modifier.onPlaced { cardCoordinates[0] = it }) {
+    Box(modifier) {
         Box(
             Modifier
                 .fillMaxSize()
@@ -486,7 +364,6 @@ private fun NowPlayingContent(
                 ) {
                     Box(
                         Modifier
-                            .graphicsLayer { alpha = transition.stage(0.7f, 1f) }
                             .size(width = 36.dp, height = 5.dp)
                             .clip(RoundedCornerShape(2.5.dp))
                             .background(Color.White.copy(alpha = 0.6f))
@@ -507,9 +384,6 @@ private fun NowPlayingContent(
                     onOpenOverflow = { overflowSong = state.song },
                     onOpenManualSearch = { showManualLyricsDialog = true },
                     onOpenLyricsSource = { showLyricsSourceDialog = true },
-                    transition = transition,
-                    cardTop = cardTop,
-                    cardCoordinates = cardCoordinates,
                     onCollapse = onCollapse,
                     onClipShowing = { clipShowing = it },
                     modifier = Modifier.weight(1f).fillMaxWidth()
@@ -539,11 +413,6 @@ private fun NowPlayingContent(
                                         seekBarSlide.animateTo(0f, tween(320, easing = EaseOutQuart))
                                     }
                                 }
-                            }
-                            .graphicsLayer {
-                                val shown = easeOutCubic(transition.stage(REVEAL_START, REVEAL_END))
-                                alpha = shown
-                                translationY = 12.dp.toPx() * (1f - shown)
                             }
                             .padding(horizontal = 26.dp)
                             .padding(top = 6.dp)
@@ -700,9 +569,6 @@ private fun PlayerPageArea(
     onOpenOverflow: () -> Unit,
     onOpenManualSearch: () -> Unit,
     onOpenLyricsSource: () -> Unit,
-    transition: PlayerTransition,
-    cardTop: () -> Float,
-    cardCoordinates: Array<LayoutCoordinates?>,
     // Closes the player before a suggestion's menu opens an artist or album page.
     onCollapse: () -> Unit,
     onClipShowing: (Boolean) -> Unit,
@@ -741,14 +607,6 @@ private fun PlayerPageArea(
     val smallTop = 10.dp
 
     val swipeThresholdPx = with(LocalDensity.current) { 72.dp.toPx() }
-    // Where the cover rests inside the card (px), for flying it out of the dock's artwork as the
-    // player opens - see flyFrom.
-    val coverRest = remember { floatArrayOf(Float.NaN, Float.NaN) }
-    fun rest(into: FloatArray): (LayoutCoordinates) -> Unit = { coordinates ->
-        cardCoordinates[0]?.takeIf { it.isAttached }?.localPositionOf(coordinates, Offset.Zero)?.let {
-            into[0] = it.x; into[1] = it.y
-        }
-    }
     var swipeOffset by remember { mutableFloatStateOf(0f) }
     val swipeSettle = animateFloatAsState(
         targetValue = swipeOffset,
@@ -811,15 +669,7 @@ private fun PlayerPageArea(
                 .then(dismissDrag),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Column(Modifier.weight(1f).padding(end = 14.dp)
-                .graphicsLayer {
-                    // Fades and rises into place once the cover has landed, instead of flying as a
-                    // scaled copy: a 14 -> 21 sp scaling text looked soft and, mid-flight, crossed
-                    // the growing cover.
-                    val reveal = easeOutCubic(transition.stage(REVEAL_START, REVEAL_END))
-                    alpha = reveal
-                    translationY = (1f - reveal) * 10.dp.toPx()
-                }) {
+            Column(Modifier.weight(1f).padding(end = 14.dp)) {
                 Text(
                     text = song?.title ?: "Not Playing",
                     color = Color.White,
@@ -853,7 +703,7 @@ private fun PlayerPageArea(
             }
             // Past the side margin by the space inside the button, so the ••• itself ends where the
             // seek bar does.
-            Box(Modifier.offset(x = 9.dp).graphicsLayer { alpha = easeOutCubic(transition.stage(REVEAL_START, REVEAL_END)) }) {
+            Box(Modifier.offset(x = 9.dp)) {
                 PlayerActionButtons(
                     isFavorite = song?.isFavorite == true,
                     overflowOpen = overflowOpen,
@@ -881,7 +731,7 @@ private fun PlayerPageArea(
                 .padding(horizontal = 26.dp)
                 .fillMaxWidth()
                 .height(26.dp)
-                .graphicsLayer { alpha = (1f - morph.value * 2f).coerceIn(0f, 1f) * easeOutCubic(transition.stage(REVEAL_START, REVEAL_END)) }
+                .graphicsLayer { alpha = (1f - morph.value * 2f).coerceIn(0f, 1f) }
         )
     }
 
@@ -946,34 +796,21 @@ private fun PlayerPageArea(
                 .offset(y = -coverLift)
                 .fillMaxWidth()
                 .height(coverHeight)
-                .onPlaced(rest(coverRest))
                 .graphicsLayer {
                     alpha = (1f - morph.value * 1.6f).coerceIn(0f, 1f)
-                    // Grows out of the dock's artwork as the player opens (a rounded square at
-                    // first, the full-width cover at the end) and shrinks back into it.
-                    val flying = flyFrom(transition.origin?.artwork, coverRest, transition.expansion.value, cardTop(),
-                        squareClip = true, riseBy = transition.origin?.player?.top ?: 0f)
-                    if (!flying) translationX = swipeSettle.value
+                    translationX = swipeSettle.value
                     // Offscreen, so the fade below can cut the picture's own alpha.
                     compositingStrategy = CompositingStrategy.Offscreen
                 }
                 .drawWithContent {
                     drawContent()
-                    // The fade into the player's colours comes in as the cover grows: the small
-                    // artwork it starts as is the whole picture.
-                    val flying = transition.origin?.artwork != null && transition.expansion.value < 0.999f
-                    // Early in the movement, so the cover's edge has softened before it is large.
-                    val fade = if (flying) easeOutCubic(flightProgress(transition.expansion.value)) else 1f
-                    // Over the part of the cover showing so far (a square while it is small), so its
-                    // bottom softens as it grows instead of ending in a hard edge.
-                    val shown = if (flying) lerpFloat(size.width, size.height, flightProgress(transition.expansion.value)).coerceAtMost(size.height) else size.height
                     drawRect(
                         Brush.verticalGradient(
                             colorStops = Array(CoverFadeCurve.size) { i ->
                                 val (position, shade) = CoverFadeCurve[i]
-                                position to Color.Black.copy(alpha = lerpFloat(1f, shade, fade))
+                                position to Color.Black.copy(alpha = shade)
                             },
-                            startY = 0f, endY = shown
+                            startY = 0f, endY = size.height
                         ),
                         blendMode = BlendMode.DstIn
                     )
@@ -1034,7 +871,6 @@ private fun PlayerPageArea(
             Box(
                 Modifier
                     .align(Alignment.TopCenter)
-                    .graphicsLayer { alpha = if (transition.origin?.artwork != null) transition.expansion.value else 1f }
                     .fillMaxWidth()
                     .height(coverLift + 24.dp)
                     .background(Brush.verticalGradient(listOf(Color.Black.copy(alpha = 0.32f), Color.Transparent)))

@@ -39,9 +39,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.draw.drawBehind
@@ -278,31 +275,17 @@ fun TgMusicNavGraph(navController: NavHostController = rememberNavController()) 
         onOpen = { c -> navController.navigate(Routes.youtubeBrowse(c.browseId, c.title, c.params)) },
         onPlay = playStreams, onPlayNext = { ids -> playerViewModel.playNext(ids) }
     ) {
-    // Black behind the page while it steps back under the opening player.
-    Box(Modifier.fillMaxSize().drawBehind { if (playerTransition.expansion.value.isPartlyOpen()) drawRect(Color.Black) }) {
+    Box(Modifier.fillMaxSize()) {
       // The status bar's gap is kept on the pages themselves (below), not here: the Scaffold clips
       // to its own bounds, and an artist / album / playlist page draws its artwork up behind
       // the status bar.
       val barsInsets = WindowInsets.systemBars.union(WindowInsets.displayCutout)
-      val pageCorner = with(LocalDensity.current) { 22.dp.toPx() }
-      val pageDrop = with(LocalDensity.current) { 10.dp.toPx() }
       Box(Modifier.fillMaxSize()
           .graphicsLayer {
-              // The page steps back as the player opens over it: a little smaller, lower, with
-              // rounded corners. A layer change only - the page itself isn't drawn again.
-              val progress = playerTransition.expansion.value
-              transformOrigin = TransformOrigin(0.5f, 0f)
-              val scale = 1f - 0.07f * progress
-              scaleX = scale
-              scaleY = scale
-              translationY = pageDrop * progress
-              if (progress > 0.001f) {
-                  shape = RoundedCornerShape(pageCorner * progress)
-                  clip = true
-              } else clip = false
-              // Fully under the open (opaque) player: not drawn at all. Drawing it anyway, frosted
-              // glass and all, put ~9 ms of GPU work in every player frame - past a 120 Hz frame.
-              alpha = if (progress >= FULLY_OPEN) 0f else 1f
+              // The page stays where it is while the player slides over it. Fully under the
+              // open (opaque) player it is not drawn at all: drawing it anyway, frosted glass
+              // and all, put ~9 ms of GPU work in every player frame - past a 120 Hz frame.
+              alpha = if (playerTransition.expansion.value >= FULLY_OPEN) 0f else 1f
           }
           .windowInsetsPadding(barsInsets.only(WindowInsetsSides.Horizontal + WindowInsetsSides.Bottom))) {
         Scaffold(
@@ -491,7 +474,7 @@ fun TgMusicNavGraph(navController: NavHostController = rememberNavController()) 
 
         DownloadLocationPrompt(app)
       }
-        // ...and darkens.
+        // The page darkens as the player slides over it.
         Box(Modifier.fillMaxSize().drawBehind {
             val progress = playerTransition.expansion.value
             if (progress.isPartlyOpen()) drawRect(Color.Black.copy(alpha = 0.55f * progress))
@@ -511,7 +494,7 @@ fun TgMusicNavGraph(navController: NavHostController = rememberNavController()) 
                 } else navController.navigate(Routes.artist(artist))
             },
             onOpenAlbum = { album -> navController.navigate(Routes.album(album)) },
-            miniPlayerContent = { state, expand, drag, dragEnd, miniModifier ->
+            miniPlayerContent = { state, expand, miniModifier ->
                 ClassicDock(
                     currentRoute = if (inLibrary) Routes.LIBRARY else currentRoute,
                     onNavigate = navigateTab,
@@ -520,8 +503,6 @@ fun TgMusicNavGraph(navController: NavHostController = rememberNavController()) 
                     state = state,
                     bottomInset = navBarInset,
                     onExpand = expand,
-                    onExpandDrag = drag,
-                    onExpandDragEnd = dragEnd,
                     onPlayPause = { playerViewModel.togglePlayPause() },
                     onNext = { playerViewModel.nextSong() },
                     onPrevious = { playerViewModel.previousSong() },
