@@ -1,5 +1,10 @@
 package com.abn3li.telemusic.ui.library
 
+import androidx.compose.material.icons.outlined.Timer
+import androidx.compose.material.icons.rounded.History
+import androidx.compose.material.icons.outlined.Equalizer
+import androidx.compose.material.icons.outlined.Album
+import androidx.compose.material.icons.outlined.Person
 import com.abn3li.telemusic.ui.theme.LocalPalette
 import com.abn3li.telemusic.ui.theme.paper
 import com.abn3li.telemusic.ui.theme.ink
@@ -14,6 +19,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.material.icons.rounded.Abc
 import androidx.compose.material.icons.rounded.PushPin
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.combinedClickable
@@ -204,7 +210,8 @@ internal fun SongListPage(
     indexDescending: Boolean = false,
     collectionKey: String = "list:$title",
     sortToken: String = "",
-    customSortIncluded: Boolean = false
+    customSortIncluded: Boolean = false,
+    emptyText: String = "No songs yet"
 ) {
     val editing = rememberLibraryEditing(collectionKey, sortToken)
     val orderedSongs = remember(songs, editing.order, editing.isCustom, editing.draft, editing.reordering) { editing.ordered(songs) }
@@ -272,9 +279,9 @@ internal fun SongListPage(
                 Box {
                     TitleBarCircleButton(contentDescription = "More", onClick = { menuOpen = true })
                     LibraryFloatingMenu(expanded = menuOpen, onDismiss = { menuOpen = false }) {
-                        EditingMenuItem(editing, songs) { menuOpen = false }
                         menu?.invoke { menuOpen = false }
                         if (!customSortIncluded) CustomSortMenuItem { menuOpen = false }
+                        EditingMenuItem(editing, songs) { menuOpen = false }
                     }
                 }
         },
@@ -290,7 +297,7 @@ internal fun SongListPage(
         if (shown.isEmpty()) {
             item("empty") {
                 Text(
-                    if (query.isBlank()) "No songs yet" else "No results",
+                    if (query.isBlank()) emptyText else "No results",
                     color = ink.copy(alpha = 0.55f),
                     fontSize = 17.sp,
                     modifier = Modifier.padding(horizontal = 20.dp, vertical = 18.dp)
@@ -322,7 +329,9 @@ fun LibrarySongsScreen(
     onOpenArtist: (String) -> Unit,
     onOpenAlbum: (String) -> Unit
 ) {
-    val songs by viewModel.tracks.collectAsState()
+    val allSongs by viewModel.tracks.collectAsState()
+    val filter by viewModel.songsFilter.collectAsState()
+    val songs = remember(allSongs, filter) { if (filter == SongsFilter.ALL) allSongs else allSongs.filter(filter::matches) }
     val sortField by viewModel.sortField.collectAsState()
     val ascending by viewModel.ascending.collectAsState()
     val showIndex by viewModel.showAlphabetIndex.collectAsState()
@@ -332,7 +341,7 @@ fun LibrarySongsScreen(
         SortField.TITLE -> { song -> song.title }
         SortField.ARTIST -> { song -> song.artist }
         SortField.ALBUM -> { song -> song.album.orEmpty() }
-        SortField.DATE_ADDED -> null
+        else -> null
     }
 
     SongListPage(
@@ -346,25 +355,51 @@ fun LibrarySongsScreen(
         indexDescending = !ascending,
         sortToken = "$sortField:$ascending",
         customSortIncluded = true,
+        emptyText = when (filter) {
+            SongsFilter.ALL -> "No songs yet"
+            SongsFilter.DOWNLOADED -> "No downloaded songs"
+            SongsFilter.TELEGRAM -> "No Telegram songs"
+            SongsFilter.YOUTUBE -> "No YouTube songs"
+            SongsFilter.DEVICE -> "No songs from this device"
+        },
         menu = { close ->
-            SortMenuItem("Title", Icons.Rounded.SortByAlpha, sortField == SortField.TITLE) { viewModel.selectSortField(SortField.TITLE); close() }
+            val custom = LocalLibraryEditing.current?.isCustom == true
+            val current = if (custom) "Custom" else sortField.label
+            LibrarySortMenu(current, gapBefore = false) {
+                SortMenuItem("Title", Icons.Rounded.SortByAlpha, sortField == SortField.TITLE) { viewModel.selectSortField(SortField.TITLE); close() }
+                LibraryMenuDivider()
+                SortMenuItem("Artist", Icons.Outlined.Person, sortField == SortField.ARTIST) { viewModel.selectSortField(SortField.ARTIST); close() }
+                LibraryMenuDivider()
+                SortMenuItem("Album", Icons.Outlined.Album, sortField == SortField.ALBUM) { viewModel.selectSortField(SortField.ALBUM); close() }
+                LibraryMenuDivider()
+                SortMenuItem("Recently Added", Icons.Rounded.Schedule, sortField == SortField.DATE_ADDED) { viewModel.selectSortField(SortField.DATE_ADDED); close() }
+                LibraryMenuDivider()
+                SortMenuItem("Most Played", Icons.Outlined.Equalizer, sortField == SortField.MOST_PLAYED) { viewModel.selectSortField(SortField.MOST_PLAYED); close() }
+                LibraryMenuDivider()
+                SortMenuItem("Recently Played", Icons.Rounded.History, sortField == SortField.RECENTLY_PLAYED) { viewModel.selectSortField(SortField.RECENTLY_PLAYED); close() }
+                LibraryMenuDivider()
+                SortMenuItem("Duration", Icons.Outlined.Timer, sortField == SortField.DURATION) { viewModel.selectSortField(SortField.DURATION); close() }
+                CustomSortMenuItem(close)
+                LibraryMenuGroupGap()
+                SortMenuItem("Ascending", Icons.Rounded.ArrowUpward, ascending) { viewModel.setAscending(true); close() }
+                LibraryMenuDivider()
+                SortMenuItem("Descending", Icons.Rounded.ArrowDownward, !ascending) { viewModel.setAscending(false); close() }
+                LibraryMenuGroupGap()
+                AlphabetIndexMenuItem(showIndex, usable = sortField.byName && !custom, unusableText = "Name sorts only") {
+                    viewModel.setShowAlphabetIndex(!showIndex); close()
+                }
+            }
             LibraryMenuDivider()
-            SortMenuItem("Artist", Icons.Rounded.Person, sortField == SortField.ARTIST) { viewModel.selectSortField(SortField.ARTIST); close() }
-            LibraryMenuDivider()
-            SortMenuItem("Album", Icons.Rounded.Album, sortField == SortField.ALBUM) { viewModel.selectSortField(SortField.ALBUM); close() }
-            LibraryMenuDivider()
-            SortMenuItem("Recently Added", Icons.Rounded.Schedule, sortField == SortField.DATE_ADDED) { viewModel.selectSortField(SortField.DATE_ADDED); close() }
-            CustomSortMenuItem(close)
-            LibraryMenuGroupGap()
-            SortMenuItem("Ascending", Icons.Rounded.ArrowUpward, ascending) { viewModel.setAscending(true); close() }
-            LibraryMenuDivider()
-            SortMenuItem("Descending", Icons.Rounded.ArrowDownward, !ascending) { viewModel.setAscending(false); close() }
-            LibraryMenuGroupGap()
-            LibraryMenuItem(
-                label = "Alphabet Index",
-                icon = if (showIndex) Icons.Rounded.Check else null,
-                selected = showIndex
-            ) { viewModel.setShowAlphabetIndex(!showIndex); close() }
+            LibrarySubmenu("Show", filter.label, gapBefore = false) {
+                // Counted only while this page of the menu is open.
+                val counts = remember(allSongs) { SongsFilter.entries.associateWith { f -> if (f == SongsFilter.ALL) allSongs.size else allSongs.count(f::matches) } }
+                SongsFilter.entries.forEachIndexed { i, f ->
+                    if (i == 1) LibraryMenuGroupGap() else if (i > 1) LibraryMenuDivider()
+                    LibraryMenuItem(f.label, null, checked = filter == f, detail = "${counts[f] ?: 0}") {
+                        viewModel.setSongsFilter(f); close()
+                    }
+                }
+            }
         }
     )
 }
@@ -372,8 +407,7 @@ fun LibrarySongsScreen(
 @Composable
 private fun SortMenuItem(label: String, icon: ImageVector, selected: Boolean, onClick: () -> Unit) {
     val editing = LocalLibraryEditing.current
-    LibraryMenuItem(label = label, icon = if (selected && editing?.isCustom != true) Icons.Rounded.Check else icon,
-        selected = selected && editing?.isCustom != true) { editing?.resetOrder(); onClick() }
+    LibraryMenuItem(label = label, icon = icon, checked = selected && editing?.isCustom != true) { editing?.resetOrder(); onClick() }
 }
 
 @Composable

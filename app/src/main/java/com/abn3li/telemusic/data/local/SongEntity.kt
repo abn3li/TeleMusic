@@ -74,7 +74,10 @@ data class SongEntity(
     val sourceSizeBytes: Long = 0L,
     val sourceMime: String? = null,
     val trackNumber: Int? = null,
-    val discNumber: Int? = null
+    val discNumber: Int? = null,
+    // How many times the song started playing (one per start, see stampLastPlayed); counts from
+    // the version that added it, so older plays aren't in it.
+    val playCount: Int = 0
 )
 
 /**

@@ -48,7 +48,13 @@ import kotlinx.coroutines.flow.emitAll
 import kotlinx.coroutines.sync.withLock
 import java.io.File
 
-enum class SortField(val label: String) { TITLE("Name"), ARTIST("Artist"), ALBUM("Album"), DATE_ADDED("Date added") }
+enum class SortField(val label: String, val startsAscending: Boolean) {
+    TITLE("Title", true), ARTIST("Artist", true), ALBUM("Album", true), DATE_ADDED("Recently Added", false),
+    MOST_PLAYED("Most Played", false), RECENTLY_PLAYED("Recently Played", false), DURATION("Duration", true);
+
+    /** Sorts by text, so the A to Z strip has letters to jump by. */
+    val byName get() = this == TITLE || this == ARTIST || this == ALBUM
+}
 
 // ~10 minutes at the 1s poll interval below - see markStreamedFileCached's own doc.
 private const val MAX_CACHE_POLL_ATTEMPTS = 600
@@ -1081,7 +1087,7 @@ class MusicRepository(
         } else File(path).takeIf { it.exists() }?.length()
     }.getOrNull()
 
-    /** [from]'s Like, playlist places, last play and Spotify link go to [to]; then [from] leaves
+    /** [from]'s Like, playlist places, last play, play count and Spotify link go to [to]; then [from] leaves
      * the library, its downloaded or cached file with it (never anything in Telegram). */
     private suspend fun moveOnto(from: SongEntity, to: SongEntity) {
         for (entry in playlistDao.getEntriesForSong(from.telegramMessageId)) {
@@ -1091,6 +1097,7 @@ class MusicRepository(
         playlistDao.moveCoverSong(from.telegramMessageId, to.telegramMessageId)
         if (from.isFavorite && !to.isFavorite) songDao.setFavorite(to.telegramMessageId, true)
         if (from.lastPlayedAtMillis > to.lastPlayedAtMillis) songDao.stampLastPlayed(to.telegramMessageId, from.lastPlayedAtMillis)
+        if (from.playCount > 0) songDao.addPlays(to.telegramMessageId, from.playCount)
         if (!from.album.isNullOrBlank()) songDao.setAlbumIfMissing(to.telegramMessageId, from.album)
         database.spotifyDao().remapSong(from.telegramMessageId, to.telegramMessageId)
         clearSong(from)
@@ -1757,6 +1764,10 @@ class MusicRepository(
         get() = settingsStore.showSongIndex
         set(value) { settingsStore.showSongIndex = value }
 
+    var songsFilter: String
+        get() = settingsStore.songsFilter
+        set(value) { settingsStore.songsFilter = value }
+
     // The player and the playback service both stamp a song as it starts. Each stamp is a write
     // to the songs table, and every such write makes the open screens re-read the whole library
     // and Home recompute - so the second stamp of the same start is dropped.
@@ -1769,7 +1780,7 @@ class MusicRepository(
         lastStampedSongId = song.telegramMessageId
         lastStampedAt = now
         // No library row to stamp: a YouTube song played from search or an album page.
-        if (songDao.stampLastPlayed(song.telegramMessageId, now) == 0) recordStreamPlayed(song, now)
+        if (songDao.markPlayed(song.telegramMessageId, now) == 0) recordStreamPlayed(song, now)
     }
 
     suspend fun getFreshFileIdForSong(song: SongEntity): Int {

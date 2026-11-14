@@ -212,6 +212,11 @@ class AppSettingsStore(context: Context) {
         get() = prefs.getBoolean(KEY_SHOW_SONG_INDEX, false)
         set(value) = prefs.edit().putBoolean(KEY_SHOW_SONG_INDEX, value).apply()
 
+    /** Which songs the Songs page shows (its ••• menu's Show): a SongsFilter name. */
+    var songsFilter: String
+        get() = prefs.getString("songs_filter", "ALL") ?: "ALL"
+        set(value) = prefs.edit().putString("songs_filter", value).apply()
+
     var hideDownloadedFromTracks: Boolean
         get() = prefs.getBoolean(KEY_HIDE_DOWNLOADED, false)
         set(value) = prefs.edit().putBoolean(KEY_HIDE_DOWNLOADED, value).apply()

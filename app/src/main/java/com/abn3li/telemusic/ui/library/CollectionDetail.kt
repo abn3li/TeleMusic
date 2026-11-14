@@ -1,5 +1,12 @@
 package com.abn3li.telemusic.ui.library
 
+import androidx.compose.material.icons.outlined.Delete
+import androidx.compose.material.icons.outlined.Image
+import androidx.compose.material.icons.outlined.VisibilityOff
+import androidx.compose.material.icons.outlined.Visibility
+import androidx.compose.material.icons.outlined.FileDownload
+import androidx.compose.material.icons.outlined.QueuePlayNext
+import androidx.compose.material.icons.outlined.Album
 import androidx.compose.runtime.CompositionLocalProvider
 import com.abn3li.telemusic.ui.download.NoResults
 import com.abn3li.telemusic.ui.download.heroTopInset
@@ -19,6 +26,7 @@ import com.abn3li.telemusic.ui.theme.LocalPalette
 import com.abn3li.telemusic.ui.theme.paper
 import com.abn3li.telemusic.ui.theme.ink
 import com.abn3li.telemusic.data.local.displayArtwork
+import androidx.compose.material.icons.rounded.Abc
 import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Check
@@ -201,23 +209,33 @@ fun AlbumDetailScreen(album: String, viewModel: LibraryViewModel, callbacks: Lib
         },
         menu = { close ->
             val editing = LocalLibraryEditing.current
-            LibraryMenuItem("Play Next", Icons.Rounded.QueuePlayNext) { list.forEach { callbacks.onPlayNext(it.telegramMessageId) }; close() }
+            LibraryMenuItem("Play Next", Icons.Outlined.QueuePlayNext) { list.forEach { callbacks.onPlayNext(it.telegramMessageId) }; close() }
+            val custom = editing?.isCustom == true
+            val current = when {
+                custom -> "Custom"
+                trackOrder -> "Track Order"
+                sortField == SortField.DATE_ADDED -> "Recently Added"
+                else -> "Title"
+            }
+            LibrarySortMenu(current) {
+                LibraryMenuItem("Track Order", Icons.Outlined.Album,
+                    checked = trackOrder && !custom) { editing?.resetOrder(); trackOrder = true; close() }
+                LibraryMenuDivider()
+                LibraryMenuItem("Title", Icons.Rounded.SortByAlpha,
+                    checked = !trackOrder && sortField == SortField.TITLE && !custom) { editing?.resetOrder(); trackOrder = false; sortField = SortField.TITLE; close() }
+                LibraryMenuDivider()
+                LibraryMenuItem("Recently Added", Icons.Rounded.Schedule,
+                    checked = !trackOrder && sortField == SortField.DATE_ADDED && !custom) { editing?.resetOrder(); trackOrder = false; sortField = SortField.DATE_ADDED; close() }
+                CustomSortMenuItem(close)
+                LibraryMenuGroupGap()
+                LibraryMenuItem("Ascending", Icons.Rounded.ArrowUpward, checked = ascending && !custom) { editing?.resetOrder(); ascending = true; close() }
+                LibraryMenuDivider()
+                LibraryMenuItem("Descending", Icons.Rounded.ArrowDownward, checked = !ascending && !custom) { editing?.resetOrder(); ascending = false; close() }
+            }
+        },
+        menuEnd = { close ->
             LibraryMenuGroupGap()
-            LibraryMenuItem("Track order", if (trackOrder && editing?.isCustom != true) Icons.Rounded.Check else Icons.Rounded.Album,
-                selected = trackOrder && editing?.isCustom != true) { editing?.resetOrder(); trackOrder = true; close() }
-            LibraryMenuDivider()
-            LibraryMenuItem("Title", if (!trackOrder && sortField == SortField.TITLE && editing?.isCustom != true) Icons.Rounded.Check else Icons.Rounded.SortByAlpha,
-                selected = !trackOrder && sortField == SortField.TITLE && editing?.isCustom != true) { editing?.resetOrder(); trackOrder = false; sortField = SortField.TITLE; close() }
-            LibraryMenuDivider()
-            LibraryMenuItem("Recently Added", if (!trackOrder && sortField == SortField.DATE_ADDED && editing?.isCustom != true) Icons.Rounded.Check else Icons.Rounded.Schedule,
-                selected = !trackOrder && sortField == SortField.DATE_ADDED && editing?.isCustom != true) { editing?.resetOrder(); trackOrder = false; sortField = SortField.DATE_ADDED; close() }
-            CustomSortMenuItem(close)
-            LibraryMenuGroupGap()
-            LibraryMenuItem("Ascending", Icons.Rounded.ArrowUpward, selected = ascending && editing?.isCustom != true) { editing?.resetOrder(); ascending = true; close() }
-            LibraryMenuDivider()
-            LibraryMenuItem("Descending", Icons.Rounded.ArrowDownward, selected = !ascending && editing?.isCustom != true) { editing?.resetOrder(); ascending = false; close() }
-            LibraryMenuGroupGap()
-            LibraryMenuItem("Delete Album", Icons.Rounded.Delete, destructive = true) { confirmDelete = true; close() }
+            LibraryMenuItem("Delete Album", Icons.Outlined.Delete, destructive = true) { confirmDelete = true; close() }
         }
     ) { shown, searching ->
         if (!searching && shown.isNotEmpty()) {
@@ -402,31 +420,34 @@ fun PlaylistDetailScreen(playlistId: Long, playlistName: String, viewModel: Libr
             scope.launch { repository.setPlaylistCoverSong(playlistId, song.telegramMessageId) }
         },
         menu = { close ->
-            LibraryMenuItem("Play Next", Icons.Rounded.QueuePlayNext) { list.forEach { callbacks.onPlayNext(it.telegramMessageId) }; close() }
-            LibraryMenuDivider()
-            LibraryMenuItem(
-                if (hidden) "Show in Songs" else "Hide from Songs",
-                if (hidden) Icons.Rounded.Visibility else Icons.Rounded.VisibilityOff
-            ) { scope.launch { repository.setPlaylistHiddenFromTracks(playlistId, !hidden) }; close() }
-            LibraryMenuDivider()
-            PinMenuItem(pinned) { viewModel.togglePin(playlistPinKey(playlistId)); close() }
-            LibraryMenuDivider()
-            LibraryMenuItem("Change Cover", Icons.Rounded.Image) { coverOptions = true; close() }
+            LibraryMenuItem("Play Next", Icons.Outlined.QueuePlayNext) { list.forEach { callbacks.onPlayNext(it.telegramMessageId) }; close() }
             if (downloadProgress != null) {
                 LibraryMenuDivider()
                 LibraryMenuItem(
-                    "Stop All (${downloadProgress.first + 1}/${downloadProgress.second})",
+                    "Stop All",
                     Icons.Rounded.Close,
-                    destructive = true
+                    destructive = true,
+                    detail = "${downloadProgress.first + 1}/${downloadProgress.second}"
                 ) { viewModel.stopPlaylistDownload(playlistId); close() }
             } else if (notDownloaded > 0) {
                 LibraryMenuDivider()
-                LibraryMenuItem("Download All ($notDownloaded)", Icons.Rounded.Download) {
+                LibraryMenuItem("Download All", Icons.Outlined.FileDownload, detail = "$notDownloaded") {
                     downloadGate.run { viewModel.downloadAllInPlaylist(playlistId, list) }; close()
                 }
             }
             LibraryMenuGroupGap()
-            LibraryMenuItem("Delete Playlist", Icons.Rounded.Delete, destructive = true) { confirmDelete = true; close() }
+            PinMenuItem(pinned) { viewModel.togglePin(playlistPinKey(playlistId)); close() }
+            LibraryMenuDivider()
+            LibraryMenuItem(
+                if (hidden) "Show in Songs" else "Hide from Songs",
+                if (hidden) Icons.Outlined.Visibility else Icons.Outlined.VisibilityOff
+            ) { scope.launch { repository.setPlaylistHiddenFromTracks(playlistId, !hidden) }; close() }
+            LibraryMenuDivider()
+            LibraryMenuItem("Change Cover", Icons.Outlined.Image) { coverOptions = true; close() }
+        },
+        menuEnd = { close ->
+            LibraryMenuGroupGap()
+            LibraryMenuItem("Delete Playlist", Icons.Outlined.Delete, destructive = true) { confirmDelete = true; close() }
         }
     )
     if (pickingCoverSong) CoverPickBar { pickingCoverSong = false }
@@ -511,7 +532,7 @@ private fun BoxScope.CoverPickBar(onCancel: () -> Unit) {
 private fun PinMenuItem(pinned: Boolean, onClick: () -> Unit) {
     LibraryMenuItem(
         if (pinned) "Unpin from Library" else "Pin to Library",
-        if (pinned) Icons.Rounded.PushPin else Icons.Outlined.PushPin,
+        Icons.Outlined.PushPin,
         onClick = onClick
     )
 }
@@ -580,18 +601,14 @@ fun SmartPlaylistDetailScreen(kind: SmartPlaylistKind, viewModel: LibraryViewMod
             }
         } else null,
         menu = { close ->
-            LibraryMenuItem("Play Next", Icons.Rounded.QueuePlayNext) { list.forEach { callbacks.onPlayNext(it.telegramMessageId) }; close() }
-            if (cachedTab) {
-                if (list.isNotEmpty()) {
-                    LibraryMenuDivider()
-                    LibraryMenuItem("Clear Cached Songs", Icons.Rounded.Delete, destructive = true) { confirmClear = true; close() }
-                }
-                return@PlaylistLikePage
-            }
+            LibraryMenuItem("Play Next", Icons.Outlined.QueuePlayNext) { list.forEach { callbacks.onPlayNext(it.telegramMessageId) }; close() }
+            if (cachedTab) return@PlaylistLikePage
+            LibraryMenuGroupGap()
+            PinMenuItem(pinned) { viewModel.togglePin(smartPinKey(kind)); close() }
             LibraryMenuDivider()
             LibraryMenuItem(
                 if (hidden) "Show in Songs" else "Hide from Songs",
-                if (hidden) Icons.Rounded.Visibility else Icons.Rounded.VisibilityOff
+                if (hidden) Icons.Outlined.Visibility else Icons.Outlined.VisibilityOff
             ) {
                 scope.launch {
                     when (kind) {
@@ -602,9 +619,11 @@ fun SmartPlaylistDetailScreen(kind: SmartPlaylistKind, viewModel: LibraryViewMod
                 }
                 close()
             }
-            LibraryMenuDivider()
-            PinMenuItem(pinned) { viewModel.togglePin(smartPinKey(kind)); close() }
-        }
+        },
+        menuEnd = if (cachedTab && list.isNotEmpty()) { close ->
+            LibraryMenuGroupGap()
+            LibraryMenuItem("Clear Cached Songs", Icons.Outlined.Delete, destructive = true) { confirmClear = true; close() }
+        } else null
     )
 
     if (confirmClear) {
@@ -684,18 +703,23 @@ private fun PlaylistLikePage(
     songSubtitle: ((SongEntity) -> String?)? = null,
     // Set on the Cached list: the song card offers Remove from Cache.
     onRemoveFromCache: ((SongEntity) -> Unit)? = null,
-    menu: @Composable ColumnScope.(close: () -> Unit) -> Unit
+    menu: @Composable ColumnScope.(close: () -> Unit) -> Unit,
+    menuEnd: (@Composable ColumnScope.(close: () -> Unit) -> Unit)? = null
 ) {
     val source = songs.orEmpty()
     val heroCovers = covers ?: remember(source) { autoPlaylistCovers(source) }
     var byTitle by rememberSaveable(collectionKey) { mutableStateOf(titleOrderByDefault) }
-    val list = remember(source, byTitle) {
-        when {
+    // Flips the chosen order. Title starts A to Z; the other order starts newest first.
+    var reversed by rememberSaveable(collectionKey) { mutableStateOf(false) }
+    val list = remember(source, byTitle, reversed) {
+        val sorted = when {
             byTitle == titleOrderByDefault -> source
             byTitle -> source.sortedWith(compareBy(String.CASE_INSENSITIVE_ORDER) { it.title })
             else -> source.sortedByDescending { it.addedAtMillis }
         }
+        if (reversed) sorted.asReversed() else sorted
     }
+    val ascending = if (byTitle) !reversed else reversed
     val showIndex by viewModel.showAlphabetIndex.collectAsState()
     val songActions = rememberLibrarySongActions(viewModel, callbacks.onPlayNext, callbacks.onOpenArtist, callbacks.onOpenAlbum)
     val actions = remember(songActions, onRemoveFromCache) { songActions.withRemoveFromCache(onRemoveFromCache) }
@@ -704,7 +728,7 @@ private fun PlaylistLikePage(
         actions = actions,
         collectionKey = collectionKey,
         customSortIncluded = true,
-        sortToken = byTitle.toString(),
+        sortToken = "$byTitle:$reversed",
         subtitle = null,
         onSubtitleClick = null,
         detailLine = detailLine ?: songCountLine(list),
@@ -715,22 +739,31 @@ private fun PlaylistLikePage(
         callbacks = callbacks,
         indexKey = if (showIndex && byTitle) { song -> song.title } else null,
         emptyText = emptyText,
+        menuEnd = menuEnd,
         menu = { close ->
             menu(close)
             val editing = LocalLibraryEditing.current
-            LibraryMenuGroupGap()
-            LibraryMenuItem("Title", if (byTitle && editing?.isCustom != true) Icons.Rounded.Check else Icons.Rounded.SortByAlpha,
-                selected = byTitle && editing?.isCustom != true) { editing?.resetOrder(); byTitle = true; close() }
-            LibraryMenuDivider()
-            LibraryMenuItem(recentLabel, if (!byTitle && editing?.isCustom != true) Icons.Rounded.Check else Icons.Rounded.Schedule,
-                selected = !byTitle && editing?.isCustom != true) { editing?.resetOrder(); byTitle = false; close() }
-            CustomSortMenuItem(close)
-            LibraryMenuGroupGap()
-            LibraryMenuItem(
-                label = "Alphabet Index",
-                icon = if (showIndex) Icons.Rounded.Check else null,
-                selected = showIndex
-            ) { viewModel.setShowAlphabetIndex(!showIndex); close() }
+            val custom = editing?.isCustom == true
+            LibrarySortMenu(if (custom) "Custom" else if (byTitle) "Title" else recentLabel) {
+                LibraryMenuItem("Title", Icons.Rounded.SortByAlpha,
+                    checked = byTitle && !custom) { editing?.resetOrder(); byTitle = true; reversed = false; close() }
+                LibraryMenuDivider()
+                LibraryMenuItem(recentLabel, Icons.Rounded.Schedule,
+                    checked = !byTitle && !custom) { editing?.resetOrder(); byTitle = false; reversed = false; close() }
+                CustomSortMenuItem(close)
+                LibraryMenuGroupGap()
+                LibraryMenuItem("Ascending", Icons.Rounded.ArrowUpward, checked = ascending && !custom) {
+                    editing?.resetOrder(); reversed = !byTitle; close()
+                }
+                LibraryMenuDivider()
+                LibraryMenuItem("Descending", Icons.Rounded.ArrowDownward, checked = !ascending && !custom) {
+                    editing?.resetOrder(); reversed = byTitle; close()
+                }
+                LibraryMenuGroupGap()
+                AlphabetIndexMenuItem(showIndex, usable = byTitle && !custom, unusableText = "Title only") {
+                    viewModel.setShowAlphabetIndex(!showIndex); close()
+                }
+            }
         }
     ) { shown, searching ->
         val ids = shown.map { it.telegramMessageId }
@@ -808,6 +841,8 @@ internal fun CollectionDetailPage(
     favorite: Boolean? = null,
     onFavorite: () -> Unit = {},
     menu: (@Composable ColumnScope.(close: () -> Unit) -> Unit)? = null,
+    // Rows after Reorder, at the very end of the menu (a red Delete).
+    menuEnd: (@Composable ColumnScope.(close: () -> Unit) -> Unit)? = null,
     // Set to show the A–Z strip (only for a title-sorted list): which text of a song it indexes.
     indexKey: ((SongEntity) -> String)? = null,
     // Under the Play / Shuffle buttons.
@@ -837,7 +872,7 @@ internal fun CollectionDetailPage(
     matches = { song, query -> song.title.contains(query, true) || song.artist.contains(query, true) || song.album.orEmpty().contains(query, true) },
     favorite = favorite,
     onFavorite = onFavorite,
-    menu = { close -> EditingMenuItem(editing, songs, close); menu?.invoke(this, close); if (!customSortIncluded) CustomSortMenuItem(close) },
+    menu = { close -> menu?.invoke(this, close); if (!customSortIncluded) CustomSortMenuItem(close); EditingMenuItem(editing, songs, close); menuEnd?.invoke(this, close) },
     indexKey = if (editing.active || editing.isCustom) null else indexKey,
     heroActions = { shown, openSearch ->
         val ids = remember(shown) { shown.map { it.telegramMessageId } }

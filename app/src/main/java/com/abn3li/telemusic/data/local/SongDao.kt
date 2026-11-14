@@ -200,6 +200,13 @@ interface SongDao {
     @Query("UPDATE songs SET lastPlayedAtMillis = :timestamp WHERE telegramMessageId = :id")
     suspend fun stampLastPlayed(id: Long, timestamp: Long): Int
 
+    /** A real play start: the time, and one more play. Same single write as the stamp alone. */
+    @Query("UPDATE songs SET lastPlayedAtMillis = :timestamp, playCount = playCount + 1 WHERE telegramMessageId = :id")
+    suspend fun markPlayed(id: Long, timestamp: Long): Int
+
+    @Query("UPDATE songs SET playCount = playCount + :plays WHERE telegramMessageId = :id")
+    suspend fun addPlays(id: Long, plays: Int)
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsert(song: SongEntity)
 

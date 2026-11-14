@@ -154,6 +154,13 @@ class LibraryViewModel(private val repository: MusicRepository) : ViewModel() {
         _showAlphabetIndex.value = show
     }
 
+    private val _songsFilter = MutableStateFlow(SongsFilter.entries.firstOrNull { it.name == repository.songsFilter } ?: SongsFilter.ALL)
+    val songsFilter: StateFlow<SongsFilter> = _songsFilter
+    fun setSongsFilter(filter: SongsFilter) {
+        repository.songsFilter = filter.name
+        _songsFilter.value = filter
+    }
+
     private val _pinnedKeys = MutableStateFlow(repository.pinnedPlaylists)
     val pinnedKeys: StateFlow<List<String>> = _pinnedKeys
 
@@ -178,7 +185,11 @@ class LibraryViewModel(private val repository: MusicRepository) : ViewModel() {
         _pinnedKeys.value = updated
     }
 
-    fun selectSortField(f: SortField) { _sortField.value = f }
+    // A new field starts in its natural direction (A to Z, newest or most played first).
+    fun selectSortField(f: SortField) {
+        if (f != _sortField.value) _ascending.value = f.startsAscending
+        _sortField.value = f
+    }
     fun setAscending(ascending: Boolean) { _ascending.value = ascending }
     fun toggleFavorite(song: SongEntity) = viewModelScope.launch { repository.setFavorite(song, !song.isFavorite) }
     fun addSongToPlaylist(playlistId: Long, song: SongEntity) = viewModelScope.launch { repository.addSongToPlaylist(playlistId, song) }
@@ -271,4 +282,21 @@ class LibraryViewModel(private val repository: MusicRepository) : ViewModel() {
      * since the dialog itself needs the found/not-found result to decide whether to dismiss. */
     suspend fun editSongAndFetchArtwork(song: SongEntity, title: String, artist: String): Boolean =
         repository.editSongAndFetchArtwork(song, title, artist)
+}
+
+/** Which songs the Songs page lists. */
+enum class SongsFilter(val label: String) {
+    ALL("All"),
+    DOWNLOADED("Downloaded"),
+    TELEGRAM("Telegram"),
+    YOUTUBE("YouTube"),
+    DEVICE("Device");
+
+    fun matches(song: SongEntity): Boolean = when (this) {
+        ALL -> true
+        DOWNLOADED -> song.isExplicitDownload || song.isLocalImport
+        TELEGRAM -> !song.isLocalImport && song.youtubeVideoId == null
+        YOUTUBE -> song.youtubeVideoId != null
+        DEVICE -> song.isLocalImport
+    }
 }

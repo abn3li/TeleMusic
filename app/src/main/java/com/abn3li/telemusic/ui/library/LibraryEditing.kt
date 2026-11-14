@@ -1,5 +1,7 @@
 package com.abn3li.telemusic.ui.library
 
+import androidx.compose.material.icons.rounded.CheckCircleOutline
+import androidx.compose.material.icons.rounded.SwapVert
 import android.content.Context
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animateFloatAsState
@@ -169,8 +171,13 @@ internal fun rememberLibraryEditing(key: String, sortToken: String = ""): Librar
 
 @Composable
 internal fun EditingMenuItem(edit: LibraryEditing, songs: List<SongEntity>, close: () -> Unit) {
-    LibraryMenuItem("Reorder", Icons.Rounded.DragHandle) { close(); if (songs.isNotEmpty()) edit.pendingReorder = songs }
     LibraryMenuDivider()
+    LibraryMenuItem("Select", Icons.Rounded.CheckCircleOutline) {
+        close()
+        if (songs.isNotEmpty()) { edit.selected = emptySet(); edit.selecting = true }
+    }
+    LibraryMenuDivider()
+    LibraryMenuItem("Reorder", Icons.Rounded.SwapVert) { close(); if (songs.isNotEmpty()) edit.pendingReorder = songs }
 }
 
 @Composable
@@ -178,7 +185,7 @@ internal fun CustomSortMenuItem(close: () -> Unit) {
     val edit = LocalLibraryEditing.current ?: return
     if (edit.order.isEmpty()) return
     LibraryMenuDivider()
-    LibraryMenuItem("Custom", if (edit.isCustom) Icons.Rounded.Check else null, selected = edit.isCustom) {
+    LibraryMenuItem("Custom", Icons.Rounded.SwapVert, checked = edit.isCustom) {
         edit.useCustomOrder()
         close()
     }

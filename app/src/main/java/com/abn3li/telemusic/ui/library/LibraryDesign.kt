@@ -1,5 +1,8 @@
 package com.abn3li.telemusic.ui.library
 
+import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.border
 
 import com.abn3li.telemusic.ui.theme.SystemBarsState
@@ -66,6 +69,19 @@ import androidx.compose.material.icons.rounded.Shuffle
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.material.icons.rounded.Abc
+import com.abn3li.telemusic.ui.theme.MENU_DIM
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.animateContentSize
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.layout.boundsInWindow
+import androidx.compose.ui.layout.onPlaced
+import androidx.compose.ui.layout.LayoutCoordinates
+import androidx.compose.material.icons.rounded.Check
+import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
@@ -574,6 +590,9 @@ internal fun LibraryFloatingMenu(
 ) {
     var keep by remember { mutableStateOf(false) }
     var show by remember { mutableStateOf(false) }
+    // Where the button's Box sits: kept in a plain holder (no recomposition), read on open.
+    val anchor = remember { arrayOfNulls<LayoutCoordinates>(1) }
+    Spacer(Modifier.onPlaced { anchor[0] = it })
     LaunchedEffect(expanded) {
         if (expanded) {
             keep = true
@@ -586,67 +605,197 @@ internal fun LibraryFloatingMenu(
         }
     }
     if (!keep) return
-    val offsetY = offsetYPx ?: with(LocalDensity.current) { 40.dp.roundToPx() }
+    val density = LocalDensity.current
+    val bounds = remember { anchor[0]?.parentLayoutCoordinates?.takeIf { it.isAttached }?.boundsInWindow() }
+    val offsetY = offsetYPx ?: with(density) { 40.dp.roundToPx() }
     val origin = TransformOrigin(if (alignStart) 0.05f else 0.95f, 0f)
-    Popup(
-        alignment = if (alignStart) Alignment.TopStart else Alignment.TopEnd,
-        offset = IntOffset(0, offsetY),
-        onDismissRequest = onDismiss,
-        properties = PopupProperties(focusable = true)
-    ) {
-        val spec = spring<Float>(dampingRatio = 0.7f, stiffness = 340f)
-        AnimatedVisibility(
-            visible = show,
-            enter = fadeIn(spec) + scaleIn(spec, initialScale = 0.618f, transformOrigin = origin),
-            exit = fadeOut(spec) + scaleOut(spec, targetScale = 0.618f, transformOrigin = origin)
+    // The page under the menu dims with it, system bars included (as the song menus do).
+    val dim by animateFloatAsState(if (show) MENU_DIM else 0f, tween(if (show) 140 else 200), label = "pullDownDim")
+    DisposableEffect(show) {
+        SystemBarsState.menuOpen = show
+        onDispose { SystemBarsState.menuOpen = false }
+    }
+    ContextMenuLayer(onDismissRequest = onDismiss) {
+        BoxWithConstraints(
+            Modifier
+                .fillMaxSize()
+                .drawBehind { drawRect(Color.Black.copy(alpha = dim)) }
+                .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onDismiss)
         ) {
-            Column(
-                Modifier
-                    .width(250.dp)
-                    .graphicsLayer {
-                        shape = RoundedCornerShape(12.dp)
-                        clip = true
-                    }
-                    .background(LocalPalette.current.alert)
-                    .border(0.5.dp, ink.copy(alpha = 0.12f), RoundedCornerShape(12.dp)),
-                content = content
-            )
+            val menuWidth = 224.dp
+            val margin = 8.dp
+            val left = with(density) {
+                val b = bounds
+                val x = when {
+                    b == null -> maxWidth - menuWidth - margin
+                    alignStart -> b.left.toDp()
+                    else -> b.right.toDp() - menuWidth
+                }
+                x.coerceIn(margin, (maxWidth - menuWidth - margin).coerceAtLeast(margin))
+            }
+            val top = with(density) { ((bounds?.top ?: 0f) + offsetY).toDp() }
+            val spec = spring<Float>(dampingRatio = 0.7f, stiffness = 340f)
+            AnimatedVisibility(
+                visible = show,
+                enter = fadeIn(spec) + scaleIn(spec, initialScale = 0.618f, transformOrigin = origin),
+                exit = fadeOut(spec) + scaleOut(spec, targetScale = 0.618f, transformOrigin = origin),
+                modifier = Modifier.offset(x = left, y = top)
+            ) {
+                val nav = remember { MenuNav() }
+                CompositionLocalProvider(LocalMenuNav provides nav) {
+                    Column(
+                        Modifier
+                            .width(menuWidth)
+                            .graphicsLayer {
+                                shape = RoundedCornerShape(13.dp)
+                                clip = true
+                            }
+                            .background(LocalPalette.current.alert)
+                            .border(0.5.dp, ink.copy(alpha = 0.12f), RoundedCornerShape(13.dp))
+                            // Taps between rows stay in the menu instead of closing it (a gesture,
+                            // not a clickable, so TalkBack still reaches each row on its own).
+                            .pointerInput(Unit) { detectTapGestures { } }
+                            .animateContentSize(spring(dampingRatio = 0.86f, stiffness = 520f)),
+                        content = content
+                    )
+                }
+            }
         }
     }
 }
 
+/** Which page of the open pull-down shows: the main rows (null), or one submenu by its title. */
+internal class MenuNav {
+    var page by mutableStateOf<String?>(null)
+}
+
+internal val LocalMenuNav = staticCompositionLocalOf<MenuNav?> { null }
+private val LocalMenuPage = staticCompositionLocalOf<String?> { null }
+
+/** False for rows of the page that isn't showing. */
+@Composable
+private fun menuRowShown(): Boolean {
+    val nav = LocalMenuNav.current ?: return true
+    return nav.page == LocalMenuPage.current
+}
+
+/** The Sort by row and its page of choices (see [LibrarySubmenu]). */
+@Composable
+internal fun LibrarySortMenu(current: String, gapBefore: Boolean = true, choices: @Composable () -> Unit) =
+    LibrarySubmenu("Sort by", current, gapBefore, choices)
+
+/**
+ * One "Sort by" row showing the current choice ([current]); tapping it swaps the menu to
+ * [choices] under a back row. A pick there closes the menu as usual.
+ */
+@Composable
+internal fun LibrarySubmenu(title: String, current: String, gapBefore: Boolean = true, choices: @Composable () -> Unit) {
+    val nav = LocalMenuNav.current
+    if (nav == null || nav.page == null) {
+        if (gapBefore) LibraryMenuGroupGap()
+        if (nav == null) return
+        Row(
+            Modifier.fillMaxWidth().height(40.dp).clickable { nav.page = title }.padding(horizontal = 14.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(title, color = ink, fontSize = 15.sp)
+            Text(current, color = ink.copy(alpha = 0.5f), fontSize = 13.5.sp, textAlign = TextAlign.End, maxLines = 1,
+                overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f).padding(start = 10.dp, end = 6.dp))
+            Icon(Icons.AutoMirrored.Rounded.ArrowForwardIos, null, tint = ink.copy(alpha = 0.45f), modifier = Modifier.size(12.dp))
+        }
+        return
+    }
+    if (nav.page != title) return
+    // Back steps out of the choices first; a second Back closes the menu.
+    BackHandler { nav.page = null }
+    Row(
+        Modifier.fillMaxWidth().height(40.dp).clickable { nav.page = null }.padding(horizontal = 12.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(Icons.AutoMirrored.Rounded.ArrowBackIos, "Back", tint = ink.copy(alpha = 0.5f), modifier = Modifier.size(13.dp))
+        Spacer(Modifier.width(6.dp))
+        Text(title, color = ink, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+    }
+    CompositionLocalProvider(LocalMenuPage provides title) {
+        LibraryMenuGroupGap()
+        choices()
+    }
+}
+
+/**
+ * A pull-down row. [checked] non-null makes it a choice, with the check before the label (the
+ * row's own [icon] stays at the end). [detail] is gray text after the label (a count); a row
+ * that can't be used now is dimmed and shows [detail] in place of its icon.
+ */
 @Composable
 internal fun LibraryMenuItem(
     label: String,
     icon: ImageVector?,
-    selected: Boolean = false,
+    checked: Boolean? = null,
     destructive: Boolean = false,
+    detail: String? = null,
+    enabled: Boolean = true,
     onClick: () -> Unit
 ) {
-    val color = when {
-        destructive -> Color(0xFFFF453A)
-        selected -> AppAccent
-        else -> ink
-    }
+    if (!menuRowShown()) return
+    val base = if (destructive) Color(0xFFFF453A) else ink
+    val color = if (enabled) base else base.copy(alpha = 0.35f)
     Row(
         Modifier
             .fillMaxWidth()
-            .height(48.dp)
-            .clickable(onClick = onClick)
-            .padding(horizontal = 18.dp),
+            .height(40.dp)
+            .clickable(enabled = enabled, onClick = onClick)
+            .padding(start = if (checked != null) 9.dp else 14.dp, end = 14.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Text(label, color = color, fontSize = 17.sp, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
-        if (icon != null) Icon(icon, contentDescription = null, tint = color, modifier = Modifier.size(22.dp))
+        if (checked != null) {
+            Box(Modifier.width(24.dp)) {
+                if (checked) Icon(Icons.Rounded.Check, contentDescription = "Selected", tint = color, modifier = Modifier.size(16.dp))
+            }
+        }
+        Row(Modifier.weight(1f).padding(end = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text(label, color = color, fontSize = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
+            if (detail != null && enabled) Text(detail, color = ink.copy(alpha = 0.45f), fontSize = 14.sp, maxLines = 1, modifier = Modifier.padding(start = 6.dp))
+        }
+        if (!enabled && detail != null) Text(detail, color = color, fontSize = 12.sp, maxLines = 1)
+        else if (icon != null) Icon(icon, contentDescription = null, tint = color, modifier = Modifier.size(18.dp))
     }
+}
+
+/** The small gray title over a group of choices. */
+@Composable
+internal fun LibraryMenuHeader(text: String) {
+    if (!menuRowShown()) return
+    Text(
+        text,
+        color = ink.copy(alpha = 0.5f),
+        fontSize = 12.sp,
+        modifier = Modifier.fillMaxWidth().padding(start = 14.dp, end = 14.dp, top = 7.dp, bottom = 6.dp)
+    )
+    LibraryMenuDivider()
 }
 
 @Composable
 internal fun LibraryMenuDivider() {
-    Spacer(Modifier.fillMaxWidth().height(0.65.dp).background(ink.copy(alpha = 0.1f)))
+    if (!menuRowShown()) return
+    Spacer(Modifier.fillMaxWidth().height(0.5.dp).background(ink.copy(alpha = 0.12f)))
 }
 
 @Composable
 internal fun LibraryMenuGroupGap() {
-    Spacer(Modifier.fillMaxWidth().height(8.dp).background(Color.Black.copy(alpha = if (LocalPalette.current.isLight) 0.06f else 0.55f)))
+    if (!menuRowShown()) return
+    Spacer(Modifier.fillMaxWidth().height(6.dp).background(Color.Black.copy(alpha = if (LocalPalette.current.isLight) 0.06f else 0.4f)))
+}
+
+/** The A to Z strip switch; dimmed with [unusableText] while the order has no letters to jump by. */
+@Composable
+internal fun AlphabetIndexMenuItem(showIndex: Boolean, usable: Boolean, unusableText: String, onToggle: () -> Unit) {
+    LibraryMenuItem(
+        label = "Alphabet Index",
+        icon = Icons.Rounded.Abc,
+        checked = showIndex && usable,
+        detail = if (usable) null else unusableText,
+        enabled = usable,
+        onClick = onToggle
+    )
 }
