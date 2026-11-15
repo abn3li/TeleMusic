@@ -23,6 +23,8 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.ui.layout.LocalPinnableContainer
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -67,6 +69,9 @@ internal fun AppAlert(
     content: (@Composable ColumnScope.() -> Unit)? = null
 ) {
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        // Opened from a list row, the window would inherit that row's pin: a focused field here
+        // pins the row, and closing the window releases it twice and crashes. Keep it unpinned.
+        CompositionLocalProvider(LocalPinnableContainer provides null) {
         Column(
             Modifier
                 .width(290.dp)
@@ -100,6 +105,7 @@ internal fun AppAlert(
                     AlertButton(action, Modifier.fillMaxWidth())
                 }
             }
+        }
         }
     }
 }

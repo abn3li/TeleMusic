@@ -140,7 +140,9 @@
     "lib/x86_64/libsqlite3_python.so": "909cccb83a9e8fe07a84bb1539a18e4197fdd7efc83dcd51bf74476f45034e24",
     "lib/x86_64/libssl_chaquopy.so": "4a3f2907be854faf1a7def9209489e65045a0a52fb1080aa6b0af85feac34fee",
     "lib/x86_64/libssl_python.so": "06c6228376f4557500f9a38f8e0e56be66d22d8b3c5a7e45bb6a650e548d05cb",
-    "lib/x86_64/libtdjni.so": "567bb5aaccdcc1d8280577f2f9fe8e82178908c72f513436972493fd6ad6dabd"
+    "lib/x86_64/libtdjni.so": "567bb5aaccdcc1d8280577f2f9fe8e82178908c72f513436972493fd6ad6dabd",
+    "lib/arm64-v8a/libandroidx.graphics.path.so": "41e9a793c43a0f4fddb19e33f346bace464f30f888ba7b9eaf96294ea115bfb6",
+    "lib/x86_64/libandroidx.graphics.path.so": "4e56c996f13670e70082658de7880c4020eabf4f25e43387f88ed78a713fc9f0"
   },
   "packaging_variants": {
     "lib/arm64-v8a/libchaquopy_java.so": [

@@ -1,11 +1,7 @@
-androidx.compose.ui:ui-unit-android:1.6.8
+androidx.graphics:graphics-path:1.0.1
 Apache License 2.0
 
-Copyright 2018 The Android Open Source Project
-Copyright 2019 The Android Open Source Project
-Copyright 2020 The Android Open Source Project
 Copyright 2022 The Android Open Source Project
-Copyright 2023 The Android Open Source Project
 
 
                                  Apache License

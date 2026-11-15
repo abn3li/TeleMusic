@@ -273,7 +273,7 @@ fun TgMusicNavGraph(navController: NavHostController = rememberNavController()) 
         com.abn3li.telemusic.crash.CrashTrail.set("Screen", currentRoute ?: "none")
     }
     LaunchedEffect(playerState.song?.telegramMessageId) {
-        playerState.song?.let { com.abn3li.telemusic.crash.CrashTrail.note("Song: ${'$'}{it.title}") }
+        playerState.song?.let { com.abn3li.telemusic.crash.CrashTrail.note("Song: " + it.title) }
     }
     val floatingInsetExtra = (15.dp - navBarInset).coerceAtLeast(0.dp)
     // Detail pages keep the same floating player, with space reserved only for the visible rows.

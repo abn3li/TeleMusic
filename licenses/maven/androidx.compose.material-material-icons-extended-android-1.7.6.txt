@@ -1,4 +1,4 @@
-androidx.compose.material:material-icons-extended-android:1.6.8
+androidx.compose.material:material-icons-extended-android:1.7.6
 Apache License 2.0
 
 Copyright 2024 The Android Open Source Project

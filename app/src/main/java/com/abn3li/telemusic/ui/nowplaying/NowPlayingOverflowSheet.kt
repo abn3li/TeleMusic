@@ -110,7 +110,7 @@ internal fun NowPlayingOverflowSheet(
         sheetState = sheetState,
         // Down under the navigation bar (its rows stay above it); the dim is the player's own -
         // see NowPlayingScreen - so it reaches the status bar too.
-        windowInsets = androidx.compose.foundation.layout.WindowInsets(0),
+        contentWindowInsets = { androidx.compose.foundation.layout.WindowInsets(0) },
         scrimColor = Color.Transparent,
         containerColor = SheetColor,
         contentColor = Color.White,

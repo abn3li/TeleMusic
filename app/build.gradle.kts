@@ -119,7 +119,9 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.4")
     implementation("androidx.activity:activity-compose:1.9.1")
     implementation("androidx.profileinstaller:profileinstaller:1.4.1")
-    implementation(platform("androidx.compose:compose-bom:2024.06.00"))
+    // Compose 1.7: drops the layers of list items that are no longer placed. On 1.6 a text that
+    // changed in such an item could be redrawn unmeasured ("no paragraph").
+    implementation(platform("androidx.compose:compose-bom:2024.12.01"))
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.ui:ui-graphics")
     implementation("androidx.compose.material3:material3")
