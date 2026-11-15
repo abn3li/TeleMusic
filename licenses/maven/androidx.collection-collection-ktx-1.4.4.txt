@@ -1,8 +1,7 @@
-androidx.compose.material:material-icons-core-android:1.6.8
+androidx.collection:collection-ktx:1.4.4
 Apache License 2.0
 
-Copyright 2020 The Android Open Source Project
-Copyright 2024 The Android Open Source Project
+
 
 
                                  Apache License

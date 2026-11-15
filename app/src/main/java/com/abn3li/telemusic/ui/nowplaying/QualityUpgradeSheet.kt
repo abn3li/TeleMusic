@@ -112,7 +112,7 @@ internal fun QualityUpgradeSheet(song: SongEntity, onDismiss: () -> Unit) {
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
         shape = RoundedCornerShape(topStart = 26.dp, topEnd = 26.dp),
         containerColor = Color(0xFF1C1C1E), contentColor = Color.White,
-        windowInsets = WindowInsets(0), dragHandle = null) {
+        contentWindowInsets = { WindowInsets(0) }, dragHandle = null) {
         Column(Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = 22.dp).padding(bottom = 22.dp)) {
             Box(Modifier.fillMaxWidth().height(24.dp), contentAlignment = Alignment.Center) {
                 Box(Modifier.size(32.dp, 4.dp).clip(RoundedCornerShape(2.dp)).background(Color.White.copy(alpha = 0.2f)))

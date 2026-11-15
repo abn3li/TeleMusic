@@ -63,7 +63,8 @@ import androidx.compose.material.icons.rounded.AccountCircle
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.pulltorefresh.PullToRefreshContainer
+import androidx.compose.material3.pulltorefresh.PullToRefreshDefaults
+import androidx.compose.material3.pulltorefresh.pullToRefresh
 import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.rememberUpdatedState
@@ -134,26 +135,28 @@ fun HomeScreen(
     val waitingForFeed = homeFeeds.youtube && newReleases.isLoading &&
         if (newReleases.account.signedIn) newReleases.personal.isNullOrEmpty()
         else newReleases.section?.items.isNullOrEmpty() && newReleases.community?.items.isNullOrEmpty()
-    val canRefresh by rememberUpdatedState(homeFeeds.youtube)
-    val refresh = rememberPullToRefreshState(enabled = { canRefresh })
-    LaunchedEffect(refresh.isRefreshing) {
-        if (refresh.isRefreshing) {
-            try { newReleasesViewModel.refreshHome() }
-            finally { refresh.endRefresh() }
-        }
-    }
+    val refresh = rememberPullToRefreshState()
+    var refreshing by remember { mutableStateOf(false) }
+    val refreshScope = rememberCoroutineScope()
     val home by viewModel.home.collectAsState()
     val artists by viewModel.artists.collectAsState()
     val topArtists = remember(artists) { artists.sortedByDescending { it.songCount }.take(12) }
 
-    Box(Modifier.fillMaxSize().nestedScroll(refresh.nestedScrollConnection)) {
+    Box(Modifier.fillMaxSize().pullToRefresh(refreshing, refresh, enabled = homeFeeds.youtube) {
+        refreshing = true
+        refreshScope.launch {
+            try { newReleasesViewModel.refreshHome() }
+            finally { refreshing = false }
+        }
+    }) {
     LargeTitleList(
         title = "Home",
         showTopBar = false,
         overlay = {
             // Clip the indicator's animated entry below the system status area.
             Box(Modifier.fillMaxSize().clipToBounds()) {
-                PullToRefreshContainer(state = refresh, containerColor = LibraryFieldColor, contentColor = AppAccent,
+                PullToRefreshDefaults.Indicator(state = refresh, isRefreshing = refreshing,
+                    containerColor = LibraryFieldColor, color = AppAccent,
                     modifier = Modifier.align(Alignment.TopCenter))
             }
         },
@@ -174,7 +177,7 @@ fun HomeScreen(
         }
 
         // Cached shelves stay visible during refresh; animate only while the feed is missing.
-        if (waitingForFeed && !refresh.isRefreshing) item("feed_loading") {
+        if (waitingForFeed && !refreshing) item("feed_loading") {
             Box(
                 Modifier.fillMaxWidth().height(144.dp).semantics { contentDescription = "Loading feed" },
                 contentAlignment = Alignment.Center
@@ -704,7 +707,7 @@ private val SHELF_SLOW_RELEASE = 350.dp
 internal fun rememberStartSnap(row: androidx.compose.foundation.lazy.LazyListState): androidx.compose.foundation.gestures.FlingBehavior {
     val layout = remember(row) {
         androidx.compose.foundation.gestures.snapping.SnapLayoutInfoProvider(row,
-            positionInLayout = androidx.compose.foundation.gestures.snapping.SnapPositionInLayout { _, _, _, _, _ -> 0 })
+            androidx.compose.foundation.gestures.snapping.SnapPosition.Start)
     }
     return rememberSnapFlingBehavior(layout)
 }

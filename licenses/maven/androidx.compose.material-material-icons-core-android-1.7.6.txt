@@ -1,8 +1,8 @@
-androidx.compose.runtime:runtime-saveable-android:1.6.8
+androidx.compose.material:material-icons-core-android:1.7.6
 Apache License 2.0
 
 Copyright 2020 The Android Open Source Project
-Copyright 2021 The Android Open Source Project
+Copyright 2024 The Android Open Source Project
 
 
                                  Apache License
