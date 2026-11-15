@@ -551,7 +551,8 @@ internal fun PlayShuffleButtons(
 @Composable
 private fun TopActionButton(icon: ImageVector, label: String, enabled: Boolean, onClick: () -> Unit, modifier: Modifier) {
     val haptics = LocalHapticFeedback.current
-    val shape = RoundedCornerShape(10.dp)
+    // A pill, like the other buttons of the new style (Resume, Import playlist).
+    val shape = RoundedCornerShape(50)
     // The card is painted straight onto the row (no clip/alpha layers) and "disabled" dims only the
     // label: with layers, the card's background sometimes wasn't redrawn when the songs arrived a
     // moment after the page opened, leaving just the pink label until the list was scrolled.

@@ -434,12 +434,13 @@ internal fun AlbumGridItem(album: AlbumSummary, onClick: () -> Unit) {
             .fillMaxWidth()
             .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onClick)
     ) {
-        CoverTile(album.albumArtUrl, Modifier.fillMaxWidth().aspectRatio(1f), corner = 7)
-        Spacer(Modifier.height(5.dp))
+        CoverTile(album.albumArtUrl, Modifier.fillMaxWidth().aspectRatio(1f), corner = 12)
+        Spacer(Modifier.height(7.dp))
         Text(album.album, color = ink.copy(alpha = 0.9f), fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        // The artist, as under every other cover (Home, Recently added).
         Text(
-            "${album.songCount} ${if (album.songCount == 1) "Song" else "Songs"}",
-            color = ink.copy(alpha = 0.6f),
+            album.artist,
+            color = ink.copy(alpha = 0.55f),
             fontSize = 13.sp,
             lineHeight = 17.sp,
             maxLines = 1
@@ -574,7 +575,7 @@ fun LibraryPlaylistsScreen(
         itemsIndexed(shown, key = { _, p -> p.id }) { index, playlist ->
             PlaylistRow(
                 label = playlist.name,
-                tile = { CoverTile(playlist.covers, Modifier.size(60.dp), corner = 4, placeholder = Icons.AutoMirrored.Rounded.QueueMusic) }
+                tile = { CoverTile(playlist.covers, Modifier.size(60.dp), corner = 8, placeholder = Icons.AutoMirrored.Rounded.QueueMusic) }
             ) { onOpenPlaylist(playlist.id, playlist.name) }
             if (index < shown.lastIndex) LibraryDivider(start = 96.dp)
         }
@@ -620,7 +621,7 @@ private fun PlaylistRow(label: String, tile: @Composable () -> Unit, onClick: ()
 @Composable
 internal fun IconTile(icon: ImageVector, sizeDp: Int = 60) {
     Box(
-        Modifier.size(sizeDp.dp).clip(RoundedCornerShape(4.dp)).background(LibraryTileColor),
+        Modifier.size(sizeDp.dp).clip(RoundedCornerShape(8.dp)).background(LibraryTileColor),
         contentAlignment = Alignment.Center
     ) {
         Icon(icon, contentDescription = null, tint = AppAccent, modifier = Modifier.size((sizeDp * 0.5f).dp))

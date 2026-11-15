@@ -1,5 +1,7 @@
 package com.abn3li.telemusic.ui.navigation
 
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.asPaddingValues
@@ -263,6 +265,10 @@ fun TgMusicNavGraph(navController: NavHostController = rememberNavController()) 
         }
     }
     val navBarInset = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+    // Scrolling a page down folds the dock; each new page starts with it open.
+    val dockThreshold = with(LocalDensity.current) { 40.dp.toPx() }
+    val dockCollapse = remember(dockThreshold) { DockCollapse(dockThreshold) }
+    LaunchedEffect(currentRoute) { dockCollapse.collapsed = false }
     val floatingInsetExtra = (15.dp - navBarInset).coerceAtLeast(0.dp)
     // Detail pages keep the same floating player, with space reserved only for the visible rows.
     val miniPlayerInset = if (showBottomBar) {
@@ -310,7 +316,8 @@ fun TgMusicNavGraph(navController: NavHostController = rememberNavController()) 
                 // No edge effect: the page just stops at its ends. (Android's stretch stays off -
                 // Samsung's renderer crashed with it - and the custom bounce that replaced it got
                 // in the way of touches and of Home's pull to refresh.)
-                modifier = Modifier.padding(innerPadding).windowInsetsPadding(barsInsets.only(WindowInsetsSides.Top)),
+                modifier = Modifier.padding(innerPadding).windowInsetsPadding(barsInsets.only(WindowInsetsSides.Top))
+                    .nestedScroll(dockCollapse),
                 enterTransition = { EnterTransition.None },
                 exitTransition = { ExitTransition.None },
                 popEnterTransition = { EnterTransition.None },
@@ -508,6 +515,7 @@ fun TgMusicNavGraph(navController: NavHostController = rememberNavController()) 
                     onPrevious = { playerViewModel.previousSong() },
                     transition = playerTransition,
                     showTabs = showBottomBar,
+                    collapse = dockCollapse,
                     modifier = miniModifier.windowInsetsPadding(barsInsets.only(WindowInsetsSides.Horizontal))
                 )
             },

@@ -257,10 +257,10 @@ internal fun Modifier.frostedCapsuleGroup(backdrop: FrostedBackdrop, capsules: F
                             surface!!.draw(this, top, position - backdrop.position, under, position - (below?.position ?: Offset.Zero))
                             drawRect(FrostedGrain.brush)
                         }
-                        drawRect(tint.copy(alpha = if (sampled) { if (light) 0.73f else 0.8f } else 1f))
+                        drawRect(tint.copy(alpha = if (sampled) DockGlassTint(light) else 1f))
                     }
                     shapes.forEach {
-                        drawRoundRect(Color.White.copy(alpha = 0.10f), topLeft = it.topLeft, size = it.size,
+                        drawRoundRect(Color.White.copy(alpha = DockGlassEdge), topLeft = it.topLeft, size = it.size,
                             cornerRadius = CornerRadius(it.height / 2f), style = border)
                     }
                 }
@@ -268,6 +268,12 @@ internal fun Modifier.frostedCapsuleGroup(backdrop: FrostedBackdrop, capsules: F
             }
         }
 }
+
+// The dock is clearer glass than the headers: more of the page shows through its blur, with a
+// brighter edge to hold its shape. Light glass stays whiter, or dark artwork under it turns it
+// grey and the grey labels on it fade.
+private fun DockGlassTint(light: Boolean) = if (light) 0.72f else 0.58f
+private const val DockGlassEdge = 0.16f
 
 /** The page's picture, once it has one to sample. */
 private fun FrostedBackdrop.drawnSource(): NativeFrostedSource? =
@@ -299,11 +305,11 @@ private fun DrawScope.drawMovingCapsules(capsules: FrostedCapsules, surface: Nat
                         surface!!.drawRecorded(this)
                         drawRect(FrostedGrain.brush)
                     }
-                    drawRect(tint.copy(alpha = if (recorded) { if (light) 0.73f else 0.8f } else 1f))
+                    drawRect(tint.copy(alpha = if (recorded) DockGlassTint(light) else 1f))
                     canvas.restore()
                 }
             }
-            drawRoundRect(Color.White.copy(alpha = 0.10f * move.alpha), topLeft = rect.topLeft, size = rect.size,
+            drawRoundRect(Color.White.copy(alpha = DockGlassEdge * move.alpha), topLeft = rect.topLeft, size = rect.size,
                 cornerRadius = corner, style = border)
         }
     }

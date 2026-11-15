@@ -1,5 +1,6 @@
 package com.abn3li.telemusic.ui.library
 
+import androidx.compose.ui.graphics.Color
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -71,11 +72,8 @@ fun LibraryHomeScreen(
     val actions = rememberLibrarySongActions(viewModel, callbacks.onPlayNext, callbacks.onOpenArtist, callbacks.onOpenAlbum)
     var createPlaylist by rememberSaveable { mutableStateOf(false) }
 
-    LargeTitleList(title = "Library", titleTrailing = {
-        Box(Modifier.size(44.dp).clickable(onClick = onOpenSettings), contentAlignment = Alignment.Center) {
-            Icon(Icons.Rounded.AccountCircle, "Settings", tint = AppAccent, modifier = Modifier.size(34.dp))
-        }
-    }) {
+    // No top bar, like Home and Discover: the large title sits at the same height on every tab.
+    LargeTitleList(title = "Library", showTopBar = false, titleTrailing = { AccountBadge(account, onOpenSettings) }) {
         item("links", contentType = "library_links") {
             Column(Modifier.fillMaxWidth().padding(top = 10.dp)) {
                 LibraryCategoryRow(Icons.AutoMirrored.Rounded.QueueMusic, "Playlists", playlists.size, onOpenPlaylists) { createPlaylist = true }
@@ -144,7 +142,7 @@ fun LibraryHomeScreen(
                     itemsIndexed(followedPlaylists, key = { _, playlist -> playlist.browseId }) { _, playlist ->
                         Column(Modifier.width(156.dp).clickable { onOpenYouTubePlaylist(playlist.browseId, playlist.title, playlist.params) }) {
                             CoverTile(playlist.thumbnailUrl, Modifier.fillMaxWidth().aspectRatio(1f)
-                                .feedArtworkBorder(RoundedCornerShape(9.dp)), corner = 9,
+                                .feedArtworkBorder(RoundedCornerShape(12.dp)), corner = 12,
                                 placeholder = if (playlist.browseId == "VLLM") Icons.Rounded.Star else Icons.AutoMirrored.Rounded.QueueMusic)
                             Spacer(Modifier.height(7.dp))
                             Text(playlist.title, color = ink, fontSize = 14.sp, fontWeight = FontWeight.Medium,
@@ -180,7 +178,7 @@ fun LibraryYouTubePlaylistsScreen(onBack: () -> Unit, onOpenYouTubePlaylist: (St
                 onOpenYouTubePlaylist(playlist.browseId, playlist.title, playlist.params)
             }) {
                 CoverTile(playlist.thumbnailUrl, Modifier.fillMaxWidth().aspectRatio(1f)
-                    .feedArtworkBorder(RoundedCornerShape(9.dp)), corner = 9,
+                    .feedArtworkBorder(RoundedCornerShape(12.dp)), corner = 12,
                     placeholder = if (playlist.browseId == "VLLM") Icons.Rounded.Star else Icons.AutoMirrored.Rounded.QueueMusic)
                 Spacer(Modifier.height(7.dp))
                 Text(playlist.title, color = ink, fontSize = 14.sp, fontWeight = FontWeight.Medium,
@@ -212,12 +210,13 @@ private fun LibraryCategoryRow(icon: ImageVector, label: String, count: Int, onC
     }
 }
 
-/** A source of songs under the Library rows: icon, name, and how many songs; dimmed while it holds none. */
+/** A source of songs under the Library rows: a filled card with its icon, name, and how many songs;
+ * dimmed while it holds none. */
 @Composable
 private fun LibraryCollectionButton(label: String, count: Int, icon: ImageVector, onClick: () -> Unit, modifier: Modifier) {
-    val shape = RoundedCornerShape(12.dp)
-    Row(modifier.heightIn(min = 54.dp).border(0.75.dp, ink.copy(alpha = 0.18f), shape)
-        .clip(shape).background(ink.copy(alpha = 0.025f)).clickable(onClick = onClick).padding(horizontal = 14.dp, vertical = 12.dp),
+    val shape = RoundedCornerShape(14.dp)
+    Row(modifier.heightIn(min = 56.dp)
+        .clip(shape).background(LibraryFieldColor).clickable(onClick = onClick).padding(horizontal = 12.dp, vertical = 11.dp),
         verticalAlignment = Alignment.CenterVertically) {
         val empty = count == 0
         Icon(icon, null, tint = if (empty) ink.copy(alpha = 0.35f) else AppAccent, modifier = Modifier.size(22.dp))
@@ -239,11 +238,16 @@ private fun RecentlyAddedCard(song: SongEntity, actions: LibrarySongActions, onC
             haptics.performHapticFeedback(HapticFeedbackType.LongPress)
             menuOpen = true
         })) {
-        SongArtwork(song, 156.dp, 9.dp, Modifier.feedArtworkBorder(RoundedCornerShape(9.dp)))
+        val playback = LocalCollectionPlayback.current
+        val current = playback.isCurrent(song.telegramMessageId, null)
+        Box {
+            SongArtwork(song, 156.dp, 12.dp, Modifier.feedArtworkBorder(RoundedCornerShape(12.dp)))
+            if (current) PlayingMark(playback.isPlaying, Color.White, RoundedCornerShape(12.dp))
+        }
         Spacer(Modifier.height(7.dp))
-        Text(song.title, color = ink, fontSize = 14.sp, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Text(song.title, color = if (current) AppAccent else ink, fontSize = 14.sp, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
         Spacer(Modifier.height(2.dp))
-        Text(song.artist, color = ink.copy(alpha = 0.5f), fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Text(song.artist, color = if (current) AppAccent.copy(alpha = 0.75f) else ink.copy(alpha = 0.5f), fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
     if (menuOpen) SongContextMenu(song, actions, anchorTop) { menuOpen = false }
 }

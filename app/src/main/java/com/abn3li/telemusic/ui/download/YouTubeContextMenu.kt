@@ -47,16 +47,17 @@ import kotlinx.coroutines.withContext
 
 private data class YouTubeMenuRequest(val track: BrowseTrack?, val collection: BrowseCollection?,
     val anchor: Float, val play: () -> Unit, val download: (() -> Unit)? = null,
-    val beforeOpen: () -> Unit = {})
+    val beforeOpen: () -> Unit = {}, val remove: (() -> Unit)? = null)
 
 /** Only the open menu observes library state; cards hold no timers or network jobs. */
 @Stable
 internal class YouTubeMenus internal constructor(
-    private val show: (BrowseTrack?, BrowseCollection?, Float, () -> Unit, (() -> Unit)?, () -> Unit) -> Unit
+    private val show: (BrowseTrack?, BrowseCollection?, Float, () -> Unit, (() -> Unit)?, () -> Unit, (() -> Unit)?) -> Unit
 ) {
     fun track(track: BrowseTrack, anchor: Float, play: () -> Unit, download: (() -> Unit)? = null,
-        beforeOpen: () -> Unit = {}) = show(track, null, anchor, play, download, beforeOpen)
-    fun collection(collection: BrowseCollection, anchor: Float, open: () -> Unit) = show(null, collection, anchor, open, null, {})
+        beforeOpen: () -> Unit = {}) = show(track, null, anchor, play, download, beforeOpen, null)
+    fun collection(collection: BrowseCollection, anchor: Float, open: () -> Unit, remove: (() -> Unit)? = null) =
+        show(null, collection, anchor, open, null, {}, remove)
 }
 
 internal val LocalYouTubeMenus = staticCompositionLocalOf<YouTubeMenus> {
@@ -78,7 +79,13 @@ internal fun Modifier.youtubeTrackActions(track: BrowseTrack, onClick: () -> Uni
 }
 
 @OptIn(ExperimentalFoundationApi::class)
-internal fun Modifier.youtubeCollectionActions(collection: BrowseCollection, onClick: () -> Unit): Modifier = composed {
+internal fun Modifier.youtubeCollectionActions(collection: BrowseCollection, onClick: () -> Unit): Modifier =
+    youtubeCollectionActions(collection, onClick, null)
+
+/** [youtubeCollectionActions] whose hold menu also offers [onRemove] (an imported playlist). */
+@OptIn(ExperimentalFoundationApi::class)
+internal fun Modifier.youtubeCollectionActions(collection: BrowseCollection, onClick: () -> Unit,
+    onRemove: (() -> Unit)?): Modifier = composed {
     val menus = LocalYouTubeMenus.current
     val haptics = LocalHapticFeedback.current
     val coordinates = remember { arrayOfNulls<LayoutCoordinates>(1) }
@@ -86,7 +93,7 @@ internal fun Modifier.youtubeCollectionActions(collection: BrowseCollection, onC
         interactionSource = remember { MutableInteractionSource() }, indication = null,
         onClick = onClick, onLongClickLabel = "Options for ${collection.title}", onLongClick = {
             haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-            menus.collection(collection, coordinates[0]?.takeIf { it.isAttached }?.positionInWindow()?.y ?: 0f, onClick)
+            menus.collection(collection, coordinates[0]?.takeIf { it.isAttached }?.positionInWindow()?.y ?: 0f, onClick, onRemove)
         })
 }
 
@@ -120,8 +127,8 @@ internal fun YouTubeContextHost(content: @Composable () -> Unit) {
     var conflict by remember { mutableStateOf<DownloadConflict?>(null) }
     val downloads = remember { mutableStateListOf<String>() }
     val imports = remember { mutableStateListOf<String>() }
-    val menus = remember { YouTubeMenus { track, collection, anchor, play, download, beforeOpen ->
-        request = YouTubeMenuRequest(track, collection, anchor, play, download, beforeOpen)
+    val menus = remember { YouTubeMenus { track, collection, anchor, play, download, beforeOpen, remove ->
+        request = YouTubeMenuRequest(track, collection, anchor, play, download, beforeOpen, remove)
     } }
     CompositionLocalProvider(LocalYouTubeMenus provides menus) {
         content()
@@ -299,6 +306,10 @@ private fun YouTubeOptions(request: YouTubeMenuRequest, onDismiss: () -> Unit,
                     youtubeCollectionLink(collection)?.let { link ->
                         CardDivider()
                         CardItem("Share", Icons.Rounded.Share) { onAction { share(link) } }
+                    }
+                    request.remove?.let { remove ->
+                        CardDivider()
+                        CardItem("Remove from Discover", Icons.Rounded.Delete, destructive = true) { onAction(remove) }
                     }
                 }
             }

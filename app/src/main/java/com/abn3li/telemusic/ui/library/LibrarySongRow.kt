@@ -225,8 +225,8 @@ private fun LibrarySongRowContent(song: SongEntity, actions: LibrarySongActions,
         ) {
             when (leading) {
                 SongRowLeading.Artwork -> Box {
-                    SongArtwork(song, 52.dp, 3.5.dp)
-                    if (current) PlayingMark(playback.isPlaying, Color.White, RoundedCornerShape(3.5.dp))
+                    SongArtwork(song, 52.dp, 8.dp)
+                    if (current) PlayingMark(playback.isPlaying, Color.White, RoundedCornerShape(8.dp))
                 }
                 is SongRowLeading.TrackNumber -> Box(Modifier.width(24.dp).height(44.dp), contentAlignment = Alignment.Center) {
                     if (current) Box(Modifier.size(24.dp)) { PlayingMark(playback.isPlaying, AppAccent, scrim = null) }

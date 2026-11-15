@@ -25,6 +25,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.Download
@@ -90,7 +91,7 @@ internal fun Thumbnail(url: String?, modifier: Modifier, corner: Int, requestPx:
     }
 }
 
-/** A browse track: artwork, title, artist, Play and Download. */
+/** A browse track: artwork, title, artist and Download. The row itself plays. */
 @Composable
 internal fun TrackResultRow(
     track: com.abn3li.telemusic.data.browse.BrowseTrack,
@@ -112,44 +113,29 @@ internal fun TrackResultRow(
             .fillMaxWidth()
             .heightIn(min = 64.dp)
             .youtubeTrackActions(track, onPlayClick, onDownloadClick)
-            .padding(start = 22.dp, end = 10.dp, top = 6.dp, bottom = 6.dp),
+            .padding(start = 18.dp, end = 8.dp, top = 6.dp, bottom = 6.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Box {
-            Thumbnail(thumbnailUrl, Modifier.size(52.dp), corner = 4, requestPx = 150)
-            if (current) PlayingMark(playback.isPlaying, Color.White, RoundedCornerShape(4.dp))
+            Thumbnail(thumbnailUrl, Modifier.size(52.dp), corner = 8, requestPx = 150)
+            if (current) PlayingMark(playback.isPlaying, Color.White, RoundedCornerShape(8.dp))
         }
-        Column(Modifier.weight(1f).padding(start = 16.dp, end = 8.dp)) {
+        Column(Modifier.weight(1f).padding(start = 12.dp, end = 8.dp)) {
             Text(title, color = if (current) AppAccent else ink, fontSize = 16.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
             Text(artist, color = if (current) AppAccent.copy(alpha = 0.75f) else ink.copy(alpha = 0.5f), fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
-        // Fixed 44dp slots so the row doesn't shift when a button turns into a spinner.
-        Box(Modifier.size(44.dp), contentAlignment = Alignment.Center) {
-            Icon(
-                Icons.Rounded.PlayArrow,
-                contentDescription = "Play",
-                tint = ink,
-                modifier = Modifier.size(26.dp).clickable(
-                    interactionSource = remember { MutableInteractionSource() },
-                    indication = null,
-                    onClick = onPlayClick
-                )
-            )
-        }
-        Box(Modifier.size(44.dp), contentAlignment = Alignment.Center) {
+        // Quiet and a full 44 dp target, the same as a search result's: a pink arrow on every row
+        // made the page shout. A fixed slot, so the row doesn't shift when it turns into a spinner.
+        Box(Modifier.size(44.dp).clickable(
+            interactionSource = remember { MutableInteractionSource() },
+            indication = null,
+            enabled = !isDownloading && !isDownloaded,
+            onClick = onDownloadClick
+        ), contentAlignment = Alignment.Center) {
             when {
-                isDownloading -> CalmSpinner(color = AppAccent, strokeWidth = 2.dp, modifier = Modifier.size(20.dp))
-                isDownloaded -> Icon(Icons.Rounded.CheckCircle, contentDescription = "Downloaded", tint = AppAccent, modifier = Modifier.size(22.dp))
-                else -> Icon(
-                    Icons.Rounded.Download,
-                    contentDescription = "Download",
-                    tint = AppAccent,
-                    modifier = Modifier.size(24.dp).clickable(
-                        interactionSource = remember { MutableInteractionSource() },
-                        indication = null,
-                        onClick = onDownloadClick
-                    )
-                )
+                isDownloading -> CalmSpinner(color = ink, strokeWidth = 2.dp, modifier = Modifier.size(20.dp))
+                isDownloaded -> Icon(Icons.Rounded.Check, contentDescription = "Downloaded", tint = ink.copy(alpha = 0.5f), modifier = Modifier.size(22.dp))
+                else -> Icon(Icons.Rounded.Download, contentDescription = "Download", tint = ink.copy(alpha = 0.6f), modifier = Modifier.size(23.dp))
             }
         }
     }

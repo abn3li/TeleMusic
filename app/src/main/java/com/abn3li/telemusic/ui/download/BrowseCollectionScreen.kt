@@ -351,14 +351,14 @@ internal fun CollectionCard(item: BrowseCollection, artworkBorder: Boolean = fal
         modifier.youtubeCollectionActions(item, onClick),
         horizontalAlignment = if (round) Alignment.CenterHorizontally else Alignment.Start
     ) {
-        val artworkShape = if (round) CircleShape else androidx.compose.foundation.shape.RoundedCornerShape(8.dp)
+        val artworkShape = if (round) CircleShape else androidx.compose.foundation.shape.RoundedCornerShape(12.dp)
         Box(Modifier.fillMaxWidth().aspectRatio(1f)
             .then(if (artworkBorder) Modifier.feedArtworkBorder(artworkShape) else Modifier)
             .then(if (round) Modifier.clip(CircleShape) else Modifier)) {
             CoverTile(
                 item.thumbnailUrl,
                 Modifier.fillMaxWidth().aspectRatio(1f),
-                corner = if (round) 0 else 8,
+                corner = if (round) 0 else 12,
                 placeholder = if (round) Icons.Rounded.Person else Icons.Rounded.Album
             )
         }
@@ -372,8 +372,8 @@ private fun BrowseSongCard(track: BrowseTrack, modifier: Modifier = Modifier.wid
     Column(modifier.youtubeTrackActions(track, onClick, onDownload)) {
         CoverTile(track.thumbnailUrl,
             Modifier.fillMaxWidth().aspectRatio(1f)
-                .feedArtworkBorder(androidx.compose.foundation.shape.RoundedCornerShape(8.dp)),
-            corner = 8, placeholder = Icons.Rounded.Album)
+                .feedArtworkBorder(androidx.compose.foundation.shape.RoundedCornerShape(12.dp)),
+            corner = 12, placeholder = Icons.Rounded.Album)
         BrowseCardLabels(track.title, track.artist)
     }
 }

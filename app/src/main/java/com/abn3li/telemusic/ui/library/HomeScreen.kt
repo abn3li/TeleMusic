@@ -1,5 +1,7 @@
 package com.abn3li.telemusic.ui.library
 
+import androidx.compose.foundation.layout.offset
+import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
 import com.abn3li.telemusic.ui.download.youtubeTrackActions
 import com.abn3li.telemusic.ui.download.youtubeCollectionActions
 
@@ -155,16 +157,7 @@ fun HomeScreen(
                     modifier = Modifier.align(Alignment.TopCenter))
             }
         },
-        titleTrailing = {
-            Icon(
-                Icons.Rounded.AccountCircle,
-                contentDescription = "Settings",
-                tint = AppAccent,
-                modifier = Modifier
-                    .size(34.dp)
-                    .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onOpenSettings)
-            )
-        }
+        titleTrailing = { AccountBadge(newReleases.account, onOpenSettings) }
     ) {
         // The last song played, large, with its own blurred colours: one tap back into it. Shown
         // with either feed on - the last song may be a library song or a YouTube one.
@@ -308,7 +301,7 @@ internal fun HomeSectionHeader(
     title: String,
     onSeeAll: (() -> Unit)? = null,
     strapline: String? = null,
-    // In place of "See all": "Play all" is drawn as an outlined pill.
+    // In place of "See all", in the same accent link: "Play all".
     action: String? = null
 ) {
     // One shape for every section on every page: same title size, same "See all" in the accent
@@ -317,7 +310,7 @@ internal fun HomeSectionHeader(
         // The 48 dp minimum sits inside the padding, so a header with "See all" and one without
         // are the same height and the gaps between shelves stay even.
         Modifier.fillMaxWidth()
-            .padding(start = 18.dp, end = 18.dp, top = if (action != null) 18.dp else 26.dp, bottom = 6.dp)
+            .padding(start = 18.dp, end = 18.dp, top = 26.dp, bottom = 6.dp)
             .heightIn(min = 48.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -331,32 +324,43 @@ internal fun HomeSectionHeader(
             }
             Text(title, color = ink, fontSize = 22.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
-        if (onSeeAll != null) {
-            if (action != null) {
-                Text(
-                    action,
-                    color = ink,
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    modifier = onTitleLine
-                        .clip(RoundedCornerShape(50))
-                        .border(1.dp, ink.copy(alpha = 0.25f), RoundedCornerShape(50))
-                        .clickable(onClick = onSeeAll)
-                        .padding(horizontal = 12.dp, vertical = 5.dp)
-                )
-            } else {
-                Text(
-                    "See all",
-                    color = AppAccent,
-                    fontSize = 15.sp,
-                    modifier = onTitleLine
-                        .heightIn(min = 48.dp)
-                        .semantics { contentDescription = "See all $title" }
-                        .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onSeeAll)
-                        .padding(start = 12.dp, top = 14.dp, bottom = 14.dp)
-                )
-            }
+        if (onSeeAll != null) SectionLink(action ?: "See all", "${action ?: "See all"} $title", onSeeAll, onTitleLine)
+    }
+}
+
+/** A section's link ("See all ›", "Play all ›"): accent text and a chevron, the same on every page. */
+@Composable
+internal fun SectionLink(text: String, description: String, onClick: () -> Unit, modifier: Modifier = Modifier) {
+    Row(
+        modifier.heightIn(min = 48.dp)
+            .semantics(mergeDescendants = true) { contentDescription = description }
+            .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onClick)
+            .padding(start = 12.dp, top = 14.dp, bottom = 14.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(text, color = AppAccent, fontSize = 15.sp)
+        Icon(Icons.AutoMirrored.Rounded.KeyboardArrowRight, null, tint = AppAccent, modifier = Modifier.size(20.dp).offset(x = 2.dp))
+    }
+}
+
+/** Your account: its photo, else your first letter on the accent, else a plain person. Opens Settings. */
+@Composable
+internal fun AccountBadge(account: com.abn3li.telemusic.data.youtube.YouTubeAccountState, onClick: () -> Unit) {
+    val initial = account.name?.trim()?.firstOrNull()?.uppercaseChar()
+    Box(
+        Modifier.size(34.dp).clip(CircleShape)
+            .semantics { contentDescription = "Settings" }
+            .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onClick)
+            .then(if (initial != null) Modifier.background(Brush.linearGradient(listOf(AppAccent, AppAccent.copy(red = AppAccent.red * 0.7f, green = AppAccent.green * 0.6f, blue = AppAccent.blue * 0.75f)))) else Modifier),
+        contentAlignment = Alignment.Center
+    ) {
+        when {
+            initial != null -> Text(initial.toString(), color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+            else -> Icon(Icons.Rounded.AccountCircle, null, tint = AppAccent, modifier = Modifier.fillMaxSize())
         }
+        // The photo covers the letter once it has loaded.
+        if (account.photoUrl != null) coil.compose.AsyncImage(account.photoUrl, null,
+            contentScale = androidx.compose.ui.layout.ContentScale.Crop, modifier = Modifier.fillMaxSize())
     }
 }
 
@@ -430,13 +434,18 @@ private fun SongShelf(songs: List<SongEntity>, callbacks: LibraryCallbacks) {
     LaunchedEffect(songs.firstOrNull()?.telegramMessageId) {
         if (atStart) rowState.scrollToItem(0)
     }
+    val playback = LocalCollectionPlayback.current
     LazyRow(state = rowState, modifier = ShelfOwnLayer, contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
         itemsIndexed(songs, key = { _, s -> s.telegramMessageId }) { index, song ->
+            val current = playback.isCurrent(song.telegramMessageId, null)
             Column(Modifier.width(128.dp).then(homeSongActions(song) { callbacks.onPlay(ids, index) })) {
-                SongArtwork(song, 128.dp, 6.dp, Modifier.feedArtworkBorder(RoundedCornerShape(6.dp)))
+                Box {
+                    SongArtwork(song, 128.dp, 6.dp, Modifier.feedArtworkBorder(RoundedCornerShape(6.dp)))
+                    if (current) PlayingMark(playback.isPlaying, Color.White, RoundedCornerShape(6.dp))
+                }
                 Spacer(Modifier.height(5.dp))
-                Text(song.title, color = ink.copy(alpha = 0.9f), fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Text(song.artist, color = ink.copy(alpha = 0.55f), fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(song.title, color = if (current) AppAccent else ink.copy(alpha = 0.9f), fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(song.artist, color = if (current) AppAccent.copy(alpha = 0.75f) else ink.copy(alpha = 0.55f), fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
         }
     }
@@ -730,21 +739,25 @@ private fun ListenAgainGrid(
     val play by rememberUpdatedState(onPlay)
     val open by rememberUpdatedState(onOpen)
     val entries = remember(shelf) {
-        shelf.tracks.mapIndexed { i, t -> Triple(t.thumbnailUrl, t.title, { play(shelf.tracks, i) }) } +
-            shelf.collections.map { c -> Triple(c.thumbnailUrl, c.title, { open(c) }) }
+        shelf.tracks.mapIndexed { i, t -> HomeCoverEntry(t.thumbnailUrl, t.title, t.artist) { play(shelf.tracks, i) } } +
+            shelf.collections.map { c -> HomeCoverEntry(c.thumbnailUrl, c.title, c.subtitle) { open(c) } }
     }
     val coverWidth = 112.dp
+    val playback = LocalCollectionPlayback.current
     CoverRow(entries.size, rows = rows, coverWidth = coverWidth) { index ->
-        val (url, title, onClick) = entries[index]
-        val actions = if (index < shelf.tracks.size)
-            Modifier.youtubeTrackActions(shelf.tracks[index], onClick)
-        else Modifier.youtubeCollectionActions(shelf.collections[index - shelf.tracks.size], onClick)
+        val entry = entries[index]
+        val track = shelf.tracks.getOrNull(index)
+        val actions = if (track != null) Modifier.youtubeTrackActions(track, entry.open)
+        else Modifier.youtubeCollectionActions(shelf.collections[index - shelf.tracks.size], entry.open)
+        val current = track != null && playback.isCurrent(null, track.videoId)
         Column(Modifier.width(coverWidth).then(actions)) {
-            coil.compose.AsyncImage(model = url, contentDescription = null,
-                contentScale = androidx.compose.ui.layout.ContentScale.Crop,
-                modifier = Modifier.size(coverWidth).feedArtworkBorder(RoundedCornerShape(12.dp)).clip(RoundedCornerShape(12.dp)).background(LibraryFieldColor))
-            Text(title, color = ink.copy(alpha = 0.9f), fontSize = 12.sp, lineHeight = 17.sp,
-                maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 6.dp))
+            Box {
+                coil.compose.AsyncImage(model = entry.artwork, contentDescription = null,
+                    contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                    modifier = Modifier.size(coverWidth).feedArtworkBorder(RoundedCornerShape(12.dp)).clip(RoundedCornerShape(12.dp)).background(LibraryFieldColor))
+                if (current) PlayingMark(playback.isPlaying, Color.White, RoundedCornerShape(12.dp))
+            }
+            CoverCaption(entry, current, top = 6.dp)
         }
     }
 }
@@ -786,6 +799,15 @@ private fun YouTubeMixTile(item: BrowseCollection, color: Color, onClick: () -> 
 
 private data class HomeCoverEntry(val artwork: String?, val title: String, val subtitle: String?, val open: () -> Unit)
 
+/** A cover's name and, in grey below, its artist (or what it is); in the accent while it plays. */
+@Composable
+private fun CoverCaption(entry: HomeCoverEntry, current: Boolean, top: Dp) {
+    Text(entry.title, color = if (current) AppAccent else ink.copy(alpha = 0.9f), fontSize = 13.sp, lineHeight = 17.sp,
+        maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = top))
+    if (!entry.subtitle.isNullOrBlank()) Text(entry.subtitle, color = if (current) AppAccent.copy(alpha = 0.75f) else ink.copy(alpha = 0.55f),
+        fontSize = 12.sp, lineHeight = 16.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+}
+
 /** A mixed YouTube shelf: one row of covers; songs play and collections open in place. */
 @Composable
 private fun HomeCoverShelf(
@@ -803,18 +825,22 @@ private fun HomeCoverShelf(
         }
     }
     val coverWidth = 140.dp
+    val playback = LocalCollectionPlayback.current
     CoverRow(entries.size, rows = 1, coverWidth = coverWidth) { index ->
         val entry = entries[index]
         val actions = if (index < shelf.tracks.size)
             Modifier.youtubeTrackActions(shelf.tracks[index], entry.open)
         else Modifier.youtubeCollectionActions(shelf.collections[index - shelf.tracks.size], entry.open)
+        val track = shelf.tracks.getOrNull(index)
+        val current = track != null && playback.isCurrent(null, track.videoId)
         Column(Modifier.width(coverWidth).then(actions)) {
-            coil.compose.AsyncImage(model = entry.artwork, contentDescription = null,
-                contentScale = androidx.compose.ui.layout.ContentScale.Crop,
-                modifier = Modifier.size(coverWidth).feedArtworkBorder(RoundedCornerShape(12.dp)).clip(RoundedCornerShape(12.dp)).background(LibraryFieldColor))
-            Spacer(Modifier.height(8.dp))
-            Text(entry.title, color = ink.copy(alpha = 0.9f), fontSize = 13.sp, lineHeight = 17.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Text(entry.subtitle.orEmpty(), color = ink.copy(alpha = 0.55f), fontSize = 12.sp, lineHeight = 16.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Box {
+                coil.compose.AsyncImage(model = entry.artwork, contentDescription = null,
+                    contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                    modifier = Modifier.size(coverWidth).feedArtworkBorder(RoundedCornerShape(12.dp)).clip(RoundedCornerShape(12.dp)).background(LibraryFieldColor))
+                if (current) PlayingMark(playback.isPlaying, Color.White, RoundedCornerShape(12.dp))
+            }
+            CoverCaption(entry, current, top = 8.dp)
         }
     }
 }

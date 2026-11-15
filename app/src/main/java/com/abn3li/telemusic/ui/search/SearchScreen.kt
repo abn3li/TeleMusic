@@ -1,4 +1,8 @@
 package com.abn3li.telemusic.ui.search
+import androidx.compose.material.icons.rounded.GraphicEq
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.draw.drawBehind
+import com.abn3li.telemusic.ui.library.SectionLink
 import androidx.compose.runtime.CompositionLocalProvider
 import com.abn3li.telemusic.ui.library.PlayingBarsLayer
 import com.abn3li.telemusic.ui.library.LocalPlayingBarsLayer
@@ -272,14 +276,16 @@ fun DiscoverScreen(onOpenCollection: (BrowseCollection) -> Unit) {
     val feed by discovery.uiState.collectAsState()
     var showImport by remember { mutableStateOf(false) }
     if (showImport) ImportPlaylistPrompt(discovery) { showImport = false }
-    LargeTitleList(title = "Discover") {
-        item("imported_header") { Header("Your Imported Playlists", action = {
-            Icon(Icons.Rounded.Add, "Import playlist", tint = AppAccent,
-                modifier = Modifier.size(30.dp).clickable { showImport = true })
+    // No top bar, like Home: the large title sits at the same height on both tabs.
+    LargeTitleList(title = "Discover", showTopBar = false) {
+        item("imported_header") { Header("Your Imported Playlists", action = if (feed.importedPlaylists.isEmpty()) null else {
+            {
+                Icon(Icons.Rounded.Add, "Import playlist", tint = AppAccent,
+                    modifier = Modifier.size(30.dp).clickable { showImport = true })
+            }
         }) }
         if (feed.importedPlaylists.isEmpty()) item("imported_empty") {
-            Text("Tap + to add a YouTube or Spotify playlist.", color = GroupLabelColor,
-                fontSize = 14.sp, modifier = Modifier.padding(horizontal = 18.dp))
+            ImportInvite { showImport = true }
         } else item("imported") {
             LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp), contentPadding = PaddingValues(horizontal = 18.dp)) {
                 itemsIndexed(feed.importedPlaylists, key = { index, p -> "imported_${index}_${p.browseId}" }) { _, p -> ImportedCard(p, {
@@ -637,8 +643,8 @@ private fun YoutubeSongRow(result: YtDlpSearchResult, state: YouTubeDownloadUiSt
     Row(swipeModifier.fillMaxWidth().heightIn(min = 60.dp).youtubeTrackActions(BrowseTrack(result.videoId, result.title,
         result.artist, result.thumbnailUrl, result.durationSeconds), { play(result) }, { download(result) }).padding(start = 18.dp, end = 8.dp, top = 5.dp, bottom = 5.dp), verticalAlignment = Alignment.CenterVertically) {
         Box {
-            Thumbnail(result.thumbnailUrl, Modifier.size(50.dp), 5, 150)
-            if (current) PlayingMark(playback.isPlaying, Color.White, RoundedCornerShape(5.dp))
+            Thumbnail(result.thumbnailUrl, Modifier.size(50.dp), 8, 150)
+            if (current) PlayingMark(playback.isPlaying, Color.White, RoundedCornerShape(8.dp))
         }
         Column(Modifier.weight(1f).padding(start = 12.dp, end = 6.dp)) {
             Text(result.title, color = if (current) AppAccent else ink, fontSize = 16.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -678,7 +684,7 @@ private fun YoutubeSongRow(result: YtDlpSearchResult, state: YouTubeDownloadUiSt
 private fun CollectionRow(title: String, subtitle: String, round: Boolean, art: String?, remote: BrowseCollection? = null, covers: List<String> = listOfNotNull(art), onClick: () -> Unit) {
     val actions = if (remote != null) Modifier.youtubeCollectionActions(remote, onClick) else Modifier.clickable(onClick = onClick)
     Row(Modifier.fillMaxWidth().heightIn(min = 60.dp).then(actions).padding(start = 18.dp, end = 16.dp, top = 5.dp, bottom = 5.dp), verticalAlignment = Alignment.CenterVertically) {
-        if (round) ArtistAvatar(art, 50) else CoverTile(covers, Modifier.size(50.dp), 5, Icons.AutoMirrored.Rounded.QueueMusic)
+        if (round) ArtistAvatar(art, 50) else CoverTile(covers, Modifier.size(50.dp), 8, Icons.AutoMirrored.Rounded.QueueMusic)
         Column(Modifier.weight(1f).padding(start = 12.dp, end = 8.dp)) {
             Text(title, color = ink, fontSize = 16.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
             Text(subtitle, color = ink.copy(.56f), fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -690,7 +696,7 @@ private fun CollectionRow(title: String, subtitle: String, round: Boolean, art: 
 @Composable
 private fun MediaCard(title: String, subtitle: String, round: Boolean, art: String?, covers: List<String> = listOfNotNull(art), onClick: () -> Unit) {
     Column(Modifier.width(142.dp).clickable(onClick = onClick), horizontalAlignment = if (round) Alignment.CenterHorizontally else Alignment.Start) {
-        if (round) ArtistAvatar(art, 142) else CoverTile(covers, Modifier.fillMaxWidth().aspectRatio(1f), 8)
+        if (round) ArtistAvatar(art, 142) else CoverTile(covers, Modifier.fillMaxWidth().aspectRatio(1f), 12)
         Text(title, color = ink.copy(.94f), fontSize = 15.sp, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 8.dp))
         Text(subtitle, color = ink.copy(.56f), fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
@@ -699,37 +705,69 @@ private fun MediaCard(title: String, subtitle: String, round: Boolean, art: Stri
 @Composable
 private fun ImportedCard(p: ImportedPlaylistEntity, open: () -> Unit, remove: () -> Unit) {
     val collection = remember(p) { BrowseCollection(p.browseId, null, p.title, p.subtitle, p.thumbnailUrl, BrowseKind.PLAYLIST) }
-    Column(Modifier.width(142.dp).youtubeCollectionActions(collection, open)) {
-        Box { Thumbnail(p.thumbnailUrl, Modifier.fillMaxWidth().aspectRatio(1f), 8, 300)
-            Box(Modifier.align(Alignment.TopEnd).padding(6.dp).size(24.dp).clip(CircleShape).background(Color.Black.copy(.62f)).clickable(onClick = remove), contentAlignment = Alignment.Center) {
-                Icon(Icons.Rounded.Close, "Remove", tint = Color.White, modifier = Modifier.size(15.dp))
-            }
-        }
+    // Removing it is in its hold menu, not a cross over every cover.
+    Column(Modifier.width(142.dp).youtubeCollectionActions(collection, open, onRemove = remove)) {
+        Thumbnail(p.thumbnailUrl, Modifier.fillMaxWidth().aspectRatio(1f), 12, 300)
         Text(p.title, color = ink.copy(.94f), fontSize = 15.sp, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 8.dp))
     }
 }
 
-@Composable private fun GenreTile(collection: BrowseCollection, color: Color, modifier: Modifier, click: () -> Unit) =
-    Box(modifier.height(96.dp).clip(RoundedCornerShape(10.dp)).background(color).youtubeCollectionActions(collection, click).padding(12.dp), contentAlignment = Alignment.BottomStart) {
-        Text(collection.title, color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.Bold, maxLines = 2, overflow = TextOverflow.Ellipsis)
+/** A category: its colour as a soft diagonal gradient with a faint round light in the corner,
+ * the name at the top. Drawn shapes only - nothing to load. */
+@Composable private fun GenreTile(collection: BrowseCollection, colors: Pair<Color, Color>, modifier: Modifier, click: () -> Unit) =
+    Box(modifier.height(80.dp).clip(RoundedCornerShape(12.dp))
+        .drawBehind {
+            drawRect(Brush.linearGradient(listOf(colors.first, colors.second), start = androidx.compose.ui.geometry.Offset.Zero,
+                end = androidx.compose.ui.geometry.Offset(size.width, size.height)))
+            drawCircle(Color.White.copy(alpha = 0.10f), radius = size.height * 0.75f,
+                center = androidx.compose.ui.geometry.Offset(size.width * 0.95f, size.height * 1.05f))
+        }
+        .youtubeCollectionActions(collection, click).padding(horizontal = 12.dp, vertical = 10.dp), contentAlignment = Alignment.TopStart) {
+        Text(collection.title, color = Color.White, fontSize = 16.sp, lineHeight = 19.sp, fontWeight = FontWeight.Bold, maxLines = 2, overflow = TextOverflow.Ellipsis)
+    }
+
+/** No imported playlists yet: what can be brought in, and the button that starts it. */
+@Composable private fun ImportInvite(onImport: () -> Unit) {
+    Column(Modifier.padding(horizontal = 18.dp).fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(LibraryFieldColor)
+        .padding(vertical = 18.dp, horizontal = 16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            SourceMark(Color(0xFF1DB954), Icons.Rounded.GraphicEq, Color.Black)
+            SourceMark(Color(0xFFFF0033), Icons.Rounded.PlayArrow, Color.White)
+        }
+        Spacer(Modifier.height(10.dp))
+        Text("Bring your playlists here", color = ink, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+        Text("From Spotify or YouTube, by link.", color = GroupLabelColor, fontSize = 13.sp, modifier = Modifier.padding(top = 2.dp))
+        Spacer(Modifier.height(12.dp))
+        Row(Modifier.clip(RoundedCornerShape(50)).background(ink).clickable(onClick = onImport)
+            .padding(start = 12.dp, end = 16.dp, top = 8.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.Rounded.Add, null, tint = paper, modifier = Modifier.size(18.dp))
+            Spacer(Modifier.width(4.dp))
+            Text("Import playlist", color = paper, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+        }
+    }
+}
+
+@Composable private fun SourceMark(color: Color, icon: androidx.compose.ui.graphics.vector.ImageVector, tint: Color) =
+    Box(Modifier.size(40.dp).clip(RoundedCornerShape(12.dp)).background(color), contentAlignment = Alignment.Center) {
+        Icon(icon, null, tint = tint, modifier = Modifier.size(24.dp))
     }
 
 @Composable
 private fun Header(title: String, seeAll: (() -> Unit)? = null, action: (@Composable () -> Unit)? = null, compact: Boolean = false) {
     Row(Modifier.fillMaxWidth().padding(horizontal = 18.dp).padding(top = if (compact) 16.dp else 22.dp, bottom = if (compact) 6.dp else 10.dp), verticalAlignment = Alignment.CenterVertically) {
         Text(title, color = ink, fontSize = 22.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
-        seeAll?.let {
-            Text("See all", color = AppAccent, fontSize = 15.sp,
-                modifier = Modifier.heightIn(min = 48.dp)
-                    .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = it)
-                    .padding(start = 12.dp, top = 14.dp, bottom = 14.dp))
-        }; action?.invoke()
+        seeAll?.let { SectionLink("See all", "See all $title", it) }; action?.invoke()
     }
 }
 
 private fun ResultSection.title() = name.lowercase().replaceFirstChar { it.uppercase() }
 private fun BrowseKind.label() = when (this) { BrowseKind.ARTIST -> "Artist"; BrowseKind.ALBUM -> "Album"; BrowseKind.PLAYLIST -> "Playlist"; BrowseKind.OTHER -> "YouTube Music" }
-private val GenreColors = listOf(Color(0xFF8A2846), Color(0xFF3C3489), Color(0xFF6B3D0F), Color(0xFF7A1F1F), Color(0xFF0F5E4A), Color(0xFF1D4F7A), Color(0xFF72243E), Color(0xFF3D4A1C))
+// Light corner to dark corner of each tile, brighter than plain fills so the page doesn't sit heavy.
+private val GenreColors = listOf(
+    Color(0xFFD6365C) to Color(0xFF8E1F3C), Color(0xFF5B4FE0) to Color(0xFF2E2690),
+    Color(0xFFE07A2A) to Color(0xFF9C4A12), Color(0xFF3B7BE0) to Color(0xFF1D4A96),
+    Color(0xFF17A37A) to Color(0xFF0B6148), Color(0xFF8C4FD6) to Color(0xFF52248F),
+    Color(0xFFE0368A) to Color(0xFF8F1754), Color(0xFF7DA22A) to Color(0xFF4A6312))
 
 // Words YouTube Music starts a card's line with to say what it is.
 private val KIND_WORDS = setOf("album", "single", "ep", "playlist", "artist", "song", "video", "podcast", "episode", "profile", "mix")
