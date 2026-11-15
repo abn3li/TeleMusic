@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.layout.LocalPinnableContainer
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.window.Popup
 import androidx.compose.ui.window.PopupProperties
@@ -44,8 +45,12 @@ private fun MenuLayer(state: MenuHostState) {
     LaunchedEffect(request.owner) { keyboard?.hide() }
     Box(Modifier.fillMaxSize()) {
         key(request.owner) {
-            // Keep the originating page's palette, editing actions and player insets.
-            CompositionLocalProvider(request.locals) { request.content() }
+            // Keep the originating page's palette, editing actions and player insets - but not
+            // its row's pin: a focused field in the menu would pin a row that can be disposed
+            // under it, and the pin would then be released twice.
+            CompositionLocalProvider(request.locals) {
+                CompositionLocalProvider(LocalPinnableContainer provides null) { request.content() }
+            }
         }
     }
 }
