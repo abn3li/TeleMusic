@@ -117,6 +117,8 @@ import androidx.compose.ui.window.Popup
 import androidx.compose.ui.window.PopupProperties
 import com.abn3li.telemusic.ui.nowplaying.LocalMiniPlayerInset
 import com.abn3li.telemusic.ui.navigation.FrostedBackdrop
+import com.abn3li.telemusic.ui.navigation.pinnedGlass
+import androidx.compose.ui.semantics.Role
 import com.abn3li.telemusic.ui.navigation.LocalFrostedDockVisible
 import com.abn3li.telemusic.ui.navigation.frostedBackdropSource
 import com.abn3li.telemusic.ui.navigation.frostedSurface
@@ -170,6 +172,10 @@ internal fun LargeTitleList(
     // A Settings-style page of grouped cards: grey page, white cards in the light theme.
     grouped: Boolean = false,
     showTopBar: Boolean = true,
+    // Stays at the top right in a glass circle while the page scrolls under it (the account).
+    pinnedButton: (@Composable () -> Unit)? = null,
+    onPinnedClick: () -> Unit = {},
+    pinnedDescription: String? = null,
     content: LazyListScope.() -> Unit
 ) {
     val palette = LocalPalette.current
@@ -180,7 +186,7 @@ internal fun LargeTitleList(
         }
     }
     CompositionLocalProvider(LocalPalette provides if (grouped) palette.groupedPage() else palette) {
-        LargeTitleListBody(title, onBack, listState, titleTrailing, barActions, stickyContent, stickyHeight, overlay, showTopBar, content)
+        LargeTitleListBody(title, onBack, listState, titleTrailing, barActions, stickyContent, stickyHeight, overlay, showTopBar, pinnedButton, onPinnedClick, pinnedDescription, content)
     }
 }
 
@@ -195,6 +201,9 @@ private fun LargeTitleListBody(
     stickyHeight: Dp,
     overlay: (@Composable BoxScope.() -> Unit)?,
     showTopBar: Boolean,
+    pinnedButton: (@Composable () -> Unit)?,
+    onPinnedClick: () -> Unit,
+    pinnedDescription: String?,
     content: LazyListScope.() -> Unit
 ) {
     var barHeightPx by remember { mutableIntStateOf(0) }
@@ -231,7 +240,11 @@ private fun LargeTitleListBody(
             ),
             contentPadding = PaddingValues(top = statusBar + if (showTopBar) LibraryBarHeight else 0.dp)
         ) {
-            item("large_title") { if (LocalLibraryEditing.current?.active != true) LargeTitle(title, titleTrailing, { titleAlpha }) }
+            item("large_title") {
+                if (LocalLibraryEditing.current?.active != true) {
+                    LargeTitle(title, if (pinnedButton != null) { { Spacer(Modifier.size(PinnedButtonSize)) } } else titleTrailing, { titleAlpha })
+                }
+            }
             if (stickyContent != null) item("sticky_space") { Spacer(Modifier.height(stickyHeight)) }
             content()
             item("bottom_inset") { Spacer(Modifier.height(bottomInset)) }
@@ -263,8 +276,28 @@ private fun LargeTitleListBody(
             showToolbar = showTopBar,
             modifier = Modifier.onSizeChanged { barHeightPx = it.height }
         )
+        if (pinnedButton != null && LocalLibraryEditing.current?.active != true) {
+            // Centred on the large title's line at rest (8dp above it, 40sp line).
+            Box(
+                Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(top = statusBar + 6.dp, end = 14.dp)
+                    .size(PinnedButtonSize)
+                    .frostedSurface(backdrop, shape = CircleShape, glass = pinnedGlass(LocalPalette.current.isLight))
+                    .clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null,
+                        role = Role.Button,
+                        onClickLabel = pinnedDescription,
+                        onClick = onPinnedClick
+                    ),
+                contentAlignment = Alignment.Center
+            ) { pinnedButton() }
+        }
     }
 }
+
+private val PinnedButtonSize = 44.dp
 
 /** Grid counterpart of [LargeTitleList] (the Albums page): two columns, 18dp gutters. */
 @Composable

@@ -118,6 +118,7 @@ internal fun ClassicDock(
     if (!showTabs && state.song == null) return
     val hasMini = state.song != null
     val folded = collapse.collapsed && hasMini && showTabs
+    LaunchedEffect(folded) { com.abn3li.telemusic.crash.CrashTrail.set("Dock", if (folded) "folded" else "open") }
     val fold = animateFloatAsState(if (folded) 1f else 0f,
         spring(dampingRatio = 0.86f, stiffness = 380f), label = "dockFold")
 
@@ -342,6 +343,7 @@ private fun ClassicMiniPlayer(
         modifier
             .drawBehind { if (press.value > 0.001f) drawRect(ink.copy(alpha = 0.12f * press.value)) }
             .clickable(interaction, indication = null) {
+                com.abn3li.telemusic.crash.CrashTrail.note("Mini player tapped")
                 haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove); onExpand()
             }
             .graphicsLayer { val s = 1f - 0.035f * press.value; scaleX = s; scaleY = s }
@@ -358,6 +360,7 @@ private fun ClassicMiniPlayer(
                 val travel = swipeTravel[0]
                 if (abs(travel) >= threshold || abs(velocity) >= 1400f) {
                     val forward = if (abs(velocity) >= 1400f) velocity < 0f else travel < 0f
+                    com.abn3li.telemusic.crash.CrashTrail.note(if (forward) "Mini player swiped to next" else "Mini player swiped to previous")
                     if ((forward && latestState.hasNext) || (!forward && latestState.hasPrevious)) {
                         haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                         if (forward) latestNext() else latestPrevious()

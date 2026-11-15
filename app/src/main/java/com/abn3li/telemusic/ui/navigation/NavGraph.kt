@@ -268,7 +268,13 @@ fun TgMusicNavGraph(navController: NavHostController = rememberNavController()) 
     // Scrolling a page down folds the dock; each new page starts with it open.
     val dockThreshold = with(LocalDensity.current) { 40.dp.toPx() }
     val dockCollapse = remember(dockThreshold) { DockCollapse(dockThreshold) }
-    LaunchedEffect(currentRoute) { dockCollapse.collapsed = false }
+    LaunchedEffect(currentRoute) {
+        dockCollapse.collapsed = false
+        com.abn3li.telemusic.crash.CrashTrail.set("Screen", currentRoute ?: "none")
+    }
+    LaunchedEffect(playerState.song?.telegramMessageId) {
+        playerState.song?.let { com.abn3li.telemusic.crash.CrashTrail.note("Song: ${'$'}{it.title}") }
+    }
     val floatingInsetExtra = (15.dp - navBarInset).coerceAtLeast(0.dp)
     // Detail pages keep the same floating player, with space reserved only for the visible rows.
     val miniPlayerInset = if (showBottomBar) {
@@ -341,7 +347,8 @@ fun TgMusicNavGraph(navController: NavHostController = rememberNavController()) 
                 }
                 composable(Routes.DISCOVER) {
                     DiscoverScreen(
-                        onOpenCollection = { c -> navController.navigate(Routes.youtubeBrowse(c.browseId, c.title, c.params)) }
+                        onOpenCollection = { c -> navController.navigate(Routes.youtubeBrowse(c.browseId, c.title, c.params)) },
+                        onOpenSettings = { navController.navigate(Routes.SETTINGS) }
                     )
                 }
                 composable(Routes.SEARCH) {

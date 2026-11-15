@@ -192,6 +192,7 @@ fun PlayerSheetOverlay(
     }
     // The player is dark in both themes: the system bars follow it while it's open.
     SideEffect { SystemBarsState.playerOpen = isExpanded }
+    LaunchedEffect(isExpanded) { com.abn3li.telemusic.crash.CrashTrail.set("Player", if (isExpanded) "open" else "closed") }
 
     DarkPlayerTheme {
     NowPlayingContent(

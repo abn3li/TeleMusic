@@ -159,7 +159,12 @@ internal class NativeFrostedSource {
 internal fun Modifier.frostedSurface(
     backdrop: FrostedBackdrop,
     shape: Shape = RoundedCornerShape(percent = 50),
-    drawBorder: Boolean = true
+    drawBorder: Boolean = true,
+    // Over the blur; null keeps the bar's denser veil.
+    tintAlpha: Float? = null,
+    // A lighter material of its own (the pinned account circle): its veil, its solid stand-in
+    // when there's nothing to blur yet, and its edge.
+    glass: FrostedGlass? = null
 ): Modifier {
     val palette = LocalPalette.current
     val light = palette.isLight
@@ -172,7 +177,7 @@ internal fun Modifier.frostedSurface(
         .clip(shape)
         .drawWithCache {
             val border = Stroke(0.5.dp.toPx())
-            val tint = if (light) Color(0xFFF7F7F9) else Color(0xFF0D0D0F)
+            val tint = glass?.tint ?: if (light) Color(0xFFF7F7F9) else Color(0xFF0D0D0F)
             onDrawWithContent {
                 val source = backdrop.source
                 val canvas = drawContext.canvas.nativeCanvas
@@ -183,13 +188,28 @@ internal fun Modifier.frostedSurface(
                     // Add grain at display resolution. Upscaling the blur must not enlarge its dots.
                     drawRect(FrostedGrain.brush)
                 }
-                drawRect(tint.copy(alpha = if (sampled) { if (light) 0.73f else 0.8f } else 1f))
+                when {
+                    sampled && glass != null -> drawRect(glass.tint)
+                    sampled -> drawRect(tint.copy(alpha = tintAlpha ?: if (light) 0.73f else 0.8f))
+                    glass != null -> drawRect(glass.solid)
+                    else -> drawRect(tint)
+                }
                 if (drawBorder) {
-                    drawRoundRect(Color.White.copy(alpha = 0.10f), cornerRadius = CornerRadius(size.height / 2f), style = border)
+                    drawRoundRect(glass?.edge ?: Color.White.copy(alpha = 0.10f), cornerRadius = CornerRadius(size.height / 2f), style = border)
                 }
                 drawContent()
             }
         }
+}
+
+/** A frosted material lighter than the bars': [tint] over the blur, [solid] without one, [edge] around it. */
+internal class FrostedGlass(val tint: Color, val solid: Color, val edge: Color)
+
+/** The dock's own glass, with a clearer edge: on a bare page the edge is what shows the circle. */
+internal fun pinnedGlass(light: Boolean): FrostedGlass {
+    val tint = if (light) Color(0xFFF7F7F9) else Color(0xFF0D0D0F)
+    return FrostedGlass(tint.copy(alpha = DockGlassTint(light)), tint,
+        if (light) Color.Black.copy(alpha = 0.08f) else Color.White.copy(alpha = 0.26f))
 }
 
 /** Capsules (the dock's player and tabs) that share one frosted material - see [frostedCapsuleGroup]. */
@@ -272,7 +292,7 @@ internal fun Modifier.frostedCapsuleGroup(backdrop: FrostedBackdrop, capsules: F
 // The dock is clearer glass than the headers: more of the page shows through its blur, with a
 // brighter edge to hold its shape. Light glass stays whiter, or dark artwork under it turns it
 // grey and the grey labels on it fade.
-private fun DockGlassTint(light: Boolean) = if (light) 0.72f else 0.58f
+internal fun DockGlassTint(light: Boolean) = if (light) 0.72f else 0.58f
 private const val DockGlassEdge = 0.16f
 
 /** The page's picture, once it has one to sample. */

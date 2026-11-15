@@ -1,4 +1,6 @@
 package com.abn3li.telemusic.ui.search
+import com.abn3li.telemusic.ui.library.PinnedAccountSize
+import com.abn3li.telemusic.ui.library.AccountBadge
 import androidx.compose.material.icons.rounded.GraphicEq
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.draw.drawBehind
@@ -268,7 +270,7 @@ fun SearchScreen(
 }
 
 @Composable
-fun DiscoverScreen(onOpenCollection: (BrowseCollection) -> Unit) {
+fun DiscoverScreen(onOpenCollection: (BrowseCollection) -> Unit, onOpenSettings: () -> Unit) {
     val app = LocalContext.current.applicationContext as TgMusicApp
     val discovery = viewModel<DiscoveryViewModel>(factory = viewModelFactory { initializer {
         DiscoveryViewModel(app.ytDlpRepository, app.discoveryRepository)
@@ -277,7 +279,9 @@ fun DiscoverScreen(onOpenCollection: (BrowseCollection) -> Unit) {
     var showImport by remember { mutableStateOf(false) }
     if (showImport) ImportPlaylistPrompt(discovery) { showImport = false }
     // No top bar, like Home: the large title sits at the same height on both tabs.
-    LargeTitleList(title = "Discover", showTopBar = false) {
+    val account by app.youtubeAccount.state.collectAsState()
+    LargeTitleList(title = "Discover", showTopBar = false, pinnedButton = { AccountBadge(account, null, PinnedAccountSize) },
+        onPinnedClick = onOpenSettings, pinnedDescription = "Settings") {
         item("imported_header") { Header("Your Imported Playlists", action = if (feed.importedPlaylists.isEmpty()) null else {
             {
                 Icon(Icons.Rounded.Add, "Import playlist", tint = AppAccent,

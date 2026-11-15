@@ -157,7 +157,9 @@ fun HomeScreen(
                     modifier = Modifier.align(Alignment.TopCenter))
             }
         },
-        titleTrailing = { AccountBadge(newReleases.account, onOpenSettings) }
+        pinnedButton = { AccountBadge(newReleases.account, null, PinnedAccountSize) },
+        onPinnedClick = onOpenSettings,
+        pinnedDescription = "Settings"
     ) {
         // The last song played, large, with its own blurred colours: one tap back into it. Shown
         // with either feed on - the last song may be a library song or a YouTube one.
@@ -343,14 +345,17 @@ internal fun SectionLink(text: String, description: String, onClick: () -> Unit,
     }
 }
 
+/** The account photo's size inside the pinned glass circle. */
+internal val PinnedAccountSize = 32.dp
+
 /** Your account: its photo, else your first letter on the accent, else a plain person. Opens Settings. */
 @Composable
-internal fun AccountBadge(account: com.abn3li.telemusic.data.youtube.YouTubeAccountState, onClick: () -> Unit) {
+internal fun AccountBadge(account: com.abn3li.telemusic.data.youtube.YouTubeAccountState, onClick: (() -> Unit)?, size: androidx.compose.ui.unit.Dp = 34.dp) {
     val initial = account.name?.trim()?.firstOrNull()?.uppercaseChar()
     Box(
-        Modifier.size(34.dp).clip(CircleShape)
+        Modifier.size(size).clip(CircleShape)
             .semantics { contentDescription = "Settings" }
-            .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onClick)
+            .then(if (onClick != null) Modifier.clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onClick) else Modifier)
             .then(if (initial != null) Modifier.background(Brush.linearGradient(listOf(AppAccent, AppAccent.copy(red = AppAccent.red * 0.7f, green = AppAccent.green * 0.6f, blue = AppAccent.blue * 0.75f)))) else Modifier),
         contentAlignment = Alignment.Center
     ) {

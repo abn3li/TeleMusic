@@ -44,7 +44,8 @@ internal object CrashReporter {
         Thread.setDefaultUncaughtExceptionHandler { thread, error ->
             runCatching {
                 // The crash first: if the log can't be read, this much is already saved.
-                val report = header(app, "Crash") + "Thread: ${thread.name}\n\n${error.stackTraceToString()}\n"
+                val trail = runCatching { CrashTrail.text() }.getOrDefault("")
+                val report = header(app, "Crash") + trail + "Thread: ${thread.name}\n\n${error.stackTraceToString()}\n"
                 save(app, report)
                 reportFile(app).appendText(logSection(Process.myPid()))
                 showPending(app)

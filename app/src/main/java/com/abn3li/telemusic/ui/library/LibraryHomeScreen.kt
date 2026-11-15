@@ -73,7 +73,8 @@ fun LibraryHomeScreen(
     var createPlaylist by rememberSaveable { mutableStateOf(false) }
 
     // No top bar, like Home and Discover: the large title sits at the same height on every tab.
-    LargeTitleList(title = "Library", showTopBar = false, titleTrailing = { AccountBadge(account, onOpenSettings) }) {
+    LargeTitleList(title = "Library", showTopBar = false, pinnedButton = { AccountBadge(account, null, PinnedAccountSize) },
+        onPinnedClick = onOpenSettings, pinnedDescription = "Settings") {
         item("links", contentType = "library_links") {
             Column(Modifier.fillMaxWidth().padding(top = 10.dp)) {
                 LibraryCategoryRow(Icons.AutoMirrored.Rounded.QueueMusic, "Playlists", playlists.size, onOpenPlaylists) { createPlaylist = true }
