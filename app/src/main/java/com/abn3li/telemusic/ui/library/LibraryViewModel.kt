@@ -277,11 +277,12 @@ class LibraryViewModel(private val repository: MusicRepository) : ViewModel() {
     /** The row menu's "Clear song" item - removes the song from the library entirely. */
     fun clearSong(song: SongEntity) = viewModelScope.launch { repository.clearSong(song) }
 
-    /** The long-press-on-a-coverless-row dialog's "Fetch artwork" action - see
-     * MusicRepository.editSongAndFetchArtwork's own doc. Suspend, not viewModelScope.launch,
-     * since the dialog itself needs the found/not-found result to decide whether to dismiss. */
-    suspend fun editSongAndFetchArtwork(song: SongEntity, title: String, artist: String): Boolean =
-        repository.editSongAndFetchArtwork(song, title, artist)
+    /** Find Artwork: the covers to choose from, then saving the one picked. Suspend, since the
+     * dialog waits for both. */
+    suspend fun artworkChoices(title: String, artist: String) = repository.artworkChoices(title, artist)
+
+    suspend fun setSongArtwork(song: SongEntity, title: String, artist: String, choice: com.abn3li.telemusic.repository.ArtworkChoice) =
+        repository.setSongArtwork(song, title, artist, choice)
 }
 
 /** Which songs the Songs page lists. */

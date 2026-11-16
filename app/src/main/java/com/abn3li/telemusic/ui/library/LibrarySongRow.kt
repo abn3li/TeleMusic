@@ -48,6 +48,10 @@ import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.union
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.material.icons.rounded.Check
+import com.abn3li.telemusic.repository.ArtworkChoice
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.rounded.MoreHoriz
@@ -135,7 +139,7 @@ internal class LibrarySongActions(
     val onAddToPlaylist: (Long, SongEntity) -> Unit,
     val onCreatePlaylistAndAdd: (String, SongEntity) -> Unit,
     val onCreatePlaylistAndAddSongs: (String, List<SongEntity>) -> Unit,
-    val onFindArtwork: suspend (SongEntity, String, String) -> Boolean,
+    val onFindArtwork: ArtworkFinder,
     val onGoToArtist: (String) -> Unit,
     val onGoToAlbum: (String) -> Unit,
     val onDownloadSongs: (List<SongEntity>) -> Unit = { songs -> songs.forEach(onDownload) },
@@ -396,7 +400,7 @@ internal fun SongContextMenu(song: SongEntity, actions: LibrarySongActions, anch
             onFindArtwork = { showArtworkDialog = true },
             onToast = { Toast.makeText(context, it, Toast.LENGTH_SHORT).show() })
         if (showArtworkDialog) FindArtworkDialog(song,
-            onFind = { title, artist -> actions.onFindArtwork(song, title, artist) },
+            finder = actions.onFindArtwork,
             onDismiss = { showArtworkDialog = false; onAction {} })
     }
 }
@@ -708,33 +712,111 @@ internal fun PlaylistPicker(playlists: List<PlaylistEntity>, onPick: (PlaylistEn
     }
 }
 
-/** For a song with no cover: correct its title/artist and look the artwork up again. */
+/** Find Artwork's two steps: the covers for a title/artist, then saving the one picked. */
+internal class ArtworkFinder(
+    val search: suspend (String, String) -> List<ArtworkChoice>,
+    val use: suspend (SongEntity, String, String, ArtworkChoice) -> Unit
+)
+
+/** Correct the song's title/artist, search, then pick a cover from the results. */
 @Composable
-private fun FindArtworkDialog(song: SongEntity, onFind: suspend (String, String) -> Boolean, onDismiss: () -> Unit) {
+private fun FindArtworkDialog(song: SongEntity, finder: ArtworkFinder, onDismiss: () -> Unit) {
     var title by remember { mutableStateOf(song.title) }
     var artist by remember { mutableStateOf(song.artist) }
-    var searching by remember { mutableStateOf(false) }
+    var busy by remember { mutableStateOf(false) }
     var notFound by remember { mutableStateOf(false) }
+    var choices by remember { mutableStateOf<List<ArtworkChoice>?>(null) }
+    var picked by remember { mutableIntStateOf(0) }
     val scope = rememberCoroutineScope()
-    AppAlert(
-        title = "Find Artwork",
-        message = "Correct the title and artist, then search again.",
-        onDismiss = { if (!searching) onDismiss() },
-        actions = listOf(
-            AlertAction("Cancel", enabled = !searching, onClick = onDismiss),
-            AlertAction("Search", bold = true, enabled = title.isNotBlank(), loading = searching) {
-                searching = true
-                scope.launch {
-                    val found = onFind(title.trim(), artist.trim())
-                    searching = false
-                    if (found) onDismiss() else notFound = true
+    val shown = choices
+    if (shown == null) {
+        AppAlert(
+            title = "Find Artwork",
+            message = "Correct the title and artist, then search again.",
+            onDismiss = { if (!busy) onDismiss() },
+            actions = listOf(
+                AlertAction("Cancel", enabled = !busy, onClick = onDismiss),
+                AlertAction("Search", bold = true, enabled = title.isNotBlank(), loading = busy) {
+                    busy = true
+                    scope.launch {
+                        val found = finder.search(title.trim(), artist.trim())
+                        busy = false
+                        if (found.isEmpty()) notFound = true else { picked = 0; choices = found }
+                    }
+                }
+            )
+        ) {
+            AlertTextField(title, { title = it; notFound = false }, "Title")
+            Spacer(Modifier.height(8.dp))
+            AlertTextField(artist, { artist = it; notFound = false }, "Artist")
+            if (notFound) AlertNote("No artwork found for that title and artist.", color = DestructiveRed)
+        }
+    } else {
+        AppAlert(
+            title = "Choose Artwork",
+            message = if (shown.size == 1) "1 cover found" else "${shown.size} covers found",
+            onDismiss = { if (!busy) onDismiss() },
+            actions = listOf(
+                AlertAction("Back", enabled = !busy) { choices = null },
+                AlertAction("Use", bold = true, loading = busy) {
+                    busy = true
+                    scope.launch {
+                        finder.use(song, title.trim(), artist.trim(), shown[picked])
+                        onDismiss()
+                    }
+                }
+            )
+        ) {
+            ArtworkGrid(shown, picked, onPick = { if (!busy) picked = it })
+            val choice = shown[picked]
+            Column(Modifier.fillMaxWidth().padding(top = 10.dp)) {
+                Text(choice.album ?: title.trim(), color = ink, fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
+                    maxLines = 1, overflow = TextOverflow.Ellipsis)
+                choice.artist?.let {
+                    Text(it, color = ink.copy(alpha = 0.6f), fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
             }
-        )
+        }
+    }
+}
+
+@Composable
+private fun ArtworkGrid(choices: List<ArtworkChoice>, picked: Int, onPick: (Int) -> Unit) {
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        choices.chunked(3).forEachIndexed { row, items ->
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                for (column in 0 until 3) {
+                    val index = row * 3 + column
+                    val choice = items.getOrNull(column)
+                    Box(Modifier.weight(1f).aspectRatio(1f)) {
+                        if (choice != null) ArtworkTile(choice, selected = index == picked) { onPick(index) }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ArtworkTile(choice: ArtworkChoice, selected: Boolean, onClick: () -> Unit) {
+    val shape = RoundedCornerShape(6.dp)
+    Box(
+        Modifier
+            .fillMaxSize()
+            .then(if (selected) Modifier.border(2.5.dp, AppAccent, RoundedCornerShape(8.dp)).padding(3.5.dp) else Modifier)
+            .clip(shape)
+            .background(LocalPalette.current.field)
+            .clickable(onClick = onClick)
     ) {
-        AlertTextField(title, { title = it; notFound = false }, "Title")
-        Spacer(Modifier.height(8.dp))
-        AlertTextField(artist, { artist = it; notFound = false }, "Artist")
-        if (notFound) AlertNote("No artwork found for that title and artist.", color = DestructiveRed)
+        AsyncImage(choice.artworkUrl, null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+        if (selected) {
+            Box(
+                Modifier.align(Alignment.BottomEnd).padding(3.dp).size(18.dp)
+                    .clip(CircleShape).background(AppAccent).border(1.5.dp, Color.White, CircleShape),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(Icons.Rounded.Check, null, tint = Color.White, modifier = Modifier.size(12.dp))
+            }
+        }
     }
 }

@@ -115,7 +115,7 @@ internal fun rememberLibrarySongActions(
             onAddToPlaylist = { id, song -> viewModel.addSongToPlaylist(id, song) },
             onCreatePlaylistAndAdd = { name, song -> viewModel.createPlaylistAndAddSong(name, song) },
             onCreatePlaylistAndAddSongs = { name, songs -> viewModel.createPlaylistAndAddSongs(name, songs) },
-            onFindArtwork = { song, title, artist -> viewModel.editSongAndFetchArtwork(song, title, artist) },
+            onFindArtwork = ArtworkFinder(viewModel::artworkChoices, viewModel::setSongArtwork),
             onGoToArtist = onGoToArtist,
             onGoToAlbum = onGoToAlbum,
             onDownloadSongs = { songs -> app.downloadGate.run { viewModel.downloadSongs(songs) } }

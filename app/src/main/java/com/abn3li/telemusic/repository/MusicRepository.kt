@@ -1259,18 +1259,15 @@ class MusicRepository(
         }
     }
 
-    /** The long-press-on-a-coverless-song flow: lets the user correct a mis-tagged title/artist
-     * (common for Telegram audio with garbage or missing tags) and re-runs the same
-     * iTunes -> Deezer -> MusicBrainz lookup enrichMissingMetadata uses, keyed off the user's own
-     * correction instead of a guess. Unlike that bulk pass, this ALWAYS overwrites title/artist -
-     * correcting them is the whole point of this flow, not a fallback for "Unknown title". Returns
-     * whether artwork was actually found; the title/artist correction is saved either way. */
-    suspend fun editSongAndFetchArtwork(song: SongEntity, newTitle: String, newArtist: String): Boolean {
-        val enriched = metadataRepository.enrich(newTitle, newArtist, song.durationSeconds)
-        songDao.setSongInfo(song.telegramMessageId, newTitle, newArtist, enriched?.album ?: song.album, enriched?.artworkUrl ?: song.albumArtUrl)
-        val artUrl = enriched?.artworkUrl ?: return false
-        ensureThumbnail(song.telegramMessageId, artUrl)
-        return true
+    suspend fun artworkChoices(title: String, artist: String): List<ArtworkChoice> =
+        metadataRepository.artworkChoices(title, artist)
+
+    /** Saves the corrected title/artist with the cover the person picked, replacing any old one. */
+    suspend fun setSongArtwork(song: SongEntity, newTitle: String, newArtist: String, choice: ArtworkChoice) {
+        songDao.setSongInfo(song.telegramMessageId, newTitle, newArtist, choice.album ?: song.album, choice.artworkUrl)
+        val thumbnail = thumbnailGenerator.replaceThumbnail(song.telegramMessageId, choice.artworkUrl, song.thumbnailPath)
+        // No thumbnail (offline): rows show the picture from its link, and the backfill makes one later.
+        songDao.setThumbnailPath(song.telegramMessageId, thumbnail ?: "")
     }
 
     /** Generates a small local thumbnail for [songId] from [artUrl] if it doesn't have one yet. */

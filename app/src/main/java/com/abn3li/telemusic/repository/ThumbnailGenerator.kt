@@ -60,6 +60,18 @@ class ThumbnailGenerator(private val context: Context) {
         if (saved) file.absolutePath else null
     }
 
+    /**
+     * A new small thumbnail for a song whose cover was changed by hand, under a new name so no
+     * image cache shows the old picture; the old one ([oldPath], if it is ours) is deleted.
+     * Returns the new path, or null when it couldn't be made.
+     */
+    suspend fun replaceThumbnail(songId: Long, sourceUrl: String, oldPath: String?): String? = withContext(Dispatchers.IO) {
+        val file = File(directory, "$songId-${System.currentTimeMillis()}.jpg")
+        val made = runCatching { saveScaled(sourceUrl, file, 160, 82, memoryCache = false) == null }.getOrDefault(false)
+        oldPath?.let { File(it) }?.takeIf { it.parentFile == directory && it != file }?.delete()
+        if (made) file.absolutePath else { file.delete(); null }
+    }
+
     fun deletePlaylistCover(path: String) {
         File(path).delete()
         File(playlistCoverThumbPath(path)).delete()
