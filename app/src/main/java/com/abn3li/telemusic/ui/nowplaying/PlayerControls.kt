@@ -241,6 +241,9 @@ internal fun TransportRow(
         TransportButton(Icons.Rounded.FastRewind, "Previous", 44.dp, state.hasPrevious, onPrevious)
         Spacer(Modifier.width(34.dp))
         val loading = visualsActive && (state.isBuffering || state.loadingSongId != null)
+        // Where the play button rests, for the copy that flies here from the mini player (and
+        // hidden while it does).
+        val morph = LocalPlayerTransition.current
         TransportButton(
             icon = if (state.isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
             contentDescription = if (state.isPlaying) "Pause" else "Play",
@@ -248,7 +251,10 @@ internal fun TransportRow(
             enabled = true,
             onClick = onPlayPause,
             animateSwap = true,
-            loading = loading
+            loading = loading,
+            modifier = Modifier
+                .playerRestingSpot(morph) { playerPlay = it }
+                .graphicsLayer { alpha = if (morph?.playFlying?.invoke() == true) 0f else 1f }
         )
         Spacer(Modifier.width(34.dp))
         TransportButton(Icons.Rounded.FastForward, "Next", 44.dp, state.hasNext, onNext)
@@ -263,7 +269,8 @@ private fun TransportButton(
     enabled: Boolean,
     onClick: () -> Unit,
     animateSwap: Boolean = false,
-    loading: Boolean = false
+    loading: Boolean = false,
+    modifier: Modifier = Modifier
 ) {
     val interaction = remember { MutableInteractionSource() }
     val pressed by interaction.collectIsPressedAsState()
@@ -278,7 +285,7 @@ private fun TransportButton(
     val alpha by animateFloatAsState(if (enabled) 1f else 0.3f, label = "transportAlpha")
 
     Box(
-        modifier = Modifier
+        modifier = modifier
             .size(iconSize + 22.dp)
             .graphicsLayer { scaleX = scale; scaleY = scale }
             .clickable(interactionSource = interaction, indication = null, enabled = enabled) {

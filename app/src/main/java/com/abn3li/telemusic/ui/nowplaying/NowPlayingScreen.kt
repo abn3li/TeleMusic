@@ -88,6 +88,18 @@ import com.abn3li.telemusic.data.local.displayArtwork
 import com.abn3li.telemusic.TgMusicApp
 import com.abn3li.telemusic.data.settings.PlayerEffects
 import androidx.compose.ui.geometry.Size
+import androidx.compose.material.icons.rounded.Pause
+import androidx.compose.material.icons.rounded.PlayArrow
+import androidx.compose.animation.core.AnimationSpec
+import androidx.compose.ui.text.font.FontFamily
+import com.abn3li.telemusic.ui.theme.LocalPalette
+import androidx.compose.ui.geometry.RoundRect
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.graphics.Outline
+import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.graphics.TransformOrigin
+import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.LayoutDirection
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
@@ -95,10 +107,10 @@ import kotlinx.coroutines.launch
 import java.io.File
 import kotlin.math.roundToInt
 
-/** Opening and closing from a tap or Back: one even movement that starts gently and lands without
- * a slow last stretch, so every staged part (see the constants below) gets real time on screen. */
-private val SHEET_OPEN_SPEC = tween<Float>(340, easing = CubicBezierEasing(0.3f, 0f, 0.15f, 1f))
-private val SHEET_CLOSE_SPEC = tween<Float>(300, easing = CubicBezierEasing(0.4f, 0f, 0.3f, 1f))
+/** Opening and closing from a tap or Back: a spring with no bounce - quick off the mark, settling
+ * softly - the same physics a finger's release carries on with. */
+private val SHEET_OPEN_SPEC: AnimationSpec<Float> = spring(dampingRatio = 1f, stiffness = 320f)
+private val SHEET_CLOSE_SPEC: AnimationSpec<Float> = spring(dampingRatio = 1f, stiffness = 340f)
 /** Settling after a finger lets go mid-way: carries on from the finger's own speed, no overshoot. */
 private val SHEET_RELEASE_SPEC = spring<Float>(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = 550f)
 /** The artwork's move between the big cover and the small header on the Lyrics/Queue pages. */
@@ -107,6 +119,155 @@ private val EaseOutQuart = CubicBezierEasing(0.25f, 1f, 0.5f, 1f)
 private const val CONTROLS_AUTO_HIDE_MS = 2500L
 
 private fun lerpFloat(start: Float, stop: Float, fraction: Float) = start + (stop - start) * fraction
+
+/** The share of the movement, at each end, over which the growing card and the mini player's
+ * glass blend into each other. Shared with the dock (ClassicDock fades the mini player out
+ * over the same stretch). */
+const val CARD_BLEND = 0.12f
+
+/** How far into the movement the flying cover reaches the card's full width. */
+private const val COVER_FILL_AT = 0.3f
+
+/** The growing card's bottom edge reaches the screen's bottom early (by 40%, easing in), so its
+ * rounded bottom corners sit on the screen's own instead of uncovering the dock under them. */
+private fun cardBottomProgress(e: Float): Float = 1f - (1f - (e / 0.4f).coerceIn(0f, 1f)).let { it * it }
+
+/** The card's top edge reaches the screen's top by 80%, so no strip of the page lingers above it. */
+/** How much of the flying cover shows, in its own unscaled height, while it grows out of the thumbnail. */
+private fun flyingCoverShown(
+    e: Float, mini: androidx.compose.ui.geometry.Rect, boxWidth: Float, boxHeight: Float, parentHeight: Float, miniArtSide: Float
+): Float {
+    val cardLeft = lerpFloat(mini.left, 0f, e)
+    val cardTop = lerpFloat(mini.top, 0f, cardTopProgress(e))
+    val cardWidth = lerpFloat(mini.right, boxWidth, e) - cardLeft
+    val cardBottom = lerpFloat(mini.bottom, parentHeight, cardBottomProgress(e))
+    val a = 1f - (1f - (e / COVER_FILL_AT).coerceIn(0f, 1f)).let { it * it }
+    val width = lerpFloat(miniArtSide, cardWidth, a)
+    val top = cardTop + lerpFloat((mini.height - miniArtSide) / 2f, 0f, a)
+    val height = minOf(lerpFloat(miniArtSide, boxHeight, a), cardBottom - top)
+    return height / (width / boxWidth)
+}
+
+private fun cardTopProgress(e: Float): Float = 1f - (1f - (e / 0.8f).coerceIn(0f, 1f)).let { it * it }
+
+/** The card's corners: the mini player's round ends at first, then square again by the end, so
+ * they never sit rounded on the screen's square-ish corners and then snap. */
+private fun cardCornerAt(e: Float, miniRound: Float, cardRound: Float): Float =
+    lerpFloat(miniRound, cardRound, (e * 4f).coerceAtMost(1f)) * (1f - ((e - 0.75f) / 0.25f).coerceIn(0f, 1f))
+
+// The mini player's and the open player's title / artist sizes (ClassicMiniPlayer, PlayerPageArea).
+private const val MINI_TITLE_SP = 14f
+private const val PLAYER_TITLE_SP = 21f
+// Their play icons (ClassicMiniPlayer, TransportRow).
+private const val MINI_PLAY_DP = 32f
+private const val PLAYER_PLAY_DP = 54f
+
+/**
+ * The title, artist and play button on their way between the mini player and the open player:
+ * each is drawn twice, as the mini player draws it and as the player does, both moving and
+ * scaling along the same path while one fades into the other. Layer moves only.
+ */
+@Composable
+private fun FlyingPlayerParts(
+    title: String,
+    artist: String,
+    isPlaying: Boolean,
+    transition: PlayerTransition,
+    textFlying: () -> Boolean,
+    playFlying: () -> Boolean,
+    modifier: Modifier
+) {
+    val ink = LocalPalette.current.ink
+    val density = LocalDensity.current
+    val e = transition.expansion
+    // Shared by every copy: how far along its path it is, and how far it has turned into the
+    // player's version (done by 35% - the card is solid dark well before that).
+    fun travel() = e.value
+    fun handover() = (e.value / 0.35f).coerceIn(0f, 1f)
+    Box(modifier.fillMaxSize()) {
+        val mini = transition.miniText
+        val big = transition.playerText
+        if (!mini.isEmpty && !big.isEmpty) {
+            val ratio = MINI_TITLE_SP / PLAYER_TITLE_SP
+            // As the mini player draws it, growing toward the player's size.
+            Column(
+                Modifier
+                    .width(with(density) { mini.width.toDp() })
+                    .graphicsLayer {
+                        if (!textFlying()) { alpha = 0f; return@graphicsLayer }
+                        val t = travel()
+                        val s = lerpFloat(1f, 1f / ratio, t)
+                        transformOrigin = TransformOrigin(0f, 0f)
+                        scaleX = s; scaleY = s
+                        translationX = lerpFloat(mini.left, big.left, t)
+                        translationY = lerpFloat(mini.top, big.top, t)
+                        alpha = 1f - handover()
+                    }
+            ) {
+                Text(title, color = ink, fontSize = MINI_TITLE_SP.sp, fontWeight = FontWeight.SemiBold,
+                    fontFamily = FontFamily.SansSerif, letterSpacing = 0.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(artist, color = ink.copy(alpha = 0.6f), fontSize = 11.sp,
+                    fontFamily = FontFamily.SansSerif, letterSpacing = 0.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+            // As the player draws it, shrunk to the mini player's size at first.
+            Column(
+                Modifier
+                    .width(with(density) { big.width.toDp() })
+                    .graphicsLayer {
+                        if (!textFlying()) { alpha = 0f; return@graphicsLayer }
+                        val t = travel()
+                        val s = lerpFloat(ratio, 1f, t)
+                        transformOrigin = TransformOrigin(0f, 0f)
+                        scaleX = s; scaleY = s
+                        translationX = lerpFloat(mini.left, big.left, t)
+                        translationY = lerpFloat(mini.top, big.top, t)
+                        alpha = handover()
+                    }
+            ) {
+                Text(title, color = Color.White, fontSize = PLAYER_TITLE_SP.sp, fontWeight = FontWeight.SemiBold,
+                    maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(artist, color = Color.White.copy(alpha = 0.55f), fontSize = 18.sp,
+                    maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+        }
+        val miniPlay = transition.miniPlay
+        val bigPlay = transition.playerPlay
+        if (!miniPlay.isEmpty && !bigPlay.isEmpty) {
+            val icon = if (isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow
+            val side = with(density) { PLAYER_PLAY_DP.dp.toPx() }
+            // One copy per look, both centred on the same moving point.
+            for (asPlayer in listOf(false, true)) {
+                Icon(
+                    icon, contentDescription = null,
+                    tint = if (asPlayer) Color.White else ink,
+                    modifier = Modifier
+                        .size(PLAYER_PLAY_DP.dp)
+                        .graphicsLayer {
+                            if (!playFlying()) { alpha = 0f; return@graphicsLayer }
+                            val t = travel()
+                            val s = lerpFloat(MINI_PLAY_DP / PLAYER_PLAY_DP, 1f, t)
+                            scaleX = s; scaleY = s
+                            translationX = lerpFloat(miniPlay.center.x, bigPlay.center.x, t) - side / 2f
+                            translationY = lerpFloat(miniPlay.center.y, bigPlay.center.y, t) - side / 2f
+                            alpha = if (asPlayer) handover() else 1f - handover()
+                        }
+                )
+            }
+        }
+    }
+}
+
+/** The growing player's card inside its full-size layer: [left]..[right], from the top down
+ * [height], with [corner] rounding - all in the layer's own pixels. */
+private class PlayerCardShape(
+    private val left: Float,
+    private val right: Float,
+    private val height: Float,
+    private val corner: Float
+) : Shape {
+    override fun createOutline(size: Size, layoutDirection: LayoutDirection, density: Density): Outline =
+        Outline.Rounded(RoundRect(left, 0f, right, height, CornerRadius(corner)))
+}
 
 /**
  * A title that scrolls once when it's too long, dissolving at both ends instead of being cut. The
@@ -172,29 +333,77 @@ fun PlayerSheetOverlay(
 
     // [releaseVelocity] (of the expansion, per second) when a finger let go: the movement then
     // carries on at that speed instead of starting again from rest.
+    // Turned around mid-movement (a tap or Back while it runs), it carries its speed into the
+    // new direction instead of stopping dead first.
     fun expand(releaseVelocity: Float? = null) {
         isExpanded = true
+        val velocity = releaseVelocity ?: expansionFraction.velocity.takeIf { expansionFraction.isRunning }
         coroutineScope.launch {
-            if (releaseVelocity == null) expansionFraction.animateTo(1f, SHEET_OPEN_SPEC)
-            else expansionFraction.animateTo(1f, SHEET_RELEASE_SPEC, releaseVelocity)
+            if (velocity == null) expansionFraction.animateTo(1f, SHEET_OPEN_SPEC)
+            else expansionFraction.animateTo(1f, SHEET_RELEASE_SPEC, velocity)
         }
     }
     fun collapse(releaseVelocity: Float? = null) {
         isExpanded = false
+        val velocity = releaseVelocity ?: expansionFraction.velocity.takeIf { expansionFraction.isRunning }
         coroutineScope.launch {
-            if (releaseVelocity == null) expansionFraction.animateTo(0f, SHEET_CLOSE_SPEC)
-            else expansionFraction.animateTo(0f, SHEET_RELEASE_SPEC, releaseVelocity)
+            if (velocity == null) expansionFraction.animateTo(0f, SHEET_CLOSE_SPEC)
+            else expansionFraction.animateTo(0f, SHEET_RELEASE_SPEC, velocity)
         }
     }
 
     key(isExpanded) {
         BackHandler(enabled = isExpanded) { collapse() }
     }
+
+    // Pulled up out of the mini player: it follows the finger, then settles from that speed.
+    SideEffect {
+        transition.dragBy = { dy ->
+            coroutineScope.launch {
+                expansionFraction.snapTo((expansionFraction.value - dy / parentHeightPx).coerceIn(0f, 1f))
+            }
+        }
+        transition.dragEnd = { velocityPx ->
+            val velocity = -velocityPx / parentHeightPx
+            // A short upward flick is enough; a slow pull opens once it is a little way up.
+            val open = velocity > 0.25f || (velocity > -0.25f && expansionFraction.value > 0.12f)
+            if (open) expand(velocity) else collapse(velocity)
+        }
+    }
+
+    val density = LocalDensity.current
+    val cardCorner = with(density) { 30.dp.toPx() }
+    val miniArtLeft = with(density) { 12.dp.toPx() }
+    val miniArtSide = with(density) { 40.dp.toPx() }
+    val miniArtCorner = with(density) { 8.dp.toPx() }
+    // Growing out of the mini player (it has one to grow from), mid-movement.
+    val growing = {
+        val e = expansionFraction.value
+        e > 0.001f && e < 0.999f && !transition.miniBounds.isEmpty
+    }
+    // The cover flies on its own only from (and to) the cover page, and only once its picture is
+    // there; otherwise the player's own cover (or Lyrics / Queue) simply grows inside the card.
+    var onCoverPage by remember { mutableStateOf(true) }
+    var flyingReady by remember { mutableStateOf(false) }
+    val coverFlying = { growing() && onCoverPage && flyingReady }
+    // The title, artist and play button fly between the two players too (cover page only).
+    val textFlying = {
+        growing() && onCoverPage && !transition.miniText.isEmpty && !transition.playerText.isEmpty
+    }
+    val miniBusy = stableState.isBuffering || stableState.loadingSongId == stableState.song?.telegramMessageId
+    val latestBusy by rememberUpdatedState(miniBusy)
+    val playFlying = { textFlying() && !latestBusy && !transition.miniPlay.isEmpty && !transition.playerPlay.isEmpty }
+    SideEffect {
+        transition.textFlying = textFlying
+        transition.playFlying = playFlying
+        transition.closedShiftPx = parentHeightPx.roundToInt() + 100f
+    }
     // The player is dark in both themes: the system bars follow it while it's open.
     SideEffect { SystemBarsState.playerOpen = isExpanded }
     LaunchedEffect(isExpanded) { com.abn3li.telemusic.crash.CrashTrail.set("Player", if (isExpanded) "open" else "closed") }
 
     DarkPlayerTheme {
+    CompositionLocalProvider(LocalPlayerTransition provides transition) {
     NowPlayingContent(
         state = stableState,
         viewModel = viewModel,
@@ -205,8 +414,12 @@ fun PlayerSheetOverlay(
         onDragRelease = { open, velocity -> if (open) expand(velocity) else collapse(velocity) },
         onOpenArtist = { artist -> collapse(); onOpenArtist(artist) },
         onOpenAlbum = { album -> collapse(); onOpenAlbum(album) },
+        growing = growing,
+        coverFlying = coverFlying,
+        onCoverPage = { onCoverPage = it },
+        onCoverHeight = { transition.coverHeightPx = it },
         modifier = Modifier
-            // Above the dock: the rising player covers it.
+            // Above the dock: the growing player covers it.
             .zIndex(1f)
             .fillMaxSize()
             .offset {
@@ -215,16 +428,146 @@ fun PlayerSheetOverlay(
                 if (expansionFraction.value <= 0.001f) IntOffset(0, parentHeightPx.roundToInt() + 100) else IntOffset.Zero
             }
             .graphicsLayer {
-                // The whole player is one layer that slides up from the bottom edge of the screen,
-                // over the page and the dock, and back down again. Its content is laid out full
-                // size and simply rides with it, so every frame shows a finished player.
-                val progress = expansionFraction.value
-                translationY = size.height * (1f - progress)
-                val moving = progress > 0.001f && progress < 0.999f
-                shape = if (moving) sheetShape else RectangleShape
+                // The whole player is one layer, laid out full size, so every frame shows a
+                // finished player. It is seen through a rounded card that grows out of the mini
+                // player to the whole screen (and shrinks back into it); the content rides with
+                // the card's top edge.
+                val e = expansionFraction.value
+                val mini = transition.miniBounds
+                val moving = e > 0.001f && e < 0.999f
+                if (mini.isEmpty) {
+                    translationY = size.height * (1f - e)
+                    shape = if (moving) sheetShape else RectangleShape
+                } else {
+                    // Blends with the mini player's glass at the very start and end, instead of
+                    // swapping with it (a dark card on light glass popped in light mode).
+                    alpha = (e / CARD_BLEND).coerceIn(0f, 1f)
+                    val top = lerpFloat(mini.top, 0f, cardTopProgress(e))
+                    // Not shifted at rest: a pixel or two left at the very end showed a line.
+                    translationY = if (moving) top else 0f
+                    shape = if (!moving) RectangleShape else PlayerCardShape(
+                        left = lerpFloat(mini.left, 0f, e),
+                        right = lerpFloat(mini.right, size.width, e),
+                        height = lerpFloat(mini.bottom, size.height, cardBottomProgress(e)) - top,
+                        corner = cardCornerAt(e, mini.height / 2f, cardCorner)
+                    )
+                }
                 clip = moving
             }
     )
+    }
+
+    // The cover on its way: from the mini player's thumbnail to the top of the open player, where
+    // the player's own cover takes over (it is hidden while this one flies). Same picture, same
+    // fade, so the hand-over doesn't show.
+    val song = stableState.song
+    if (song == null || song.displayArtwork.isNullOrEmpty()) SideEffect { flyingReady = false }
+    if (song != null && !song.displayArtwork.isNullOrEmpty()) {
+        val context = LocalContext.current
+        val fullArtwork = remember(song.displayArtwork) { fullSizeArtwork(song.displayArtwork) }
+        LaunchedEffect(fullArtwork) { flyingReady = false }
+        val shadeHeight = WindowInsets.statusBars.asPaddingValues().calculateTopPadding() + 54.dp
+        val request = remember(fullArtwork, context) {
+            ImageRequest.Builder(context)
+                .data(fullArtwork)
+                .memoryCacheKey(fullArtwork)
+                .diskCacheKey(fullArtwork)
+                .placeholderMemoryCacheKey(song.displayArtwork)
+                .build()
+        }
+        val coverHeight = with(density) {
+            transition.coverHeightPx.takeIf { it > 0f }?.toDp() ?: (maxWidth * 1.22f)
+        }
+        Box(
+            Modifier
+                .zIndex(2f)
+                .fillMaxWidth()
+                .height(coverHeight)
+                .graphicsLayer {
+                    val mini = transition.miniBounds
+                    if (!coverFlying()) { alpha = 0f; return@graphicsLayer }
+                    val e = expansionFraction.value
+                    // The card this cover sits in (the same one the player is seen through).
+                    val cardLeft = lerpFloat(mini.left, 0f, e)
+                    val cardTop = lerpFloat(mini.top, 0f, cardTopProgress(e))
+                    val cardWidth = lerpFloat(mini.right, size.width, e) - cardLeft
+                    val cardBottom = lerpFloat(mini.bottom, parentHeightPx, cardBottomProgress(e))
+                    val cardRound = cardCornerAt(e, mini.height / 2f, cardCorner)
+                    // The cover fills the card's width early (by half way), so the card is never
+                    // a bare block with a small picture in its corner; it stays inside the card.
+                    val a = 1f - (1f - (e / COVER_FILL_AT).coerceIn(0f, 1f)).let { it * it }
+                    val width = lerpFloat(miniArtSide, cardWidth, a)
+                    val top = cardTop + lerpFloat((mini.height - miniArtSide) / 2f, 0f, a)
+                    val height = minOf(lerpFloat(miniArtSide, size.height, a), cardBottom - top)
+                    val scale = width / size.width
+                    alpha = (e / CARD_BLEND).coerceIn(0f, 1f)
+                    transformOrigin = TransformOrigin(0f, 0f)
+                    scaleX = scale
+                    scaleY = scale
+                    translationX = cardLeft + lerpFloat(miniArtLeft, 0f, a)
+                    translationY = top
+                    shape = PlayerCardShape(0f, size.width, height / scale, lerpFloat(miniArtCorner, cardRound, a) / scale)
+                    clip = true
+                    // Offscreen, so the fade below can cut the picture's own alpha.
+                    compositingStrategy = CompositingStrategy.Offscreen
+                }
+                .drawWithContent {
+                    drawContent()
+                    // The cover's fade, grown in with the cover: none on the thumbnail.
+                    val e = 1f - (1f - (expansionFraction.value / COVER_FILL_AT).coerceIn(0f, 1f)).let { it * it }
+                    drawRect(
+                        Brush.verticalGradient(
+                            colorStops = Array(CoverFadeCurve.size) { i ->
+                                val (position, shade) = CoverFadeCurve[i]
+                                position to Color.Black.copy(alpha = lerpFloat(1f, shade, e))
+                            },
+                            startY = 0f, endY = size.height
+                        ),
+                        blendMode = BlendMode.DstIn
+                    )
+                }
+                .background(Color(0xFF2A2A2E))
+        ) {
+            AsyncImage(
+                model = request,
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                alignment = Alignment.TopCenter,
+                onSuccess = { flyingReady = true },
+                onError = { flyingReady = false },
+                modifier = Modifier
+                    .fillMaxSize()
+                    .graphicsLayer {
+                        // Zoomed only as far as the shown part needs: on the first frame it is the
+                        // thumbnail's own picture, uncropped, and the crop comes in as it grows.
+                        if (!coverFlying()) return@graphicsLayer
+                        val shown = flyingCoverShown(expansionFraction.value, transition.miniBounds,
+                            size.width, size.height, parentHeightPx, miniArtSide)
+                        val zoom = (shown / size.height).coerceIn(size.width / size.height, 1f)
+                        transformOrigin = TransformOrigin(0.5f, 0f)
+                        scaleX = zoom
+                        scaleY = zoom
+                    }
+            )
+            // The same shade under the status bar as the player's own cover, grown in with it,
+            // so nothing darkens in one frame at the hand-over.
+            Box(
+                Modifier
+                    .align(Alignment.TopCenter)
+                    .fillMaxWidth()
+                    .height(shadeHeight)
+                    .graphicsLayer {
+                        alpha = 1f - (1f - (expansionFraction.value / COVER_FILL_AT).coerceIn(0f, 1f)).let { it * it }
+                    }
+                    .background(Brush.verticalGradient(listOf(Color.Black.copy(alpha = 0.32f), Color.Transparent)))
+            )
+        }
+    }
+    }
+
+    stableState.song?.let { flyingSong ->
+        FlyingPlayerParts(flyingSong.title, flyingSong.artist.orEmpty(), stableState.isPlaying, transition,
+            textFlying, playFlying, Modifier.zIndex(3f))
     }
 
     miniPlayerContent(stableState, { expand() }, Modifier.align(Alignment.BottomCenter))
@@ -242,6 +585,12 @@ private fun NowPlayingContent(
     onDragRelease: (open: Boolean, velocity: Float) -> Unit,
     onOpenArtist: (String) -> Unit,
     onOpenAlbum: (String) -> Unit,
+    // Growing out of the mini player: the cover is flying on its own (hidden here) and the rest
+    // arrives as the card gets big enough to hold it.
+    growing: () -> Boolean,
+    coverFlying: () -> Boolean,
+    onCoverPage: (Boolean) -> Unit,
+    onCoverHeight: (Float) -> Unit,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -250,6 +599,7 @@ private fun NowPlayingContent(
 
     val playerVisible by remember { derivedStateOf { expansionFraction.value > 0.001f } }
     var page by rememberSaveable { mutableStateOf(PlayerPage.ARTWORK) }
+    SideEffect { onCoverPage(page == PlayerPage.ARTWORK) }
     var showControls by remember { mutableStateOf(true) }
     var lastInteractionMs by remember { mutableLongStateOf(0L) }
     var showSongInfoDialog by remember { mutableStateOf(false) }
@@ -351,6 +701,11 @@ private fun NowPlayingContent(
             Column(
                 Modifier
                     .fillMaxSize()
+                    .graphicsLayer {
+                        // Title and controls come in behind the cover, so the card fills up as it grows.
+                        alpha = if (growing()) ((expansionFraction.value - 0.1f) / 0.3f).coerceIn(0f, 1f) else 1f
+                        compositingStrategy = CompositingStrategy.ModulateAlpha
+                    }
                     .statusBarsPadding()
                     .navigationBarsPadding()
             ) {
@@ -387,6 +742,8 @@ private fun NowPlayingContent(
                     onOpenLyricsSource = { showLyricsSourceDialog = true },
                     onCollapse = onCollapse,
                     onClipShowing = { clipShowing = it },
+                    coverHidden = coverFlying,
+                    onCoverHeight = onCoverHeight,
                     modifier = Modifier.weight(1f).fillMaxWidth()
                 )
 
@@ -573,6 +930,9 @@ private fun PlayerPageArea(
     // Closes the player before a suggestion's menu opens an artist or album page.
     onCollapse: () -> Unit,
     onClipShowing: (Boolean) -> Unit,
+    // The player is growing out of the mini player with its own flying copy of the cover.
+    coverHidden: () -> Boolean,
+    onCoverHeight: (Float) -> Unit,
     modifier: Modifier = Modifier
     // On the artwork page, a drag anywhere (not just on the cover/title) closes the player, like
     // Apple Music. Lyrics and queue keep only the header, since their lists scroll.
@@ -603,6 +963,8 @@ private fun PlayerPageArea(
     if (page == PlayerPage.ARTWORK) coverPageHeight[0] = maxHeight
     val titleTop = (coverPageHeight[0] - 96.dp).coerceAtLeast(8.dp)
     val coverHeight = minOf(maxWidth * 1.22f, coverLift + titleTop).coerceAtLeast(160.dp)
+    val coverHeightPx = with(LocalDensity.current) { coverHeight.toPx() }
+    SideEffect { onCoverHeight(coverHeightPx) }
     val smallSide = 62.dp
     val smallLeft = 26.dp
     val smallTop = 10.dp
@@ -670,11 +1032,16 @@ private fun PlayerPageArea(
                 .then(dismissDrag),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Column(Modifier.weight(1f).padding(end = 14.dp)) {
+            val morphTransition = LocalPlayerTransition.current
+            Column(
+                Modifier.weight(1f).padding(end = 14.dp)
+                    .playerRestingSpot(morphTransition) { playerText = it }
+                    .graphicsLayer { alpha = if (morphTransition?.textFlying?.invoke() == true) 0f else 1f }
+            ) {
                 Text(
                     text = song?.title ?: "Not Playing",
                     color = Color.White,
-                    fontSize = 21.sp,
+                    fontSize = PLAYER_TITLE_SP.sp,
                     fontWeight = FontWeight.SemiBold,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
@@ -798,7 +1165,7 @@ private fun PlayerPageArea(
                 .fillMaxWidth()
                 .height(coverHeight)
                 .graphicsLayer {
-                    alpha = (1f - morph.value * 1.6f).coerceIn(0f, 1f)
+                    alpha = if (coverHidden()) 0f else (1f - morph.value * 1.6f).coerceIn(0f, 1f)
                     translationX = swipeSettle.value
                     // Offscreen, so the fade below can cut the picture's own alpha.
                     compositingStrategy = CompositingStrategy.Offscreen

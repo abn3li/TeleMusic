@@ -25,6 +25,13 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.util.VelocityTracker
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.positionInRoot
+import androidx.compose.ui.unit.toSize
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource
@@ -60,6 +67,7 @@ import com.abn3li.telemusic.data.local.displayArtwork
 import com.abn3li.telemusic.ui.library.CalmSpinner
 import com.abn3li.telemusic.ui.nowplaying.NowPlayingUiState
 import com.abn3li.telemusic.ui.nowplaying.PlayerTransition
+import com.abn3li.telemusic.ui.nowplaying.CARD_BLEND
 import com.abn3li.telemusic.ui.theme.LocalPalette
 import kotlin.math.abs
 
@@ -91,6 +99,16 @@ internal class DockCollapse(private val threshold: Float) : NestedScrollConnecti
 private val TabRoutes = listOf(Routes.HOME, Routes.DISCOVER, Routes.LIBRARY)
 private val DockGap = 8.dp
 private val MiniHeight = 56.dp
+/** Records where this mini-player part rests, in root pixels: only while the player is closed
+ * and the capsule isn't pressed in (both move it a little). */
+private fun Modifier.miniRestingSpot(transition: PlayerTransition?, press: () -> Float, store: PlayerTransition.(Rect) -> Unit): Modifier =
+    if (transition == null) this else onGloballyPositioned { coordinates ->
+        if (transition.expansion.value > 0.001f || press() > 0.001f) return@onGloballyPositioned
+        transition.store(Rect(coordinates.positionInRoot(), coordinates.size.toSize()))
+    }
+
+// How far the tabs drop while the player opens over them.
+private val TabsDrop = 40.dp
 
 /**
  * The player above the tabs, with Search in its own circle beside them. Folded ([collapse]),
@@ -124,17 +142,23 @@ internal fun ClassicDock(
 
     // The player and the tabs share one frosted material: the page is blurred once for both,
     // except while they move with the player (see FrostedCapsules.paused).
-    // The player slides up over the dock, which stays where it is. Once it is well covered it
-    // stops drawing (content and glass alike), so nothing is painted under the open player.
-    val dockMove = {
-        CapsuleMove(dy = 0f, scale = 1f, alpha = if (transition.expansion.value > 0.5f) 0f else 1f)
+    // The player grows out of the mini player: the card fades in over its capsule, which stays
+    // solid underneath until the card is (CARD_BLEND) - two fading layers let the page show
+    // through. The tabs drop a little and are gone just as fast. Once covered nothing here draws.
+    val dropPx = with(LocalDensity.current) { TabsDrop.toPx() }
+    val miniMove = {
+        CapsuleMove(dy = 0f, scale = 1f, alpha = if (transition.expansion.value < CARD_BLEND) 1f else 0f)
+    }
+    val tabsMove = {
+        val e = transition.expansion.value
+        CapsuleMove(dy = e * dropPx, scale = 1f, alpha = (1f - e / CARD_BLEND).coerceIn(0f, 1f))
     }
     val capsules = remember(transition) {
         FrostedCapsules().apply {
             moving = { transition.expansion.value > 0.001f }
-            moves[0] = dockMove
-            moves[1] = dockMove
-            moves[2] = dockMove
+            moves[0] = miniMove
+            moves[1] = tabsMove
+            moves[2] = tabsMove
         }
     }
     // The tabs' row keeps its open width while the capsule shrinks around it (set while measuring).
@@ -143,16 +167,23 @@ internal fun ClassicDock(
         content = {
             if (hasMini) {
                 ClassicMiniPlayer(state, onExpand, onPlayPause, onNext, onPrevious, compact = folded,
+                    onDragUp = transition.dragBy, onDragUpEnd = transition.dragEnd, transition = transition,
                     modifier = Modifier.layoutId("mini")
-                        .graphicsLayer { alpha = dockMove().alpha }
+                        // Where the player grows from (and shrinks back to). The movement never
+                        // moves this capsule, so it is kept current even mid-way - the page under
+                        // it can change while the player closes.
+                        .onGloballyPositioned { transition.miniBounds = it.boundsInRoot() }
+                        .graphicsLayer { alpha = miniMove().alpha }
                         .frostedCapsule(capsules, 0))
             }
             if (showTabs) {
                 ClassicTabs(currentRoute, onNavigate, fold::value, folded, { collapse.collapsed = false },
                     { tabsRowWidth[0] },
-                    Modifier.layoutId("tabs").graphicsLayer { alpha = dockMove().alpha }.frostedCapsule(capsules, 1))
+                    Modifier.layoutId("tabs").graphicsLayer { tabsMove().let { alpha = it.alpha; translationY = it.dy } }
+                        .frostedCapsule(capsules, 1))
                 ClassicSearchButton(currentRoute == Routes.SEARCH, { onNavigate(Routes.SEARCH) },
-                    Modifier.layoutId("search").graphicsLayer { alpha = dockMove().alpha }.frostedCapsule(capsules, 2))
+                    Modifier.layoutId("search").graphicsLayer { tabsMove().let { alpha = it.alpha; translationY = it.dy } }
+                        .frostedCapsule(capsules, 2))
             }
         },
         modifier = modifier.fillMaxWidth()
@@ -320,9 +351,17 @@ private fun ClassicMiniPlayer(
     onPlayPause: () -> Unit, onNext: () -> Unit, onPrevious: () -> Unit,
     // Folded between the two round buttons: Next gives its room to the title.
     compact: Boolean = false,
+    // A finger pulling the player up out of it: pixels moved (down positive), then the release
+    // speed in pixels per second.
+    onDragUp: (Float) -> Unit = {},
+    onDragUpEnd: (Float) -> Unit = {},
+    // Where its title and play button rest, for the copies that fly into the player.
+    transition: PlayerTransition? = null,
     modifier: Modifier
 ) {
     val song = state.song ?: return
+    val latestDragUp by rememberUpdatedState(onDragUp)
+    val latestDragUpEnd by rememberUpdatedState(onDragUpEnd)
     val ink = LocalPalette.current.ink
     val haptics = LocalHapticFeedback.current
     val latestNext by rememberUpdatedState(onNext)
@@ -342,6 +381,20 @@ private fun ClassicMiniPlayer(
     Row(
         modifier
             .drawBehind { if (press.value > 0.001f) drawRect(ink.copy(alpha = 0.12f * press.value)) }
+            // Up pulls the player out of the mini player; sideways (on the title) changes song.
+            .pointerInput(Unit) {
+                val tracker = VelocityTracker()
+                detectVerticalDragGestures(
+                    onDragStart = { tracker.resetTracking() },
+                    onDragEnd = { latestDragUpEnd(tracker.calculateVelocity().y) },
+                    onDragCancel = { latestDragUpEnd(0f) },
+                    onVerticalDrag = { change, dy ->
+                        change.consume()
+                        tracker.addPosition(change.uptimeMillis, change.position)
+                        latestDragUp(dy)
+                    }
+                )
+            }
             .clickable(interaction, indication = null) {
                 com.abn3li.telemusic.crash.CrashTrail.note("Mini player tapped")
                 haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove); onExpand()
@@ -367,7 +420,9 @@ private fun ClassicMiniPlayer(
                     }
                 }
                 swipeTravel[0] = 0f
-            })) {
+            })
+            .miniRestingSpot(transition, press::value) { miniText = it }
+            .graphicsLayer { alpha = if (transition?.textFlying?.invoke() == true) 0f else 1f }) {
             Text(song.title, color = ink, fontSize = 14.sp, fontWeight = FontWeight.SemiBold,
                 fontFamily = FontFamily.SansSerif, letterSpacing = 0.sp,
                 maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -375,9 +430,12 @@ private fun ClassicMiniPlayer(
                 fontFamily = FontFamily.SansSerif, letterSpacing = 0.sp,
                 maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
-        Box(Modifier.size(40.dp).clickable(remember { MutableInteractionSource() }, indication = null) {
-            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove); onPlayPause()
-        }, contentAlignment = Alignment.Center) {
+        Box(Modifier.size(40.dp)
+            .miniRestingSpot(transition, press::value) { miniPlay = it }
+            .graphicsLayer { alpha = if (transition?.playFlying?.invoke() == true) 0f else 1f }
+            .clickable(remember { MutableInteractionSource() }, indication = null) {
+                haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove); onPlayPause()
+            }, contentAlignment = Alignment.Center) {
             // Pause remains usable during buffering, including a quality upgrade.
             if (state.isBuffering || state.loadingSongId == song.telegramMessageId) {
                 CalmSpinner(color = ink, strokeWidth = 2.dp, modifier = Modifier.size(18.dp))

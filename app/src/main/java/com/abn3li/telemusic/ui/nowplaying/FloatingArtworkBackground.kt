@@ -1,5 +1,6 @@
 package com.abn3li.telemusic.ui.nowplaying
 
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.asAndroidBitmap
 import kotlinx.coroutines.delay
 import android.content.Context
@@ -155,12 +156,8 @@ fun FloatingArtworkBackground(
                 )
             }
         }
-        Box(
-            Modifier
-                .fillMaxSize()
-                .graphicsLayer { alpha = animatedDim }
-                .background(Color.Black)
-        )
+        // A see-through black drawn straight, not a faded layer (that took a full-screen extra pass).
+        Box(Modifier.fillMaxSize().drawBehind { drawRect(Color.Black, alpha = animatedDim) })
     }
 }
 

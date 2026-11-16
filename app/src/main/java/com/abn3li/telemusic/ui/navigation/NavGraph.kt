@@ -37,12 +37,17 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.derivedStateOf
+import androidx.compose.ui.graphics.CompositingStrategy
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.TransformOrigin
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
@@ -287,17 +292,40 @@ fun TgMusicNavGraph(navController: NavHostController = rememberNavController()) 
         onOpen = { c -> navController.navigate(Routes.youtubeBrowse(c.browseId, c.title, c.params)) },
         onPlay = playStreams, onPlayNext = { ids -> playerViewModel.playNext(ids) }
     ) {
-    Box(Modifier.fillMaxSize()) {
+    // Behind the page while it steps back under the opening player: its own colour (dimmed with
+    // it), so the edges it uncovers blend in - black there showed as a black band.
+    val pageBackground = LocalPalette.current.background
+    Box(Modifier.fillMaxSize().drawBehind {
+        if (playerTransition.expansion.value.isPartlyOpen()) drawRect(pageBackground)
+    }) {
       // The status bar's gap is kept on the pages themselves (below), not here: the Scaffold clips
       // to its own bounds, and an artist / album / playlist page draws its artwork up behind
       // the status bar.
       val barsInsets = WindowInsets.systemBars.union(WindowInsets.displayCutout)
       Box(Modifier.fillMaxSize()
           .graphicsLayer {
-              // The page stays where it is while the player slides over it. Fully under the
-              // open (opaque) player it is not drawn at all: drawing it anyway, frosted glass
-              // and all, put ~9 ms of GPU work in every player frame - past a 120 Hz frame.
-              alpha = if (playerTransition.expansion.value >= FULLY_OPEN) 0f else 1f
+              // The page steps back a little as the player grows over it (a layer move, nothing
+              // drawn again). Fully under the open (opaque) player it is not drawn at all:
+              // drawing it anyway, frosted glass and all, put ~9 ms of GPU work in every player
+              // frame - past a 120 Hz frame.
+              val e = playerTransition.expansion.value
+              alpha = if (e >= FULLY_OPEN) 0f else 1f
+              if (e.isPartlyOpen()) {
+                  val scale = 1f - PAGE_STEP_BACK * e
+                  scaleX = scale
+                  scaleY = scale
+                  // Pinned at the top, so no band opens above it.
+                  transformOrigin = TransformOrigin(0.5f, 0f)
+                  shape = RoundedCornerShape(PageCorner * e)
+                  clip = true
+                  // One cached picture while it moves: the page is not drawn again every frame.
+                  compositingStrategy = CompositingStrategy.Offscreen
+              } else {
+                  scaleX = 1f
+                  scaleY = 1f
+                  clip = false
+                  compositingStrategy = CompositingStrategy.Auto
+              }
           }
           .windowInsetsPadding(barsInsets.only(WindowInsetsSides.Horizontal + WindowInsetsSides.Bottom))) {
         Scaffold(
@@ -488,11 +516,17 @@ fun TgMusicNavGraph(navController: NavHostController = rememberNavController()) 
 
         DownloadLocationPrompt(app)
       }
-        // The page darkens as the player slides over it.
-        Box(Modifier.fillMaxSize().drawBehind {
-            val progress = playerTransition.expansion.value
-            if (progress.isPartlyOpen()) drawRect(Color.Black.copy(alpha = 0.55f * progress))
-        })
+        // The page darkens as the player grows over it, and takes no taps meanwhile (they would
+        // land on the page and the faded tabs around the card).
+        val playerMoving by remember { derivedStateOf { playerTransition.expansion.value.isPartlyOpen() } }
+        Box(Modifier.fillMaxSize()
+            .then(if (playerMoving) Modifier.pointerInput(Unit) {
+                awaitPointerEventScope { while (true) awaitPointerEvent().changes.forEach { it.consume() } }
+            } else Modifier)
+            .drawBehind {
+                val progress = playerTransition.expansion.value
+                if (progress.isPartlyOpen()) drawRect(Color.Black.copy(alpha = 0.55f * progress))
+            })
 
         PlayerSheetOverlay(
             viewModel = playerViewModel,
@@ -561,6 +595,9 @@ private fun DownloadLocationPrompt(app: TgMusicApp) {
 
 // The player's expansion at which it covers the whole screen (see the page layer above).
 private const val FULLY_OPEN = 0.999f
+// How far the page steps back (shrinks) under the open player, and its corners meanwhile.
+private const val PAGE_STEP_BACK = 0.08f
+private val PageCorner = 22.dp
 
 /** Between closed and fully open: the page and its dimming behind the player are on screen. */
 private fun Float.isPartlyOpen() = this > 0.001f && this < FULLY_OPEN
