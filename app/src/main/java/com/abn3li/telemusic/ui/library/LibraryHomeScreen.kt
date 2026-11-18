@@ -57,11 +57,15 @@ fun LibraryHomeScreen(
 ) {
     val app = LocalContext.current.applicationContext as TgMusicApp
     val account by app.youtubeAccount.state.collectAsState()
+    // What's already known shows at once - from memory, else saved on the phone - and the fresh
+    // list from YouTube replaces it quietly (nothing redraws when it's the same).
     var followedPlaylists by remember(account.sessionId) {
-        mutableStateOf(emptyList<com.abn3li.telemusic.data.browse.BrowseCollection>())
+        mutableStateOf(if (account.signedIn) app.discoveryRepository.accountPlaylistsIfLoaded().orEmpty() else emptyList())
     }
     LaunchedEffect(account.sessionId, account.signedIn) {
-        followedPlaylists = if (account.signedIn) app.discoveryRepository.accountPlaylists().orEmpty() else emptyList()
+        if (!account.signedIn) { followedPlaylists = emptyList(); return@LaunchedEffect }
+        if (followedPlaylists.isEmpty()) app.discoveryRepository.savedAccountPlaylists(account.sessionId)?.let { followedPlaylists = it }
+        app.discoveryRepository.accountPlaylists(account.sessionId)?.let { if (it != followedPlaylists) followedPlaylists = it }
     }
     val home by viewModel.home.collectAsState()
     val playlists by viewModel.playlists.collectAsState()
@@ -170,8 +174,10 @@ private class CollectionTile(val label: String, val count: Int, val icon: ImageV
 fun LibraryYouTubePlaylistsScreen(onBack: () -> Unit, onOpenYouTubePlaylist: (String, String, String?) -> Unit) {
     val app = LocalContext.current.applicationContext as TgMusicApp
     // The Library page loaded the same list for its shelf, so this is answered from memory.
-    val playlists by produceState(emptyList<com.abn3li.telemusic.data.browse.BrowseCollection>()) {
-        value = app.discoveryRepository.accountPlaylists().orEmpty()
+    val sessionId = app.youtubeAccount.state.collectAsState().value.sessionId
+    val playlists by produceState(app.discoveryRepository.accountPlaylistsIfLoaded().orEmpty(), sessionId) {
+        if (value.isEmpty()) app.discoveryRepository.savedAccountPlaylists(sessionId)?.let { value = it }
+        app.discoveryRepository.accountPlaylists(sessionId)?.let { if (it != value) value = it }
     }
     LargeTitleGrid(title = "YouTube Playlists", onBack = onBack) {
         items(playlists, key = { it.browseId }) { playlist ->

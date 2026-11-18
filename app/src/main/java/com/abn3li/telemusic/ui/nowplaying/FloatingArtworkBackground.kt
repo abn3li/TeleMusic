@@ -1,8 +1,6 @@
 package com.abn3li.telemusic.ui.nowplaying
 
 import androidx.compose.ui.draw.drawBehind
-import androidx.compose.ui.graphics.asAndroidBitmap
-import kotlinx.coroutines.delay
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Canvas
@@ -50,14 +48,6 @@ private const val KEN_BURNS_STEP_MS = 9_000
 private const val KEN_BURNS_FRAME_NANOS = 15_500_000L
 
 private val backdropCache = LruCache<String, ImageBitmap>(8)
-
-// Home's "Continue Listening" card holds its blur still and barely zoomed, where Now Playing's
-// 96px backdrop (fine there - always moving, zoomed 1.5-2x) shows as blocky. So the card builds
-// its own, larger and more softly blurred copy, cached apart from Now Playing's: ~256 KB each.
-private const val CARD_BACKDROP_SIZE_PX = 256
-private const val CARD_BLUR_RADIUS = 8
-private const val CARD_BLUR_PASSES = 3
-private val cardBackdropCache = LruCache<String, ImageBitmap>(6)
 
 /**
  * Full-screen "floating light" backdrop: the artwork, saturated and heavily blurred, drifting
@@ -159,65 +149,6 @@ fun FloatingArtworkBackground(
         // A see-through black drawn straight, not a faded layer (that took a full-screen extra pass).
         Box(Modifier.fillMaxSize().drawBehind { drawRect(Color.Black, alpha = animatedDim) })
     }
-}
-
-/** A still, blurred copy of [artwork] filling [modifier] - Home's "Continue Listening" card.
- * Its own 256px, three-pass blur (see [CARD_BACKDROP_SIZE_PX]), built once per cover on a
- * background thread and kept in its own cache; nothing moves, so it costs nothing after that. A dark cover is lifted to at
- * least [minBrightness] (its colour kept, just brighter), so on a black OLED page the card never
- * sinks into the background; bright covers are left as they are. */
-@Composable
-internal fun BlurredArtwork(artwork: String?, modifier: Modifier = Modifier, minBrightness: Float = 0f) {
-    val context = LocalContext.current
-    var backdrop by remember(artwork) { mutableStateOf(artwork?.let { cardBackdropCache.get(it) }) }
-    LaunchedEffect(artwork) {
-        if (artwork.isNullOrEmpty() || backdrop != null) return@LaunchedEffect
-        val built = withContext(Dispatchers.IO) {
-            buildBlurredArtwork(context, artwork, CARD_BACKDROP_SIZE_PX, CARD_BLUR_RADIUS, CARD_BLUR_PASSES)
-        } ?: return@LaunchedEffect
-        cardBackdropCache.put(artwork, built)
-        backdrop = built
-    }
-    // Worked out once per cover from the bitmap (a few tens of thousands of pixels), not per frame.
-    val lift = remember(backdrop, minBrightness) { backdrop?.let { brightnessLift(it, minBrightness) } }
-    Box(modifier.background(Color(0xFF2A2A2E))) {
-        backdrop?.let {
-            Image(
-                bitmap = it,
-                contentDescription = null,
-                contentScale = ContentScale.Crop,
-                filterQuality = FilterQuality.High,
-                colorFilter = lift,
-                modifier = Modifier.fillMaxSize().graphicsLayer { scaleX = 1.4f; scaleY = 1.4f }
-            )
-        }
-    }
-}
-
-/** Null when [bitmap] is already at least [floor] bright on average; otherwise a filter that
- * scales its colours up (up to 3x, which keeps the hue) and, for a cover that's nearly black
- * even then, adds a little light on top. */
-private fun brightnessLift(bitmap: ImageBitmap, floor: Float): androidx.compose.ui.graphics.ColorFilter? {
-    if (floor <= 0f) return null
-    val android = bitmap.asAndroidBitmap()
-    val pixels = IntArray(android.width * android.height)
-    android.getPixels(pixels, 0, android.width, 0, 0, android.width, android.height)
-    var sum = 0.0
-    for (p in pixels) sum += 0.2126 * ((p shr 16) and 0xFF) + 0.7152 * ((p shr 8) and 0xFF) + 0.0722 * (p and 0xFF)
-    val luminance = (sum / pixels.size / 255.0).toFloat()
-    if (luminance >= floor) return null
-    val scale = (floor / luminance.coerceAtLeast(0.01f)).coerceIn(1f, 3f)
-    val offset = ((floor - luminance * scale).coerceAtLeast(0f) * 255f)
-    return androidx.compose.ui.graphics.ColorFilter.colorMatrix(
-        androidx.compose.ui.graphics.ColorMatrix(
-            floatArrayOf(
-                scale, 0f, 0f, 0f, offset,
-                0f, scale, 0f, 0f, offset,
-                0f, 0f, scale, 0f, offset,
-                0f, 0f, 0f, 1f, 0f
-            )
-        )
-    )
 }
 
 private suspend fun buildBackdrop(context: Context, artwork: String): ImageBitmap? =

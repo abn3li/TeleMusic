@@ -33,6 +33,9 @@ class DiscoveryRepository(
 ) {
     @Volatile private var cachedNewReleases: HomeSection? = null
     @Volatile private var cachedGenres: List<BrowseCollection>? = null
+    @Volatile private var cachedMoods: List<BrowseCollection>? = null
+    private val moodsFile get() = File(genresFile.parentFile, "moods.json")
+    private val accountPlaylistsFile get() = File(genresFile.parentFile, "account_playlists.json")
     @Volatile private var cachedCommunity: HomeSection? = null
     private val accountGeneration = java.util.concurrent.atomic.AtomicLong()
     private val accountCacheLock = Any()
@@ -92,8 +95,44 @@ class DiscoveryRepository(
         }
     }
 
-    /** Saved/followed playlists from the signed-in YouTube Music library, not URL imports. */
-    suspend fun accountPlaylists(): List<BrowseCollection>? = accountPlaylistsCache.getOrLoad(false) {
+    /** The account playlists already in memory (even if due a refresh), for showing at once. */
+    fun accountPlaylistsIfLoaded(): List<BrowseCollection>? = accountPlaylistsCache.value
+
+    /** The account playlists saved on the phone by the last load for this [sessionId]: Library
+     * shows them at once after the app starts, while the fresh list loads. A list saved for
+     * another session (signed out, or another account) is never shown, and is deleted. */
+    suspend fun savedAccountPlaylists(sessionId: String?): List<BrowseCollection>? = withContext(Dispatchers.IO) {
+        if (sessionId == null || !accountPlaylistsFile.exists()) return@withContext null
+        runCatching {
+            val saved = JSONObject(accountPlaylistsFile.readText())
+            if (saved.optString("session") != sessionId) {
+                accountPlaylistsFile.delete()
+                return@runCatching null
+            }
+            val array = saved.getJSONArray("playlists")
+            (0 until array.length()).mapNotNull { i ->
+                val o = array.optJSONObject(i) ?: return@mapNotNull null
+                val browseId = o.optString("browseId").takeIf { it.isNotBlank() } ?: return@mapNotNull null
+                BrowseCollection(browseId, o.optString("params").ifBlank { null }, o.optString("title"),
+                    o.optString("subtitle").ifBlank { null }, o.optString("thumbnail").ifBlank { null }, BrowseKind.PLAYLIST)
+            }.takeIf { it.isNotEmpty() }
+        }.getOrNull()
+    }
+
+    private fun saveAccountPlaylists(sessionId: String, playlists: List<BrowseCollection>) {
+        runCatching {
+            val array = JSONArray()
+            playlists.forEach {
+                array.put(JSONObject().put("browseId", it.browseId).put("params", it.params ?: "").put("title", it.title)
+                    .put("subtitle", it.subtitle ?: "").put("thumbnail", it.thumbnailUrl ?: ""))
+            }
+            accountPlaylistsFile.writeText(JSONObject().put("session", sessionId).put("playlists", array).toString())
+        }.onFailure { e -> android.util.Log.w("DiscoveryRepo", "account playlists not saved", e) }
+    }
+
+    /** Saved/followed playlists from the signed-in YouTube Music library, not URL imports.
+     * A fresh list is also saved on the phone for [sessionId] (see [savedAccountPlaylists]). */
+    suspend fun accountPlaylists(sessionId: String? = null): List<BrowseCollection>? = accountPlaylistsCache.getOrLoad(false) {
         withContext(Dispatchers.IO) {
             try {
                 val playlists = LinkedHashMap<String, BrowseCollection>()
@@ -110,7 +149,7 @@ class DiscoveryRepository(
                 // YouTube sometimes omits its built-in Liked Songs tile from this grid.
                 val liked = playlists.remove("VLLM") ?: BrowseCollection(
                     "VLLM", null, "Liked Songs", "YouTube Music", null, BrowseKind.PLAYLIST)
-                listOf(liked) + playlists.values
+                (listOf(liked) + playlists.values).also { list -> sessionId?.let { saveAccountPlaylists(it, list) } }
             } catch (cancelled: kotlinx.coroutines.CancellationException) {
                 throw cancelled
             } catch (error: Exception) {
@@ -227,6 +266,7 @@ class DiscoveryRepository(
      * right away, then refreshes them from YouTube Music for next time. One request per run. */
     suspend fun preloadGenres() = withContext(Dispatchers.IO) {
         if (cachedGenres == null) readSavedGenres()?.let { cachedGenres = it }
+        if (cachedMoods == null) readSavedChips(moodsFile)?.let { cachedMoods = it }
         if (genresRefreshed) return@withContext
         genresRefreshed = true
         fetchGenres()
@@ -237,15 +277,34 @@ class DiscoveryRepository(
     /** From the network; a good answer replaces what's in memory and on the phone, a failed one
      * (offline) leaves both as they were. */
     private fun fetchGenres(): List<BrowseCollection> =
-        runCatching { BrowseParser.parseGenreChips(client.browse(InnertubeBrowseClient.GENRES_BROWSE_ID)) }
+        runCatching {
+            // One request holds both grids: the Search categories and Home's mood buttons.
+            val page = client.browse(InnertubeBrowseClient.GENRES_BROWSE_ID)
+            BrowseParser.parseMoodChips(page).takeIf { it.isNotEmpty() }?.let { cachedMoods = it; saveChips(moodsFile, it) }
+            BrowseParser.parseGenreChips(page)
+        }
             .onFailure { e -> android.util.Log.e("DiscoveryRepo", "genres(): fetch/parse failed", e) }
             .getOrElse { emptyList() }
             .also { if (it.isNotEmpty()) { cachedGenres = it; saveGenres(it) } }
             .ifEmpty { cachedGenres.orEmpty() }
 
-    private fun readSavedGenres(): List<BrowseCollection>? = runCatching {
-        if (!genresFile.exists()) return null
-        val array = JSONArray(genresFile.readText())
+    /** Home's mood buttons (Relax, Sleep, Sad...) if already in memory. */
+    fun moodsIfLoaded(): List<BrowseCollection>? = cachedMoods
+
+    /** Home's mood buttons: from memory, else saved on the phone, else the same one request the
+     * Search categories use. */
+    suspend fun moods(): List<BrowseCollection> {
+        cachedMoods?.let { return it }
+        return withContext(Dispatchers.IO) {
+            readSavedChips(moodsFile)?.also { cachedMoods = it } ?: run { fetchGenres(); cachedMoods.orEmpty() }
+        }
+    }
+
+    private fun readSavedGenres(): List<BrowseCollection>? = readSavedChips(genresFile)
+
+    private fun readSavedChips(file: File): List<BrowseCollection>? = runCatching {
+        if (!file.exists()) return null
+        val array = JSONArray(file.readText())
         (0 until array.length()).mapNotNull { i ->
             val o = array.optJSONObject(i) ?: return@mapNotNull null
             val browseId = o.optString("browseId").takeIf { it.isNotBlank() } ?: return@mapNotNull null
@@ -254,11 +313,13 @@ class DiscoveryRepository(
         }.takeIf { it.isNotEmpty() }
     }.getOrNull()
 
-    private fun saveGenres(genres: List<BrowseCollection>) {
+    private fun saveGenres(genres: List<BrowseCollection>) = saveChips(genresFile, genres)
+
+    private fun saveChips(file: File, chips: List<BrowseCollection>) {
         runCatching {
             val array = JSONArray()
-            genres.forEach { array.put(JSONObject().put("browseId", it.browseId).put("params", it.params ?: "").put("title", it.title)) }
-            genresFile.writeText(array.toString())
+            chips.forEach { array.put(JSONObject().put("browseId", it.browseId).put("params", it.params ?: "").put("title", it.title)) }
+            file.writeText(array.toString())
         }.onFailure { e -> android.util.Log.w("DiscoveryRepo", "genres not saved", e) }
     }
 

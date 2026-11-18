@@ -187,7 +187,12 @@ object BrowseParser {
      * artwork/subtitle of its own) and opened through the exact same BrowseCollectionScreen every
      * other card uses, not a separate screen. Matched by the grid's own header title rather than
      * position, since the page also has an unrelated "Moods & moments" grid ahead of it. */
-    fun parseGenreChips(response: JSONObject): List<BrowseCollection> {
+    fun parseGenreChips(response: JSONObject): List<BrowseCollection> = parseChipGrid(response) { it.equals("Genres", ignoreCase = true) }
+
+    /** The same page's "Moods & moments" grid (Relax, Sleep, Sad...): Home's mood buttons. */
+    fun parseMoodChips(response: JSONObject): List<BrowseCollection> = parseChipGrid(response) { it.startsWith("Moods", ignoreCase = true) }
+
+    private fun parseChipGrid(response: JSONObject, isWanted: (String) -> Boolean): List<BrowseCollection> {
         val tabs = response.opt("contents").obj()?.opt("singleColumnBrowseResultsRenderer").obj()?.opt("tabs").arr()
         val shelves = tabs?.optJSONObject(0)?.opt("tabRenderer").obj()?.opt("content").obj()
             ?.opt("sectionListRenderer").obj()?.opt("contents").arr() ?: return emptyList()
@@ -195,7 +200,7 @@ object BrowseParser {
         for (i in 0 until shelves.length()) {
             val grid = shelves.optJSONObject(i)?.opt("gridRenderer").obj() ?: continue
             val headerTitle = grid.opt("header").obj()?.opt("gridHeaderRenderer").obj()?.opt("title").obj()?.runs().orEmpty()
-            if (!headerTitle.equals("Genres", ignoreCase = true)) continue
+            if (!isWanted(headerTitle)) continue
 
             val gridItems = grid.opt("items").arr() ?: continue
             val chips = mutableListOf<BrowseCollection>()
