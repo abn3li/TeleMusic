@@ -19,7 +19,7 @@ import java.util.Locale
  * Returns (format, quality), e.g. ("FLAC · Hi-Res Lossless", "24-bit / 96 kHz · 2,851 kbps") or
  * ("MP3", "320 kbps · 44.1 kHz").
  */
-internal fun detectAudioFormat(context: Context, filePath: String?, durationSec: Int): Pair<String, String> {
+internal fun detectAudioFormat(context: Context, filePath: String?, durationSec: Int, partial: Boolean = false): Pair<String, String> {
     if (filePath == null) return "Streaming" to ""
     val uri = if (filePath.startsWith("content://")) Uri.parse(filePath) else Uri.fromFile(File(filePath))
     val header = readHeader(context, filePath)
@@ -47,7 +47,9 @@ internal fun detectAudioFormat(context: Context, filePath: String?, durationSec:
         }
     }
     var bitsPerSample = 0
-    runCatching {
+    // A file still downloading: only what its headers say counts (the platform would otherwise
+    // work a bitrate out from the part that's there).
+    if (!partial) runCatching {
         val retriever = MediaMetadataRetriever()
         try {
             retriever.setDataSource(context, uri)
@@ -93,7 +95,7 @@ internal fun detectAudioFormat(context: Context, filePath: String?, durationSec:
     val hiRes = lossless && (bitsPerSample > 16 || sampleRate > 48_000)
 
     // Last resort for bitrate only: size over duration (accurate for lossless and CBR audio).
-    if (bitrate <= 0 && durationSec > 0) {
+    if (!partial && bitrate <= 0 && durationSec > 0) {
         val bytes = localFileSizeBytes(context, filePath)
         if (bytes > 0) bitrate = bytes * 8 / durationSec
     }

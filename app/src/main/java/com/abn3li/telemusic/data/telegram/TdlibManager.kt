@@ -470,6 +470,12 @@ class TdlibManager(private val context: Context) {
         }
     }
 
+    /** Where a file's downloaded part sits, once its start is on disk; null before that. */
+    suspend fun partialFilePath(fileId: Int): String? = runCatching {
+        val file = sendSuspend(TdApi.GetFile(fileId)) as? TdApi.File ?: return null
+        file.local.path.takeIf { !it.isNullOrBlank() && file.local.downloadedPrefixSize > 0 && java.io.File(it).exists() }
+    }.getOrNull()
+
     /** Fetches the exact total file size for a fileId directly from TDLib's file metadata. */
     suspend fun getFreshFileSize(fileId: Int): Long? {
         return try {

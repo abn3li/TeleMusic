@@ -26,6 +26,10 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.foundation.clickable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -46,6 +50,13 @@ import java.util.Locale
 
 private data class FileDetails(val format: String, val bitrate: String, val size: String)
 
+/** What a YouTube audio format (itag) is, as YouTube defines it. Opus is variable-rate, so no kbps. */
+private fun youtubeFormat(itag: Int): Pair<String, String>? = when (itag) {
+    249, 250, 251, 774 -> "Opus" to "48 kHz"
+    140, 141 -> "AAC" to "44.1 kHz"
+    else -> null
+}
+
 /** "Song info" from the Now Playing menu, styled like the menu sheet itself. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -54,13 +65,27 @@ internal fun SongInfoSheet(song: SongEntity, onDismiss: () -> Unit) {
     val app = context.applicationContext as com.abn3li.telemusic.TgMusicApp
     val activeFlac by app.flacUpgradeStore.activeFlac.collectAsState()
     val flac = activeFlac?.takeIf { it.songId == song.telegramMessageId.toString() }
+    // Read again when the player reports a new song format, so a stream's quality shows once it's known.
+    val playingStatus by app.audioOutput.status.collectAsState()
     // Reads the file's header and size - kept off the main thread.
-    val details by produceState<FileDetails?>(null, song.telegramMessageId, song.localFilePath) {
+    val details by produceState<FileDetails?>(null, song.telegramMessageId, song.localFilePath, playingStatus) {
         value = withContext(Dispatchers.IO) {
-            val (format, bitrate) = detectAudioFormat(context, song.localFilePath, song.durationSeconds)
-            val bytes = song.localFilePath?.let { localFileSizeBytes(context, it) } ?: 0L
-            val size = if (bytes > 0) String.format(Locale.US, "%.2f MB", bytes / (1024.0 * 1024.0)) else "Streaming"
-            FileDetails(format, bitrate, size)
+            if (song.localFilePath != null) {
+                val (format, bitrate) = detectAudioFormat(context, song.localFilePath, song.durationSeconds)
+                val bytes = localFileSizeBytes(context, song.localFilePath)
+                val size = if (bytes > 0) String.format(Locale.US, "%.2f MB", bytes / (1024.0 * 1024.0)) else "Streaming"
+                FileDetails(format, bitrate, size)
+            } else {
+                // Streaming: what the player reads from the stream, else the YouTube format the
+                // stream came in, else the start of the Telegram file already on disk. Never a guess.
+                val (format, quality) = app.audioOutput.playingQuality()
+                    ?: song.youtubeVideoId?.let { id -> app.youtubeAudioCache.itagOf(id)?.let(::youtubeFormat) }
+                    ?: song.telegramFileId.takeIf { it != 0 && song.youtubeVideoId == null && !song.isLocalImport }
+                        ?.let { app.tdlibManager.partialFilePath(it) }
+                        ?.let { detectAudioFormat(context, it, song.durationSeconds, partial = true) }
+                    ?: ("—" to "")
+                FileDetails(format, quality, "Streaming")
+            }
         }
     }
     val source = when {
@@ -72,6 +97,8 @@ internal fun SongInfoSheet(song: SongEntity, onDismiss: () -> Unit) {
         song.isLocalImport || song.youtubeVideoId != null -> "Streaming from YouTube"
         else -> "Streaming from Telegram"
     }
+
+    var showPath by remember { mutableStateOf(false) }
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -87,6 +114,12 @@ internal fun SongInfoSheet(song: SongEntity, onDismiss: () -> Unit) {
                 .padding(horizontal = 18.dp)
                 .padding(bottom = 22.dp)
         ) {
+            if (showPath) {
+                // Read once when opened; nothing keeps polling playback.
+                val path = remember { app.audioOutput.signalPath() }
+                SignalPathView(path, onClose = { showPath = false })
+                return@Column
+            }
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Box(
                     Modifier
@@ -131,10 +164,15 @@ internal fun SongInfoSheet(song: SongEntity, onDismiss: () -> Unit) {
                 InfoDivider()
                 InfoRow("Quality", if (flac != null)
                     "${flac.bitDepth}-bit / ${String.format(Locale.US, if (flac.sampleRate % 1000 == 0) "%.0f" else "%.1f", flac.sampleRate / 1000.0)} kHz"
-                    else details?.bitrate?.ifBlank { "Unknown" } ?: "…")
+                    else details?.bitrate?.ifBlank { "—" } ?: "…")
                 if (flac != null) {
                     InfoDivider()
                     InfoRow("Channels", if (flac.channels == 2) "Stereo" else "Mono")
+                }
+                val output by app.audioOutput.status.collectAsState()
+                output?.let {
+                    InfoDivider()
+                    InfoRow("Output", it, onClick = { showPath = true })
                 }
             }
             InfoSection("File") {
@@ -174,10 +212,11 @@ private fun InfoSection(title: String, content: @Composable () -> Unit) {
 }
 
 @Composable
-private fun InfoRow(label: String, value: String) {
+private fun InfoRow(label: String, value: String, onClick: (() -> Unit)? = null) {
     Row(
         Modifier
             .fillMaxWidth()
+            .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
             .height(48.dp)
             .padding(horizontal = 16.dp),
         verticalAlignment = Alignment.CenterVertically
@@ -194,6 +233,7 @@ private fun InfoRow(label: String, value: String) {
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.weight(1f)
         )
+        if (onClick != null) Text("  ›", color = Color.White.copy(alpha = 0.4f), fontSize = 18.sp)
     }
 }
 

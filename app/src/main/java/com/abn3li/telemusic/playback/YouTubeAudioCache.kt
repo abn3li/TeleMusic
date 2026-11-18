@@ -111,6 +111,12 @@ class YouTubeAudioCache(private val context: Context) {
         }
     }.getOrDefault(emptyList())
 
+    /** The YouTube format (itag) of [videoId]'s audio in the cache, if any of it is there. */
+    internal fun itagOf(videoId: String): Int? = runCatching {
+        cache.keys.firstOrNull { it.startsWith("$KEY_PREFIX$videoId:") && cache.getCachedSpans(it).isNotEmpty() }
+            ?.removePrefix("$KEY_PREFIX$videoId:")?.substringBefore(':')?.toIntOrNull()
+    }.getOrNull()
+
     /** Removes one song's audio; how many bytes that freed. */
     internal fun remove(key: String): Long = runCatching {
         val size = cache.getCachedSpans(key).sumOf { it.length }
