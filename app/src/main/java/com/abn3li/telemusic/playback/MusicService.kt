@@ -94,9 +94,36 @@ class MusicService : MediaLibraryService() {
         val supportsFlac = FfmpegLibrary.supportsFormat("audio/flac")
         Log.d("MusicService", "FFmpeg Native Engine Loaded: $isFfmpegAvailable, ALAC: $supportsAlac, FLAC: $supportsFlac")
 
-        val renderersFactory = DefaultRenderersFactory(this)
+        // Float is built in but only offered for an external output that asks for it (see
+        // AudioOutputRouter); the phone speaker keeps 16-bit.
+        val audioOutput = app.audioOutput
+        val renderersFactory = object : DefaultRenderersFactory(this) {
+            override fun buildAudioSink(context: android.content.Context, enableFloatOutput: Boolean,
+                                        enableAudioTrackPlaybackParams: Boolean): androidx.media3.exoplayer.audio.AudioSink =
+                RoutedAudioSink(
+                    androidx.media3.exoplayer.audio.DefaultAudioSink.Builder(context)
+                        .setEnableFloatOutput(true)
+                        .setEnableAudioTrackPlaybackParams(enableAudioTrackPlaybackParams)
+                        .build(),
+                    audioOutput
+                )
+
+            // The FFmpeg decoder, with the app deciding per source whether it decodes to float.
+            override fun buildAudioRenderers(
+                context: android.content.Context, extensionRendererMode: Int,
+                mediaCodecSelector: androidx.media3.exoplayer.mediacodec.MediaCodecSelector, enableDecoderFallback: Boolean,
+                audioSink: androidx.media3.exoplayer.audio.AudioSink, eventHandler: android.os.Handler,
+                eventListener: androidx.media3.exoplayer.audio.AudioRendererEventListener,
+                out: java.util.ArrayList<androidx.media3.exoplayer.Renderer>
+            ) {
+                super.buildAudioRenderers(context, extensionRendererMode, mediaCodecSelector, enableDecoderFallback,
+                    audioSink, eventHandler, eventListener, out)
+                val index = out.indexOfFirst { it is androidx.media3.decoder.ffmpeg.FfmpegAudioRenderer }
+                if (index >= 0) out[index] = androidx.media3.decoder.ffmpeg.SourceAwareFfmpegAudioRenderer(
+                    eventHandler, eventListener, audioSink, audioOutput)
+            }
+        }
             .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_PREFER)
-            .setEnableAudioFloatOutput(false)
             .setEnableAudioTrackPlaybackParams(true)
 
         val audioAttributes = AudioAttributes.Builder()
@@ -109,6 +136,8 @@ class MusicService : MediaLibraryService() {
             .setAudioAttributes(audioAttributes, true)
             .setHandleAudioBecomingNoisy(true)
             .build()
+        // The app drives that DAC itself, so Android won't announce it leaving: pause like an unplug.
+        audioOutput.onDacLost = { android.os.Handler(android.os.Looper.getMainLooper()).post { if (::player.isInitialized) player.pause() } }
         // Audio only: a YouTube stream can be a video file (YouTube now often answers with one),
         // and its picture was decoded in the background for nothing - CPU, battery and heat.
         player.trackSelectionParameters = player.trackSelectionParameters.buildUpon()
@@ -432,6 +461,8 @@ class MusicService : MediaLibraryService() {
         youtubeHistory?.close()
         serviceScope.cancel()
         mediaSession?.run { player.release(); release(); mediaSession = null }
+        (application as TgMusicApp).audioOutput.onDacLost = null
+        (application as TgMusicApp).audioOutput.onPlayerReleased()
         super.onDestroy()
     }
 }

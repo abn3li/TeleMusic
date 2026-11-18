@@ -28,6 +28,8 @@ import kotlinx.coroutines.withContext
 class TgMusicApp : Application(), ImageLoaderFactory {
     val flacUpgradeStore by lazy { com.abn3li.telemusic.data.quality.FlacUpgradeStore(this) }
     internal val flacCache by lazy { com.abn3li.telemusic.data.quality.FlacCache(java.io.File(filesDir, "flac_cache")) }
+    @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
+    val audioOutput by lazy { com.abn3li.telemusic.playback.AudioOutputRouter(this, settingsStore.audioOutput) }
     val youtubeAudioCache by lazy { com.abn3li.telemusic.playback.YouTubeAudioCache(this) }
     val animatedCovers by lazy { com.abn3li.telemusic.data.animatedcover.AnimatedCoverRepository(this) }
     val sleepTimer = com.abn3li.telemusic.playback.SleepTimer()

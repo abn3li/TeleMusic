@@ -130,7 +130,8 @@ def ensure_source(record):
 def runtime_payloads(android_package):
     payloads = {}
     for name in android_package.namelist():
-        if name.endswith('.so') and not name.endswith('/libffmpegJNI.so'):
+        # libtelemusic_bitperfect.so is the app's own code, built from app/src/main/cpp in the source.
+        if name.endswith('.so') and not name.endswith(('/libffmpegJNI.so', '/libtelemusic_bitperfect.so')):
             payloads[name] = hashlib.sha256(android_package.read(name)).hexdigest()
         elif name.startswith('assets/chaquopy/stdlib-') and name.endswith('.imy'):
             with zipfile.ZipFile(io.BytesIO(android_package.read(name))) as stdlib:

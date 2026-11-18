@@ -69,6 +69,7 @@ android {
             signingConfig = if (releaseStoreFile != null) signingConfigs.getByName("release") else signingConfigs.getByName("debug")
         }
     }
+    externalNativeBuild { cmake { path = file("src/main/cpp/CMakeLists.txt"); version = "3.22.1" } }
     buildFeatures { compose = true }
     testOptions.unitTests.isIncludeAndroidResources = true
     testOptions.unitTests.all {

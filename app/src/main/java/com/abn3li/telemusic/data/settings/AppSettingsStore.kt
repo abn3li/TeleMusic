@@ -19,6 +19,15 @@ data class PlayerEffects(
     val animatedCoversOnMobileData: Boolean = false
 )
 
+/** How songs leave the player untouched. Off plays through Android's mixer as usual. */
+enum class BitPerfectMode { OFF, USB_ANDROID, USB_DIRECT, DAP_EXCLUSIVE }
+
+/** How songs reach an external output (USB DAC, wired, Bluetooth). Both are off by default. */
+data class AudioOutputSettings(
+    val bitPerfect: BitPerfectMode = BitPerfectMode.OFF,
+    val floatOutput: Boolean = false
+)
+
 enum class DnsResolver(
     val displayName: String,
     val source: String,
@@ -288,6 +297,20 @@ class AppSettingsStore(context: Context) {
         _playerEffects.value = updated
     }
 
+    // Read by the audio sink each time a song starts, so a change applies from the next song.
+    private val _audioOutput = MutableStateFlow(AudioOutputSettings(
+        bitPerfect = runCatching { BitPerfectMode.valueOf(prefs.getString(KEY_BIT_PERFECT, null) ?: "OFF") }.getOrDefault(BitPerfectMode.OFF),
+        floatOutput = prefs.getBoolean(KEY_FLOAT_OUTPUT, false)
+    ))
+    val audioOutput: StateFlow<AudioOutputSettings> = _audioOutput
+
+    fun updateAudioOutput(transform: (AudioOutputSettings) -> AudioOutputSettings) {
+        val updated = transform(_audioOutput.value)
+        prefs.edit().putString(KEY_BIT_PERFECT, updated.bitPerfect.name)
+            .putBoolean(KEY_FLOAT_OUTPUT, updated.floatOutput).apply()
+        _audioOutput.value = updated
+    }
+
     private val _homeFeeds = MutableStateFlow(HomeFeeds(
         telegram = prefs.getBoolean(KEY_HOME_TELEGRAM, true),
         youtube = prefs.getBoolean(KEY_HOME_YOUTUBE, true)
@@ -331,6 +354,8 @@ class AppSettingsStore(context: Context) {
         private const val KEY_LYRICS_TRANSLATION_LANGUAGE = "lyrics_translation_language"
         private const val KEY_HOME_TELEGRAM = "home_feed_telegram"
         private const val KEY_HOME_YOUTUBE = "home_feed_youtube"
+        private const val KEY_BIT_PERFECT = "audio_bit_perfect_mode"
+        private const val KEY_FLOAT_OUTPUT = "audio_float_output"
         private const val KEY_THEME_MODE = "theme_mode"
         private const val KEY_LYRICS_GLOW = "player_lyrics_glow"
         private const val KEY_LYRICS_BLUR = "player_lyrics_blur"

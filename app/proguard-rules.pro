@@ -38,3 +38,6 @@
 # Line numbers in crash logs; mapping.txt turns the short names back into real ones.
 -keepattributes SourceFile,LineNumberTable
 -renamesourcefileattribute SourceFile
+
+# JNI entry points for exclusive audio output.
+-keep class com.abn3li.telemusic.playback.bitperfect.NativeBitPerfect { native <methods>; }
