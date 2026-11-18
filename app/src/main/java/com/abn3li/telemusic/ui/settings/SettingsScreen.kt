@@ -485,7 +485,15 @@ fun SettingsScreen(
             SettingsPage.AUDIO -> LargeTitleList(title = "Audio Quality", onBack = ::closePage, grouped = true) {
                 item("audio") {
                     Spacer(Modifier.height(8.dp))
+                    NowPlayingOutput()
+                    AudioOutputSettingsGroup(onOpenBitPerfect = { openPage(SettingsPage.BIT_PERFECT) })
                     FlacQualitySettingsGroup(showHeader = false)
+                }
+            }
+            SettingsPage.BIT_PERFECT -> LargeTitleList(title = "Bit-Perfect", onBack = ::closePage, grouped = true) {
+                item("modes") {
+                    Spacer(Modifier.height(8.dp))
+                    BitPerfectModes()
                 }
             }
             SettingsPage.LIBRARY -> LargeTitleList(title = "Library", onBack = ::closePage, grouped = true) {
@@ -856,7 +864,7 @@ private fun LinkRow(title: String, value: String, icon: androidx.compose.ui.grap
 /** Pages opened over Settings, each its own large-title list. */
 private enum class SettingsPage {
     // Sections, opened from Settings.
-    HOME, APPEARANCE, PLAYER, LYRICS, AUDIO, LIBRARY, STORAGE, CONNECTION, ABOUT,
+    HOME, APPEARANCE, PLAYER, LYRICS, AUDIO, BIT_PERFECT, LIBRARY, STORAGE, CONNECTION, ABOUT,
     // Lists and accounts, opened from a section or from Settings.
     LYRICS_SOURCES, TRANSLATE_TO, CACHE_LIMIT, DNS, TELEGRAM, SPOTIFY
 }

@@ -8,6 +8,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.GraphicEq
 import androidx.compose.material.icons.rounded.Person
+import androidx.compose.material.icons.rounded.Waves
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
@@ -39,9 +40,10 @@ internal fun FlacQualitySettingsGroup(showHeader: Boolean = true) {
     var password by remember { mutableStateOf("") }
     var saving by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
-    if (showHeader) GroupHeader("Audio Quality")
+    if (showHeader) GroupHeader("Audio Quality") else GroupHeader("Downloads")
     GroupCard {
         GroupRow(title = "Automatic FLAC Upgrade",
+            desc = if (showHeader) null else "Uses a lot of data",
             icon = { GroupIcon(Icons.Rounded.GraphicEq, Color(0xFF30D158)) },
             trailing = {
                 GroupSwitch(preferences.enabled, { enabled ->
@@ -55,7 +57,7 @@ internal fun FlacQualitySettingsGroup(showHeader: Boolean = true) {
             trailing = { GroupValue(preferences.username.ifBlank { "Set Up" }) },
             onClick = { username = preferences.username; password = ""; error = null; accountOpen = true })
     }
-    SettingsNote("Quality upgrades use a lot of mobile data. Wi-Fi is recommended.")
+    if (showHeader) SettingsNote("Quality upgrades use a lot of mobile data. Wi-Fi is recommended.")
     if (accountOpen) AppAlert(
         title = "Soulseek Account",
         message = "Use your existing Soulseek account, or create a new one with a unique username and password.",
@@ -92,6 +94,26 @@ internal fun FlacQualitySettingsGroup(showHeader: Boolean = true) {
             }
         }
     )
+}
+
+/** Bit-perfect mode (its own page) and 32-bit float. Both only act while an external output is plugged in. */
+@Composable
+internal fun AudioOutputSettingsGroup(onOpenBitPerfect: () -> Unit) {
+    val app = LocalContext.current.applicationContext as TgMusicApp
+    val output by app.settingsStore.audioOutput.collectAsState()
+    GroupHeader("Output")
+    GroupCard {
+        GroupRow(title = "Bit-Perfect",
+            desc = output.bitPerfect.title(),
+            icon = { BitPerfectModeIcon(output.bitPerfect) },
+            onClick = onOpenBitPerfect,
+            trailing = { GroupValue(null) })
+        GroupDivider(start = 57.dp)
+        GroupRow(title = "32-bit Float",
+            desc = "Hi-res on USB and wired",
+            icon = { GroupIcon(Icons.Rounded.Waves, Color(0xFF0A84FF)) },
+            trailing = { GroupSwitch(output.floatOutput, { on -> app.settingsStore.updateAudioOutput { it.copy(floatOutput = on) } }) })
+    }
 }
 
 @Composable
