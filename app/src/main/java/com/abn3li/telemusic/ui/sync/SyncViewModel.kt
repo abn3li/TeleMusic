@@ -1,6 +1,5 @@
 package com.abn3li.telemusic.ui.sync
 
-import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.abn3li.telemusic.data.telegram.TdlibManager
@@ -126,9 +125,5 @@ class SyncViewModel(private val tdlibManager: TdlibManager) : ViewModel() {
 
     fun setSearchQuery(query: String) {
         _uiState.value = _uiState.value.copy(searchQuery = query)
-    }
-
-    fun syncChannel(context: Context, chatId: Long) {
-        SyncService.start(context, chatId)
     }
 }

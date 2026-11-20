@@ -946,6 +946,58 @@ class MusicRepository(
         mergeCrossSourceDuplicates()
     }
 
+    /** A song in a Telegram chat, for picking which ones to add; [libraryCopy] is the library's
+     * copy when it already has it (this message, or the same song from another message or from
+     * YouTube). */
+    data class ChatSong(val message: TelegramAudioMessage, val libraryCopy: SongEntity?) {
+        val inLibrary get() = libraryCopy != null
+    }
+
+    /** Every song in [chatId], newest first. Read page by page; [onPage] gets the whole list so
+     * far after each page, so the first songs show while the rest load. */
+    suspend fun loadChatSongs(chatId: Long, onPage: (List<ChatSong>) -> Unit) = withContext(Dispatchers.IO) {
+        val all = ArrayList<ChatSong>()
+        for (documents in listOf(false, true)) {
+            var fromMessageId = 0L
+            while (true) {
+                val page = tdlibManager.fetchAudioPage(chatId, fromMessageId, documents, limit = 100)
+                page.songs.mapTo(all) { ChatSong(it, libraryCopyOf(chatId, it)) }
+                onPage(all.sortedByDescending { it.message.messageId })
+                if (page.nextFromMessageId == 0L || page.nextFromMessageId == fromMessageId) break
+                fromMessageId = page.nextFromMessageId
+            }
+        }
+    }
+
+    /** Adds only [songs] from [chatId] - the ones picked on the chat's page. */
+    suspend fun syncPickedSongs(chatId: Long, songs: List<TelegramAudioMessage>) {
+        settingsStore.lastSyncedChatId = chatId
+        songs.forEach { verifiedFreshFileIdThisRun.remove(it.messageId) }
+        for (msg in songs) addSyncedSong(chatId, msg)
+        removeDuplicates()
+        mergeCrossSourceDuplicates()
+    }
+
+    /** The same checks [addSyncedSong] makes before adding a song, without adding it: the copy
+     * that keeps it out, or null when it would be added. */
+    private suspend fun libraryCopyOf(chatId: Long, msg: TelegramAudioMessage): SongEntity? {
+        songDao.getById(msg.messageId)?.let {
+            if (it.telegramFileId != 0 && (it.resolvedChatId == null || it.resolvedChatId == chatId)) return it
+        }
+        val title = msg.title.ifBlank { "Unknown title" }.trim()
+        val artist = msg.performer.ifBlank { "Unknown artist" }.trim()
+        val titleKnown = title != "Unknown title"
+        val artistKnown = artist != "Unknown artist"
+        if (titleKnown && artistKnown) songDao.findTelegramByTitleAndArtist(title, artist)?.let { return it }
+        if (titleKnown && msg.durationSeconds > 0) songDao.findTelegramByTitleAndDuration(title, msg.durationSeconds)?.let { return it }
+        if (!titleKnown || !artistKnown) return null
+        val song = SongEntity(
+            telegramMessageId = msg.messageId, telegramFileId = msg.fileId, title = title, artist = artist,
+            durationSeconds = msg.durationSeconds, sourceSizeBytes = msg.sizeBytes, sourceMime = msg.mimeType.ifBlank { null }
+        )
+        return songDao.findYoutubeByTitleAndArtist(title, artist).firstOrNull { sameRecording(song, it) && betterCopy(song, it) === it }
+    }
+
     // ---- One song from both Telegram and YouTube ----
 
     private val crossSourceLock = kotlinx.coroutines.sync.Mutex()

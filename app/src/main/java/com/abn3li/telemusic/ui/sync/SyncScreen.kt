@@ -145,6 +145,17 @@ fun SyncScreen(onBack: () -> Unit) {
         }
     } else Modifier
 
+    // A chat opened to pick its songs.
+    var openChatId by remember { mutableStateOf<Long?>(null) }
+    val openChat = openChatId?.let { id ->
+        state.savedMessagesChat?.takeIf { it.id == id }?.let { it to "Saved Messages" }
+            ?: state.chats.firstOrNull { it.id == id }?.let { it to it.title }
+    }
+    if (openChat != null) {
+        ChatSongsPage(openChat.first, openChat.second, onBack = { openChatId = null })
+        return
+    }
+
     Box(Modifier.fillMaxSize().then(swipeModifier)) {
     LargeTitleList(
         title = "Sync",
@@ -187,7 +198,7 @@ fun SyncScreen(onBack: () -> Unit) {
                 state = state,
                 syncing = syncing,
                 onRetry = viewModel::loadChats,
-                onPick = { chatId -> viewModel.syncChannel(context, chatId) },
+                onPick = { chatId -> openChatId = chatId },
                 onFilterChange = viewModel::setFilter
             )
             is TelegramAuthState.Error -> item("error") { GroupFooter("Error: ${auth.message}", color = DestructiveRed) }
@@ -571,7 +582,7 @@ private fun LazyListScope.chatPicker(
                         ChatRow(chat.title, style.subtitle, style.icon, style.tint, !syncing) { onPick(chat.id) }
                     }
                 }
-                item("chats_footer") { GroupFooter("Songs in the chat you pick are added to your library.") }
+                item("chats_footer") { GroupFooter("Open a chat to pick which of its songs to add to your library.") }
             }
         }
     }

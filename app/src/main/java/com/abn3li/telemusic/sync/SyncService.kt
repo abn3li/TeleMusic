@@ -33,8 +33,10 @@ class SyncService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        if (syncJob?.isActive == true) return START_NOT_STICKY
         val chatId = intent?.getLongExtra(EXTRA_CHAT_ID, -1) ?: -1
+        val picked = pendingPicked?.takeIf { it.first == chatId }?.second
+        pendingPicked = null
+        if (syncJob?.isActive == true) return START_NOT_STICKY
         if (chatId == -1L) { stopSelf(); return START_NOT_STICKY }
 
         startForeground(NOTIFICATION_ID, buildNotification("Syncing..."))
@@ -43,9 +45,16 @@ class SyncService : Service() {
         _isRunning.value = true
         syncJob = scope.launch {
             try {
-                _progress.value = "Fetching musics..."
-                updateNotification("Fetching musics...")
-                app.musicRepository.syncFromChannel(chatId)
+                if (picked != null) {
+                    val text = if (picked.size == 1) "Adding 1 song..." else "Adding ${picked.size} songs..."
+                    _progress.value = text
+                    updateNotification(text)
+                    app.musicRepository.syncPickedSongs(chatId, picked)
+                } else {
+                    _progress.value = "Fetching musics..."
+                    updateNotification("Fetching musics...")
+                    app.musicRepository.syncFromChannel(chatId)
+                }
 
                 if (app.settingsStore.enrichMetadataOnSync) {
                     app.musicRepository.enrichMissingMetadata { message ->
@@ -102,6 +111,15 @@ class SyncService : Service() {
 
         private val _isRunning = MutableStateFlow(false)
         val isRunning: StateFlow<Boolean> = _isRunning.asStateFlow()
+
+        // Songs picked on a chat's page, handed to the next start for that chat.
+        @Volatile private var pendingPicked: Pair<Long, List<com.abn3li.telemusic.data.telegram.TelegramAudioMessage>>? = null
+
+        /** Adds only [songs] from [chatId]. */
+        fun startPicked(context: Context, chatId: Long, songs: List<com.abn3li.telemusic.data.telegram.TelegramAudioMessage>) {
+            pendingPicked = chatId to songs
+            start(context, chatId)
+        }
 
         fun start(context: Context, chatId: Long) {
             val intent = Intent(context, SyncService::class.java).putExtra(EXTRA_CHAT_ID, chatId)

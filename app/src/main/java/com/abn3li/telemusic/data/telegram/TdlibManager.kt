@@ -415,7 +415,9 @@ class TdlibManager(private val context: Context) {
                         audio.performer,
                         audio.duration,
                         sizeBytes = audio.audio.size.takeIf { it > 0 } ?: audio.audio.expectedSize,
-                        mimeType = audio.mimeType.orEmpty()
+                        mimeType = audio.mimeType.orEmpty(),
+                        dateSeconds = message.date,
+                        thumbnailFileId = audio.albumCoverThumbnail?.file?.id ?: 0
                     )
                 }
                 is TdApi.MessageDocument -> {
@@ -429,7 +431,9 @@ class TdlibManager(private val context: Context) {
                         "Telegram Document",
                         0,
                         sizeBytes = doc.document.size.takeIf { it > 0 } ?: doc.document.expectedSize,
-                        mimeType = doc.mimeType.orEmpty()
+                        mimeType = doc.mimeType.orEmpty(),
+                        dateSeconds = message.date,
+                        thumbnailFileId = doc.thumbnail?.file?.id ?: 0
                     )
                 }
                 else -> null
@@ -497,6 +501,12 @@ class TdlibManager(private val context: Context) {
             null
         }
     }
+
+    /** A small cover from Telegram, downloaded once; its local path, or null when it can't be had. */
+    suspend fun downloadThumbnail(fileId: Int): String? = runCatching {
+        val file = sendSuspend(TdApi.DownloadFile(fileId, 1, 0, 0, true)) as TdApi.File
+        file.local.path.takeIf { file.local.isDownloadingCompleted && it.isNotEmpty() }
+    }.getOrNull()
 
     /** Full blocking download - used only for the explicit "Download" button, not streaming. */
     suspend fun downloadFile(fileId: Int): String {

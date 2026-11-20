@@ -136,6 +136,10 @@ class AppSettingsStore(context: Context) {
         get() = prefs.getLong(KEY_LAST_CHAT_ID, 0L)
         set(value) = prefs.edit().putLong(KEY_LAST_CHAT_ID, value).apply()
 
+    /** The newest song seen on a chat's page; songs after it show as New next time. 0 = never opened. */
+    fun chatSongsSeenUpTo(chatId: Long): Long = prefs.getLong("chat_songs_seen_$chatId", 0L)
+    fun setChatSongsSeenUpTo(chatId: Long, messageId: Long) = prefs.edit().putLong("chat_songs_seen_$chatId", messageId).apply()
+
     /** A SAF tree the user picked (via ACTION_OPEN_DOCUMENT_TREE) to keep a visible, real copy
      * of every explicit download in shared/media storage - separate from the app-private copy
      * every download also keeps for playback (see MusicRepository's own doc on why both exist).
