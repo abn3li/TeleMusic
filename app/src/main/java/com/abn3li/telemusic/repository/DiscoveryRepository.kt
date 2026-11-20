@@ -288,8 +288,9 @@ class DiscoveryRepository(
             .also { if (it.isNotEmpty()) { cachedGenres = it; saveGenres(it) } }
             .ifEmpty { cachedGenres.orEmpty() }
 
-    /** Home's mood buttons (Relax, Sleep, Sad...) if already in memory. */
-    fun moodsIfLoaded(): List<BrowseCollection>? = cachedMoods
+    /** Home's mood buttons (Relax, Sleep, Sad...) if in memory or saved on the phone - a small
+     * file, read right away so the buttons are there with the page's first frame at launch. */
+    fun moodsIfLoaded(): List<BrowseCollection>? = cachedMoods ?: readSavedChips(moodsFile)?.also { cachedMoods = it }
 
     /** Home's mood buttons: from memory, else saved on the phone, else the same one request the
      * Search categories use. */

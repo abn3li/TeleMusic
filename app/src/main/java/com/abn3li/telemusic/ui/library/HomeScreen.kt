@@ -149,7 +149,8 @@ fun HomeScreen(
 
     // Mood buttons (Relax, Sleep, Sad...): picking one puts that mood's playlists at the top of
     // the page - in a fresh random order on every tap, kept only until the next tap.
-    val moods by produceState(app.discoveryRepository.moodsIfLoaded().orEmpty(), homeFeeds.youtube) {
+    val savedMoods = remember { app.discoveryRepository.moodsIfLoaded().orEmpty() }
+    val moods by produceState(savedMoods, homeFeeds.youtube) {
         if (value.isEmpty() && homeFeeds.youtube) value = app.discoveryRepository.moods()
     }
     var moodKey by rememberSaveable { mutableStateOf<String?>(null) }
@@ -199,13 +200,14 @@ fun HomeScreen(
         onPinnedClick = onOpenSettings,
         pinnedDescription = "Settings"
     ) {
-        if (homeFeeds.youtube && moods.isNotEmpty()) item("moods") {
-            LazyRow(ShelfOwnLayer.padding(bottom = 14.dp), contentPadding = PaddingValues(horizontal = 16.dp),
+        // Shown with the feed once it has loaded, not alone above the loading spinner.
+        if (homeFeeds.youtube && moods.isNotEmpty() && !waitingForFeed) item("moods") {
+            LazyRow(ShelfOwnLayer, contentPadding = PaddingValues(horizontal = 16.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 items(moods, key = { moodKeyOf(it) }) { mood ->
                     val key = moodKeyOf(mood)
                     val on = key == moodKey
-                    FilterPill(if (on) "${mood.title}  ✕" else mood.title, on) {
+                    FilterPill(if (on) "${mood.title}  ✕" else mood.title, on, glass = true) {
                         moodFailed = null
                         if (!on) moodTap++
                         moodKey = if (on) null else key

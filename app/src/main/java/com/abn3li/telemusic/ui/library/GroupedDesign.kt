@@ -9,6 +9,7 @@ import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
@@ -285,14 +286,19 @@ internal fun GroupActionRow(
 
 /** Pill chip used for filters (Sync chat types, YouTube genres). */
 @Composable
-internal fun FilterPill(label: String, selected: Boolean, onClick: () -> Unit) {
-    val background by animateColorAsState(if (selected) AppAccent else GroupCardColor, label = "pillBg")
+internal fun FilterPill(label: String, selected: Boolean, glass: Boolean = false, onClick: () -> Unit) {
+    // Glass: see-through with a thin edge, so it reads over the cover colour behind Home.
+    val background by animateColorAsState(
+        if (selected) AppAccent else if (glass) ink.copy(alpha = 0.10f) else GroupCardColor, label = "pillBg"
+    )
+    val shape = RoundedCornerShape(50)
     Text(
         label,
-        color = if (selected) Color.White else ink.copy(alpha = 0.75f),
+        color = if (selected) Color.White else if (glass) ink else ink.copy(alpha = 0.75f),
         fontSize = 15.sp,
         modifier = Modifier
-            .clip(RoundedCornerShape(50))
+            .then(if (glass && !selected) Modifier.border(1.dp, ink.copy(alpha = 0.16f), shape) else Modifier)
+            .clip(shape)
             .background(background)
             .clickable(onClick = onClick)
             .padding(horizontal = 16.dp, vertical = 8.dp)
