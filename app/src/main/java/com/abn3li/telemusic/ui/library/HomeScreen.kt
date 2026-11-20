@@ -183,6 +183,7 @@ fun HomeScreen(
         }
     }) {
     LargeTitleList(
+        coverGlow = true,
         title = "Home",
         listState = listState,
         showTopBar = false,

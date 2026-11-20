@@ -1,5 +1,6 @@
 package com.abn3li.telemusic.ui.navigation
 
+import com.abn3li.telemusic.data.local.listArtwork
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.foundation.layout.only
@@ -229,6 +230,7 @@ fun TgMusicNavGraph(navController: NavHostController = rememberNavController()) 
         app.downloadGate.run { libraryViewModel.downloadAllInPlaylist(playlistId, songs) }
     }
 
+    CoverGlowEffect(playerState.song?.listArtwork, LocalPalette.current.isLight)
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = navBackStackEntry?.destination?.route
     val inLibrary = currentRoute in LibraryRoutes

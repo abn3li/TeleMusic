@@ -281,7 +281,7 @@ fun DiscoverScreen(onOpenCollection: (BrowseCollection) -> Unit, onOpenSettings:
     if (showImport) ImportPlaylistPrompt(discovery) { showImport = false }
     // No top bar, like Home: the large title sits at the same height on both tabs.
     val account by app.youtubeAccount.state.collectAsState()
-    LargeTitleList(title = "Discover", showTopBar = false, pinnedButton = { AccountBadge(account, null, PinnedAccountSize) },
+    LargeTitleList(title = "Discover", coverGlow = true, showTopBar = false, pinnedButton = { AccountBadge(account, null, PinnedAccountSize) },
         onPinnedClick = onOpenSettings, pinnedDescription = "Settings") {
         item("imported_header") { Header("Your Imported Playlists", action = if (feed.importedPlaylists.isEmpty()) null else {
             {

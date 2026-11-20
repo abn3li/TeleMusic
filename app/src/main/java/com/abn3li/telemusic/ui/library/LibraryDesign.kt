@@ -1,5 +1,6 @@
 package com.abn3li.telemusic.ui.library
 
+import com.abn3li.telemusic.ui.navigation.coverGlow
 import com.abn3li.telemusic.ui.theme.appFontFamily
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -177,6 +178,8 @@ internal fun LargeTitleList(
     pinnedButton: (@Composable () -> Unit)? = null,
     onPinnedClick: () -> Unit = {},
     pinnedDescription: String? = null,
+    // The playing cover's colour at the top of the page (the main tab pages).
+    coverGlow: Boolean = false,
     content: LazyListScope.() -> Unit
 ) {
     val palette = LocalPalette.current
@@ -187,7 +190,7 @@ internal fun LargeTitleList(
         }
     }
     CompositionLocalProvider(LocalPalette provides if (grouped) palette.groupedPage() else palette) {
-        LargeTitleListBody(title, onBack, listState, titleTrailing, barActions, stickyContent, stickyHeight, overlay, showTopBar, pinnedButton, onPinnedClick, pinnedDescription, content)
+        LargeTitleListBody(title, onBack, listState, titleTrailing, barActions, stickyContent, stickyHeight, overlay, showTopBar, pinnedButton, onPinnedClick, pinnedDescription, coverGlow, content)
     }
 }
 
@@ -205,6 +208,7 @@ private fun LargeTitleListBody(
     pinnedButton: (@Composable () -> Unit)?,
     onPinnedClick: () -> Unit,
     pinnedDescription: String?,
+    coverGlow: Boolean,
     content: LazyListScope.() -> Unit
 ) {
     var barHeightPx by remember { mutableIntStateOf(0) }
@@ -238,7 +242,7 @@ private fun LargeTitleListBody(
             modifier = Modifier.fillMaxSize().playingBarsLayer(barsLayer).libraryReorderGestures(LocalLibraryEditing.current, listState).then(
                 if ((captureForDock || showSmallTitle) && !SystemBarsState.playerOpen) Modifier.frostedBackdropSource(backdrop, paper)
                 else Modifier
-            ),
+            ).then(if (coverGlow) Modifier.coverGlow() else Modifier),
             contentPadding = PaddingValues(top = statusBar + if (showTopBar) LibraryBarHeight else 0.dp)
         ) {
             item("large_title") {
@@ -275,6 +279,7 @@ private fun LargeTitleListBody(
             backdrop = backdrop,
             statusBar = statusBar,
             showToolbar = showTopBar,
+            coverGlow = coverGlow,
             modifier = Modifier.onSizeChanged { barHeightPx = it.height }
         )
         if (pinnedButton != null && LocalLibraryEditing.current?.active != true) {
@@ -408,6 +413,7 @@ private fun LibraryTitleBar(
     backdrop: FrostedBackdrop,
     statusBar: Dp,
     showToolbar: Boolean = true,
+    coverGlow: Boolean = false,
     modifier: Modifier = Modifier
 ) {
     val editing = LocalLibraryEditing.current
@@ -415,7 +421,7 @@ private fun LibraryTitleBar(
     // Before the large title scrolls away, keep the original page-colour header.
     val background = if (showSmallTitle || editing?.active == true) {
         Modifier.frostedSurface(backdrop, shape = RectangleShape, drawBorder = false)
-    } else Modifier.background(paper)
+    } else Modifier.background(paper).then(if (coverGlow) Modifier.coverGlow() else Modifier)
     val toolbarHeight = if (showToolbar) LibraryBarHeight else 0.dp
     Box(modifier.fillMaxWidth().height(toolbarHeight + statusBar).then(background).padding(top = statusBar)) {
         // Home keeps the system status area readable without covering the feed with a toolbar.
