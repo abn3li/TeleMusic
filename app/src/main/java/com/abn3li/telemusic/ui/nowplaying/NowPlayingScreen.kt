@@ -1086,6 +1086,8 @@ private fun PlayerPageArea(
     // The line being sung, between the title and the seek bar (saved synced lyrics only - it
     // never searches on its own). Tapping it opens Lyrics.
     if (showCoverTitle && state.lyricLines.isNotEmpty()) {
+        // Gone while the player opens or closes, so the flying title never passes over it.
+        val lineTransition = LocalPlayerTransition.current
         CurrentLyricLine(
             lines = state.lyricLines,
             viewModel = viewModel,
@@ -1099,7 +1101,10 @@ private fun PlayerPageArea(
                 .padding(horizontal = 26.dp)
                 .fillMaxWidth()
                 .height(26.dp)
-                .graphicsLayer { alpha = (1f - morph.value * 2f).coerceIn(0f, 1f) }
+                .graphicsLayer {
+                    val open = lineTransition?.let { ((it.expansion.value - 0.9f) / 0.1f).coerceIn(0f, 1f) } ?: 1f
+                    alpha = (1f - morph.value * 2f).coerceIn(0f, 1f) * open
+                }
         )
     }
 
