@@ -1,5 +1,6 @@
 package com.abn3li.telemusic.ui.library
 
+import com.abn3li.telemusic.ui.theme.appFontFamily
 import androidx.compose.runtime.ReadOnlyComposable
 import com.abn3li.telemusic.ui.theme.LocalPalette
 import com.abn3li.telemusic.ui.theme.paper
@@ -245,7 +246,7 @@ internal fun GroupTextField(
                 onValueChange = onValueChange,
                 singleLine = true,
                 enabled = enabled,
-                textStyle = TextStyle(color = ink, fontSize = 16.5.sp),
+                textStyle = TextStyle(color = ink, fontSize = 16.5.sp, fontFamily = appFontFamily),
                 cursorBrush = SolidColor(AppAccent),
                 keyboardOptions = KeyboardOptions(keyboardType = if (password) KeyboardType.Password else keyboardType),
                 visualTransformation = if (password) PasswordVisualTransformation() else VisualTransformation.None,

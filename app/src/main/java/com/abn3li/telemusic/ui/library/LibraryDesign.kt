@@ -1,5 +1,6 @@
 package com.abn3li.telemusic.ui.library
 
+import com.abn3li.telemusic.ui.theme.appFontFamily
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.ui.input.pointer.pointerInput
@@ -508,7 +509,7 @@ internal fun LibrarySearchField(
                 value = text,
                 onValueChange = onValueChange,
                 singleLine = true,
-                textStyle = TextStyle(color = ink, fontSize = 17.sp),
+                textStyle = TextStyle(color = ink, fontSize = 17.sp, fontFamily = appFontFamily),
                 cursorBrush = SolidColor(AppAccent),
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
                 keyboardActions = KeyboardActions(onSearch = { onSearch(); keyboard?.hide() }),

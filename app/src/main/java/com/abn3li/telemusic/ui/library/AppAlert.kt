@@ -1,5 +1,6 @@
 package com.abn3li.telemusic.ui.library
 
+import com.abn3li.telemusic.ui.theme.appFontFamily
 import androidx.compose.runtime.ReadOnlyComposable
 import com.abn3li.telemusic.ui.theme.LocalPalette
 import com.abn3li.telemusic.ui.theme.paper
@@ -162,7 +163,7 @@ internal fun AlertTextField(
             value = value,
             onValueChange = onValueChange,
             singleLine = true,
-            textStyle = TextStyle(color = ink, fontSize = 15.sp),
+            textStyle = TextStyle(color = ink, fontSize = 15.sp, fontFamily = appFontFamily),
             cursorBrush = SolidColor(AppAccent),
             keyboardOptions = KeyboardOptions(keyboardType = keyboardType),
             modifier = Modifier.fillMaxWidth()

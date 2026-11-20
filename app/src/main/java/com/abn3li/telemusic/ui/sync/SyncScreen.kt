@@ -1,5 +1,6 @@
 package com.abn3li.telemusic.ui.sync
 
+import com.abn3li.telemusic.ui.theme.appFontFamily
 import com.abn3li.telemusic.ui.theme.LocalPalette
 import com.abn3li.telemusic.ui.theme.paper
 import com.abn3li.telemusic.ui.theme.ink
@@ -418,7 +419,7 @@ private fun CountryPickerDialog(selected: Country, onDismiss: () -> Unit, onSele
                         value = query,
                         onValueChange = { query = it },
                         singleLine = true,
-                        textStyle = TextStyle(color = ink, fontSize = 16.sp),
+                        textStyle = TextStyle(color = ink, fontSize = 16.sp, fontFamily = appFontFamily),
                         cursorBrush = SolidColor(AppAccent),
                         modifier = Modifier.fillMaxWidth()
                     )

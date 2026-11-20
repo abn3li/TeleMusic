@@ -1,5 +1,6 @@
 package com.abn3li.telemusic.ui.nowplaying
 
+import com.abn3li.telemusic.ui.theme.appFontFamily
 import com.abn3li.telemusic.ui.theme.SoftIconButton as IconButton
 
 import androidx.compose.ui.graphics.BlendMode
@@ -91,7 +92,6 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.material.icons.rounded.Pause
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.animation.core.AnimationSpec
-import androidx.compose.ui.text.font.FontFamily
 import com.abn3li.telemusic.ui.theme.LocalPalette
 import androidx.compose.ui.geometry.RoundRect
 import androidx.compose.ui.geometry.CornerRadius
@@ -205,9 +205,9 @@ private fun FlyingPlayerParts(
                     }
             ) {
                 Text(title, color = ink, fontSize = MINI_TITLE_SP.sp, fontWeight = FontWeight.SemiBold,
-                    fontFamily = FontFamily.SansSerif, letterSpacing = 0.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    fontFamily = appFontFamily, letterSpacing = 0.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Text(artist, color = ink.copy(alpha = 0.6f), fontSize = 11.sp,
-                    fontFamily = FontFamily.SansSerif, letterSpacing = 0.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    fontFamily = appFontFamily, letterSpacing = 0.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
             // As the player draws it, shrunk to the mini player's size at first.
             Column(

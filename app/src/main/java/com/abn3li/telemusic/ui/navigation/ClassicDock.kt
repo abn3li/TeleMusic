@@ -1,5 +1,6 @@
 package com.abn3li.telemusic.ui.navigation
 
+import com.abn3li.telemusic.ui.theme.appFontFamily
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.foundation.background
@@ -55,7 +56,6 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.LayoutDirection
@@ -340,7 +340,7 @@ private fun ClassicTab(icon: ImageVector, label: String, selected: Boolean, onCl
             scaleX = glyphScale.value; scaleY = glyphScale.value
         })
         Spacer(Modifier.height(2.dp))
-        Text(label, color = tint, fontFamily = FontFamily.SansSerif, fontWeight = FontWeight.SemiBold,
+        Text(label, color = tint, fontFamily = appFontFamily, fontWeight = FontWeight.SemiBold,
             fontSize = 11.sp, lineHeight = 13.sp, letterSpacing = 0.sp, maxLines = 1)
     }
 }
@@ -424,10 +424,10 @@ private fun ClassicMiniPlayer(
             .miniRestingSpot(transition, press::value) { miniText = it }
             .graphicsLayer { alpha = if (transition?.textFlying?.invoke() == true) 0f else 1f }) {
             Text(song.title, color = ink, fontSize = 14.sp, fontWeight = FontWeight.SemiBold,
-                fontFamily = FontFamily.SansSerif, letterSpacing = 0.sp,
+                fontFamily = appFontFamily, letterSpacing = 0.sp,
                 maxLines = 1, overflow = TextOverflow.Ellipsis)
             Text(song.artist.orEmpty(), color = ink.copy(alpha = 0.6f), fontSize = 11.sp,
-                fontFamily = FontFamily.SansSerif, letterSpacing = 0.sp,
+                fontFamily = appFontFamily, letterSpacing = 0.sp,
                 maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
         Box(Modifier.size(40.dp)

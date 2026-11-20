@@ -1,5 +1,6 @@
 package com.abn3li.telemusic.ui.nowplaying
 
+import com.abn3li.telemusic.ui.theme.AppFonts
 import android.content.ClipData
 import android.content.ContentValues
 import android.content.Context
@@ -8,7 +9,6 @@ import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Paint
 import android.graphics.RectF
-import android.graphics.Typeface
 import android.os.Build
 import android.os.Environment
 import android.provider.MediaStore
@@ -288,7 +288,7 @@ private fun textPaint(size: Float, bold: Boolean, alpha: Int) = TextPaint(Paint.
     color = android.graphics.Color.WHITE
     this.alpha = alpha
     textSize = size
-    typeface = if (bold) Typeface.DEFAULT_BOLD else Typeface.DEFAULT
+    typeface = AppFonts.typeface(bold)
 }
 
 private suspend fun loadCover(context: Context, artwork: String): Bitmap? = runCatching {

@@ -1,5 +1,6 @@
 package com.abn3li.telemusic.ui.library
 
+import com.abn3li.telemusic.ui.theme.appFontFamily
 import com.abn3li.telemusic.ui.theme.LocalPalette
 import com.abn3li.telemusic.ui.theme.paper
 import com.abn3li.telemusic.ui.theme.ink
@@ -666,7 +667,7 @@ internal fun PlaylistPicker(playlists: List<PlaylistEntity>, onPick: (PlaylistEn
                         value = name,
                         onValueChange = { name = it },
                         singleLine = true,
-                        textStyle = TextStyle(color = ink, fontSize = 12.sp),
+                        textStyle = TextStyle(color = ink, fontSize = 12.sp, fontFamily = appFontFamily),
                         cursorBrush = SolidColor(AppAccent),
                         modifier = Modifier.fillMaxWidth()
                     )

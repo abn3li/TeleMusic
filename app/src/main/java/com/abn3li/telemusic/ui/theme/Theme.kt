@@ -10,6 +10,7 @@ import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import com.abn3li.telemusic.ui.library.ContextMenuHost
 
 private val Accent = Color(0xFFE64366)
@@ -75,7 +76,8 @@ private val LightColorScheme = lightColorScheme(
 @OptIn(ExperimentalFoundationApi::class)
 fun TgMusicTheme(light: Boolean = false, content: @Composable () -> Unit) {
     val pressFeedback = remember(light) { SoftPressIndication(if (light) Color.Black else Color.White) }
-    MaterialTheme(colorScheme = if (light) LightColorScheme else AppColorScheme, shapes = AppShapes) {
+    val typography = rememberAppTypography()
+    MaterialTheme(colorScheme = if (light) LightColorScheme else AppColorScheme, shapes = AppShapes, typography = typography) {
         // No Android 12+ stretch overscroll: Samsung's renderer can segfault in
         // StretchEffect::getShader when a stretched list changes size mid-stretch (seen when
         // switching Sync filters), killing the whole process.
@@ -93,7 +95,14 @@ fun TgMusicTheme(light: Boolean = false, content: @Composable () -> Unit) {
 @Composable
 fun DarkPlayerTheme(content: @Composable () -> Unit) {
     val pressFeedback = remember { SoftPressIndication(Color.White) }
-    MaterialTheme(colorScheme = AppColorScheme, shapes = AppShapes) {
+    val typography = rememberAppTypography()
+    MaterialTheme(colorScheme = AppColorScheme, shapes = AppShapes, typography = typography) {
         CompositionLocalProvider(LocalPalette provides DarkPalette, LocalIndication provides pressFeedback, content = content)
     }
+}
+
+@Composable
+private fun rememberAppTypography(): androidx.compose.material3.Typography {
+    val context = LocalContext.current
+    return remember { appTypography(AppFonts.family(context)) }
 }

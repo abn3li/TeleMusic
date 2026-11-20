@@ -1,5 +1,6 @@
 package com.abn3li.telemusic.ui.nowplaying
 
+import com.abn3li.telemusic.ui.theme.appFontFamily
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.material.icons.rounded.MusicNote
 import androidx.compose.animation.togetherWith
@@ -240,7 +241,7 @@ internal fun LyricsPage(
                     )
                     translations[line.trim()]?.let { translated ->
                         Text(translated, color = Color.White.copy(alpha = 0.55f), fontSize = 15.sp, fontWeight = FontWeight.Medium,
-                            lineHeight = 21.sp, style = TranslationStyle, modifier = Modifier.fillMaxWidth().padding(bottom = 10.dp))
+                            lineHeight = 21.sp, style = TranslationStyle.copy(fontFamily = appFontFamily), modifier = Modifier.fillMaxWidth().padding(bottom = 10.dp))
                     }
                 }
                 LyricsSourceButton(onOpenLyricsSource, Modifier.padding(top = 28.dp))
@@ -939,7 +940,7 @@ private fun TranslationLine(text: String, isActive: Boolean, distance: Int, just
         fontSize = 18.sp,
         fontWeight = FontWeight.SemiBold,
         lineHeight = 24.sp,
-        style = TranslationStyle,
+        style = TranslationStyle.copy(fontFamily = appFontFamily),
         modifier = Modifier
             .fillMaxWidth()
             .graphicsLayer { this.alpha = alpha }

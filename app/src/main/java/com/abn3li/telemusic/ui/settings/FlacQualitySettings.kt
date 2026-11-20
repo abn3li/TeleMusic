@@ -1,5 +1,6 @@
 package com.abn3li.telemusic.ui.settings
 
+import com.abn3li.telemusic.ui.theme.appFontFamily
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -122,7 +123,7 @@ private fun QualityAccountField(value: String, onChange: (String) -> Unit, hint:
         .padding(horizontal = 10.dp, vertical = 10.dp)) {
         if (value.isEmpty()) Text(hint, color = ink.copy(alpha = 0.35f), fontSize = 15.sp)
         BasicTextField(value, onChange, singleLine = true, enabled = enabled,
-            textStyle = TextStyle(color = ink, fontSize = 15.sp), cursorBrush = SolidColor(AppAccent),
+            textStyle = TextStyle(color = ink, fontSize = 15.sp, fontFamily = appFontFamily), cursorBrush = SolidColor(AppAccent),
             visualTransformation = if (secret) PasswordVisualTransformation() else VisualTransformation.None,
             keyboardOptions = KeyboardOptions(autoCorrect = false,
                 keyboardType = if (secret) KeyboardType.Password else KeyboardType.Ascii),

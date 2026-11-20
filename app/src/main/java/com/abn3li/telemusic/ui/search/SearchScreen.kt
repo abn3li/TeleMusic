@@ -1,4 +1,5 @@
 package com.abn3li.telemusic.ui.search
+import com.abn3li.telemusic.ui.theme.appFontFamily
 import com.abn3li.telemusic.ui.library.PinnedAccountSize
 import com.abn3li.telemusic.ui.library.AccountBadge
 import androidx.compose.material.icons.rounded.GraphicEq
@@ -487,7 +488,7 @@ private fun ResultsHeader(query: String, source: SearchSource, onQuery: (String)
                 BasicTextField(fieldValue, { value ->
                     fieldValue = value
                     onQuery(value.text)
-                }, Modifier.weight(1f).focusRequester(focus), textStyle = TextStyle(ink, fontSize = 17.sp),
+                }, Modifier.weight(1f).focusRequester(focus), textStyle = TextStyle(ink, fontSize = 17.sp, fontFamily = appFontFamily),
                     cursorBrush = SolidColor(AppAccent), singleLine = true, keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
                     keyboardActions = KeyboardActions(onSearch = {
                         onSearch()
