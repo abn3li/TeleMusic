@@ -93,7 +93,7 @@ fun LibraryHomeScreen(
         }
         // Where the songs come from: the built-in playlists and the phone's own music.
         item("collections", contentType = "library_shortcuts") {
-            Column(Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 22.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Column(Modifier.fillMaxWidth().padding(start = 18.dp, end = 18.dp, top = 22.dp, bottom = 6.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 // The sources that hold songs come first; an empty one steps back and dims.
                 val tiles = listOf(
                     CollectionTile("Liked", smartCounts.liked, SmartPlaylistKind.LIKED.icon()) { onOpenSmartPlaylist(SmartPlaylistKind.LIKED) },
@@ -217,13 +217,13 @@ private fun LibraryCategoryRow(icon: ImageVector, label: String, count: Int, onC
     }
 }
 
-/** A source of songs under the Library rows: a filled card with its icon, name, and how many songs;
- * dimmed while it holds none. */
+/** A source of songs under the Library rows: a black card with a thin edge, its icon, name, and how
+ * many songs; dimmed while it holds none. */
 @Composable
 private fun LibraryCollectionButton(label: String, count: Int, icon: ImageVector, onClick: () -> Unit, modifier: Modifier) {
-    val shape = RoundedCornerShape(14.dp)
-    Row(modifier.heightIn(min = 56.dp)
-        .clip(shape).background(LibraryFieldColor).clickable(onClick = onClick).padding(horizontal = 12.dp, vertical = 11.dp),
+    val shape = RoundedCornerShape(12.dp)
+    Row(modifier.heightIn(min = 54.dp).border(0.75.dp, ink.copy(alpha = 0.18f), shape)
+        .clip(shape).background(ink.copy(alpha = 0.025f)).clickable(onClick = onClick).padding(horizontal = 14.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically) {
         val empty = count == 0
         Icon(icon, null, tint = if (empty) ink.copy(alpha = 0.35f) else AppAccent, modifier = Modifier.size(22.dp))
