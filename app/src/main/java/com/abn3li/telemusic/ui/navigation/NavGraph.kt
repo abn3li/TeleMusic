@@ -252,9 +252,9 @@ fun TgMusicNavGraph(navController: NavHostController = rememberNavController()) 
                     navController.navigate(Routes.HOME) { launchSingleTop = true }
                 }
             }
-            // Library tapped while inside a Library page: back to the main Library
+            // Library tapped while inside a Library page or Settings: back to the main Library
             // page - or open it, when the page came from Home and Library isn't open.
-            route == Routes.LIBRARY && inLibrary -> {
+            route == Routes.LIBRARY && (inLibrary || currentRoute == Routes.SETTINGS) -> {
                 if (!navController.popBackStack(Routes.LIBRARY, inclusive = false)) {
                     navController.navigate(Routes.LIBRARY) {
                         popUpTo(Routes.HOME)
