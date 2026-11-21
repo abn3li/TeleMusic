@@ -812,73 +812,73 @@
     "empty_artifact": false
   },
   {
-    "coordinate": "androidx.navigation:navigation-common-ktx:2.7.7",
-    "artifact_sha256": "859bfc92d936fbaf87173f57b5b918c552fadd5c5a931efe16d78e9ad865b6b7",
+    "coordinate": "androidx.navigation:navigation-common-ktx:2.8.8",
+    "artifact_sha256": "526207fa71b2ec9d40635b3bac79868184d998ea4a77ed86726d935d098a2f12",
     "license": "Apache-2.0",
     "declared_licenses": [
       "The Apache Software License, Version 2.0"
     ],
-    "notice": "licenses/maven/androidx.navigation-navigation-common-ktx-2.7.7.txt",
-    "notice_sha256": "d4f6a6d73d1daade7362dfc67cc44e55e3c16492263f7e84c0b0398843fb066d",
-    "source_url": "https://dl.google.com/dl/android/maven2/androidx/navigation/navigation-common-ktx/2.7.7/navigation-common-ktx-2.7.7-sources.jar",
-    "source_sha256": "c6deada2fac53b8ea6523dbda77597b128006674616f140f04df23264c6d1aa3",
-    "source_file": "build/licensing/sources/androidx.navigation-navigation-common-ktx-2.7.7-sources.jar",
+    "notice": "licenses/maven/androidx.navigation-navigation-common-ktx-2.8.8.txt",
+    "notice_sha256": "3dcbd6d41d9ced238b3b572181d008ab2fc2af83bd94dbb9a655c11b92a70f28",
+    "source_url": "https://dl.google.com/dl/android/maven2/androidx/navigation/navigation-common-ktx/2.8.8/navigation-common-ktx-2.8.8-sources.jar",
+    "source_sha256": "d36f5a324be55a9d2b7f8ffe5121fc3a1f9b2f6e5d6278036ccce8f785931543",
+    "source_file": "build/licensing/sources/androidx.navigation-navigation-common-ktx-2.8.8-sources.jar",
     "empty_artifact": false
   },
   {
-    "coordinate": "androidx.navigation:navigation-common:2.7.7",
-    "artifact_sha256": "39d9bd3bf88185bad78aaed01d8893f375dc9f0e699e5097ff6441a2dd8aaf29",
+    "coordinate": "androidx.navigation:navigation-common:2.8.8",
+    "artifact_sha256": "c7a9851d33f2c71728220b14b0f03825720ead4ca7973fb87f6569e336b89204",
     "license": "Apache-2.0",
     "declared_licenses": [
       "The Apache Software License, Version 2.0"
     ],
-    "notice": "licenses/maven/androidx.navigation-navigation-common-2.7.7.txt",
-    "notice_sha256": "4f2f81d6494d19381972ffb08eb974d1ead2bfba9767a6ff0296c7470e1f372a",
-    "source_url": "https://dl.google.com/dl/android/maven2/androidx/navigation/navigation-common/2.7.7/navigation-common-2.7.7-sources.jar",
-    "source_sha256": "8ca47e5a97e484819923432e8f86f9c5aaa84a5251c602bff0daef9cdf2b32cf",
-    "source_file": "build/licensing/sources/androidx.navigation-navigation-common-2.7.7-sources.jar",
+    "notice": "licenses/maven/androidx.navigation-navigation-common-2.8.8.txt",
+    "notice_sha256": "b15a8750efd2eefd5237406a38cb90cbc9a3a157d6934a47e9e6089913031f54",
+    "source_url": "https://dl.google.com/dl/android/maven2/androidx/navigation/navigation-common/2.8.8/navigation-common-2.8.8-sources.jar",
+    "source_sha256": "cd5b8b7027b0f9b36c983a19903f39c0186a37d58880f0b73dbaae50516c5661",
+    "source_file": "build/licensing/sources/androidx.navigation-navigation-common-2.8.8-sources.jar",
     "empty_artifact": false
   },
   {
-    "coordinate": "androidx.navigation:navigation-compose:2.7.7",
-    "artifact_sha256": "f505aee98afa24faaba36e0aa2f8cbe9b7a58008ba2a03286a0b7a1e68ee277f",
+    "coordinate": "androidx.navigation:navigation-compose:2.8.8",
+    "artifact_sha256": "b4f5774748acac050c3ad9eff3d38215bff5d284b2fc8853e18f87743aed0593",
     "license": "Apache-2.0",
     "declared_licenses": [
       "The Apache Software License, Version 2.0"
     ],
-    "notice": "licenses/maven/androidx.navigation-navigation-compose-2.7.7.txt",
-    "notice_sha256": "22f8dba7390bd7d5f7cfefe2095f5d32eec3cab7a21049ddfd06071749fc1c9d",
-    "source_url": "https://dl.google.com/dl/android/maven2/androidx/navigation/navigation-compose/2.7.7/navigation-compose-2.7.7-sources.jar",
-    "source_sha256": "098e7a0cd801ee3322de1416115c96818334cc7ab5f887b90cfae941c4404967",
-    "source_file": "build/licensing/sources/androidx.navigation-navigation-compose-2.7.7-sources.jar",
+    "notice": "licenses/maven/androidx.navigation-navigation-compose-2.8.8.txt",
+    "notice_sha256": "b2582c35c40f3306b95608ffd0fe75f64e554f4e1177e0e152a4f0c8787091b4",
+    "source_url": "https://dl.google.com/dl/android/maven2/androidx/navigation/navigation-compose/2.8.8/navigation-compose-2.8.8-sources.jar",
+    "source_sha256": "1803f2eeb62e33e5888639338af9bae8fc1b37d1a034262a17440b1bb746b8f0",
+    "source_file": "build/licensing/sources/androidx.navigation-navigation-compose-2.8.8-sources.jar",
     "empty_artifact": false
   },
   {
-    "coordinate": "androidx.navigation:navigation-runtime-ktx:2.7.7",
-    "artifact_sha256": "ad40c4adae848076fef41b747499a1050f4552539c0f42b74765e43a77deaeda",
+    "coordinate": "androidx.navigation:navigation-runtime-ktx:2.8.8",
+    "artifact_sha256": "cbed4ff0153b63a08053c94652e0aa793fbd9bb617b9b60d84681eef8c7c05ca",
     "license": "Apache-2.0",
     "declared_licenses": [
       "The Apache Software License, Version 2.0"
     ],
-    "notice": "licenses/maven/androidx.navigation-navigation-runtime-ktx-2.7.7.txt",
-    "notice_sha256": "ceb74dfefeed644c3fe73cbb604f50da0f5f2b49b2bd543c00e585308f011f21",
-    "source_url": "https://dl.google.com/dl/android/maven2/androidx/navigation/navigation-runtime-ktx/2.7.7/navigation-runtime-ktx-2.7.7-sources.jar",
-    "source_sha256": "c6deada2fac53b8ea6523dbda77597b128006674616f140f04df23264c6d1aa3",
-    "source_file": "build/licensing/sources/androidx.navigation-navigation-runtime-ktx-2.7.7-sources.jar",
+    "notice": "licenses/maven/androidx.navigation-navigation-runtime-ktx-2.8.8.txt",
+    "notice_sha256": "7da17c033c72675833da3635d67615a8bfe658062c043dfe08bbb3e35e3863a4",
+    "source_url": "https://dl.google.com/dl/android/maven2/androidx/navigation/navigation-runtime-ktx/2.8.8/navigation-runtime-ktx-2.8.8-sources.jar",
+    "source_sha256": "a012de5a17cdfafc06ab48be56b442fbcfa64e8459beb5017459d6f9030ede72",
+    "source_file": "build/licensing/sources/androidx.navigation-navigation-runtime-ktx-2.8.8-sources.jar",
     "empty_artifact": false
   },
   {
-    "coordinate": "androidx.navigation:navigation-runtime:2.7.7",
-    "artifact_sha256": "0b5e075287203a36f46afb4ceda3964768a278c9b36768e4b8cbb294ef01d4f4",
+    "coordinate": "androidx.navigation:navigation-runtime:2.8.8",
+    "artifact_sha256": "a0da9bad3eac93890fd7fd77238f137ae27f34b9372487d8edcd1d8cfabad9ea",
     "license": "Apache-2.0",
     "declared_licenses": [
       "The Apache Software License, Version 2.0"
     ],
-    "notice": "licenses/maven/androidx.navigation-navigation-runtime-2.7.7.txt",
-    "notice_sha256": "8cd779b7028a3389c8f1d94c9b1c92485933fc284c92bc9fbe106034786be05a",
-    "source_url": "https://dl.google.com/dl/android/maven2/androidx/navigation/navigation-runtime/2.7.7/navigation-runtime-2.7.7-sources.jar",
-    "source_sha256": "78d7b5d379cd725373352b05b2cad6eee1fd42670820847c37032fcc188da0b2",
-    "source_file": "build/licensing/sources/androidx.navigation-navigation-runtime-2.7.7-sources.jar",
+    "notice": "licenses/maven/androidx.navigation-navigation-runtime-2.8.8.txt",
+    "notice_sha256": "18910da1e26fb106c8fb73ba7e14ffb899df591b84908d5c71a864c62815772b",
+    "source_url": "https://dl.google.com/dl/android/maven2/androidx/navigation/navigation-runtime/2.8.8/navigation-runtime-2.8.8-sources.jar",
+    "source_sha256": "804776520a2fc7ce4f123c93c37a10ada32ce04e40ba002822b34ca4f991ab6f",
+    "source_file": "build/licensing/sources/androidx.navigation-navigation-runtime-2.8.8-sources.jar",
     "empty_artifact": false
   },
   {
@@ -1369,6 +1369,20 @@
     "source_url": "https://repo.maven.apache.org/maven2/org/jetbrains/kotlinx/kotlinx-coroutines-core-jvm/1.8.1/kotlinx-coroutines-core-jvm-1.8.1-sources.jar",
     "source_sha256": "737e71610738eb308ae4caa9d352c963df7c25efed7ca176de3a35a2141bed92",
     "source_file": "build/licensing/sources/org.jetbrains.kotlinx-kotlinx-coroutines-core-jvm-1.8.1-sources.jar",
+    "empty_artifact": false
+  },
+  {
+    "coordinate": "org.jetbrains.kotlinx:kotlinx-serialization-core-jvm:1.6.3",
+    "artifact_sha256": "29c821a8d4e25cbfe4f2ce96cdd4526f61f8f4e69a135f9612a34a81d93b65f1",
+    "license": "Apache-2.0",
+    "declared_licenses": [
+      "The Apache Software License, Version 2.0"
+    ],
+    "notice": "licenses/maven/org.jetbrains.kotlinx-kotlinx-serialization-core-jvm-1.6.3.txt",
+    "notice_sha256": "b07838beb1db692d84b831a1ee8882a6300a3495b652b81a59278a8c85b51d82",
+    "source_url": "https://repo.maven.apache.org/maven2/org/jetbrains/kotlinx/kotlinx-serialization-core-jvm/1.6.3/kotlinx-serialization-core-jvm-1.6.3-sources.jar",
+    "source_sha256": "5d873e2532ed1bb413a7698ddce0b85bc82a4018ad2b8a327fadf51c704cee8e",
+    "source_file": "build/licensing/sources/org.jetbrains.kotlinx-kotlinx-serialization-core-jvm-1.6.3-sources.jar",
     "empty_artifact": false
   },
   {

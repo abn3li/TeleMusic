@@ -357,7 +357,10 @@ fun TgMusicNavGraph(navController: NavHostController = rememberNavController()) 
                 enterTransition = { EnterTransition.None },
                 exitTransition = { ExitTransition.None },
                 popEnterTransition = { EnterTransition.None },
-                popExitTransition = { ExitTransition.None }
+                popExitTransition = { ExitTransition.None },
+                // No size transform: it clips both pages to the NavHost while they swap, cutting
+                // off the strip they draw behind the status bar - that strip blinked black.
+                sizeTransform = { null }
             ) {
                 composable(Routes.ONBOARDING) {
                     OnboardingScreen(onFinished = {
