@@ -54,12 +54,14 @@ import java.util.Random
 
 private val FrostedBlurRadius = 24.dp
 
-/** Fade only the material over artwork, leaving the header's controls fully visible. */
+/** Fade only the material over artwork, leaving the header's controls fully visible. The glass
+ * is whole by 70% of the way, before the bar's small title fades in, so the title never sits on
+ * the page's own big title and details still showing through a half-faded bar. */
 @Composable
 internal fun BoxScope.FrostedHeaderBackground(backdrop: FrostedBackdrop, progress: () -> Float) {
     Box(
         Modifier.matchParentSize()
-            .graphicsLayer { alpha = progress().coerceIn(0f, 1f) }
+            .graphicsLayer { alpha = (progress() / 0.7f).coerceIn(0f, 1f) }
             .frostedSurface(backdrop, shape = RectangleShape, drawBorder = false)
     )
 }

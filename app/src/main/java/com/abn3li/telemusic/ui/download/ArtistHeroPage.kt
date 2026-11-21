@@ -390,7 +390,7 @@ internal fun ArtistHeroLayout(
                     fontWeight = FontWeight.Bold,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.align(Alignment.Center).padding(horizontal = 60.dp).graphicsLayer { alpha = collapse }
+                    modifier = Modifier.align(Alignment.Center).padding(horizontal = 60.dp).graphicsLayer { alpha = ((collapse - 0.7f) / 0.3f).coerceIn(0f, 1f) }
                 )
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     BarButton(Icons.AutoMirrored.Rounded.ArrowBackIos, "Back", { collapse }, iconStart = 5.dp, onClick = if (searching) closeSearch else onBack)
