@@ -735,6 +735,8 @@ private fun NowPlayingContent(
                     visualsActive = visualsActive,
                     dismissDrag = dismissDrag,
                     overflowOpen = overflowSong != null,
+                    coveredBySheet = overflowSong != null || showSongInfoDialog || showQuality ||
+                        showLyricsSourceDialog || showManualLyricsDialog,
                     onPageChange = { page = it },
                     onInteraction = onInteraction,
                     onOpenOverflow = { overflowSong = state.song },
@@ -922,6 +924,8 @@ private fun PlayerPageArea(
     visualsActive: Boolean,
     dismissDrag: Modifier,
     overflowOpen: Boolean,
+    // A sheet or dialog is over the player, hiding the lyric line under the cover.
+    coveredBySheet: Boolean,
     onPageChange: (PlayerPage) -> Unit,
     onInteraction: () -> Unit,
     onOpenOverflow: () -> Unit,
@@ -1091,7 +1095,8 @@ private fun PlayerPageArea(
         CurrentLyricLine(
             lines = state.lyricLines,
             viewModel = viewModel,
-            active = isExpanded && visualsActive && page == PlayerPage.ARTWORK,
+            // Rests while a sheet hides it: its word sweep would redraw every frame unseen.
+            active = isExpanded && visualsActive && page == PlayerPage.ARTWORK && !coveredBySheet,
             isPlaying = state.isPlaying,
             onClick = { onInteraction(); onPageChange(PlayerPage.LYRICS) },
             modifier = Modifier
