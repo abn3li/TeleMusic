@@ -306,7 +306,7 @@ fun SettingsScreen(
 
     Box(Modifier.fillMaxSize()) {
     Box(Modifier.fillMaxSize().drawWithContent { if (!pageCovers) drawContent() }) {
-    LargeTitleList(title = "Settings", onBack = onBack, grouped = true) {
+    LargeTitleList(title = "Settings", onBack = onBack, grouped = true, coverGlow = true) {
         item("accounts") {
             GroupHeader("Accounts")
             GroupCard {

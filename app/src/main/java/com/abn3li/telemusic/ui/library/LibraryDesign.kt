@@ -1,6 +1,9 @@
 package com.abn3li.telemusic.ui.library
 
 import com.abn3li.telemusic.ui.navigation.coverGlow
+import com.abn3li.telemusic.ui.navigation.CoverGlow
+import androidx.compose.ui.unit.em
+import androidx.compose.ui.graphics.Brush
 import com.abn3li.telemusic.ui.theme.appFontFamily
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -129,6 +132,8 @@ import kotlinx.coroutines.delay
 
 internal val LibraryBarHeight = 54.dp
 internal val SearchStickyHeight = 61.dp
+/** The glass bar's veil over pages with the cover colour: thinner than the usual one. */
+private const val COVER_GLOW_BAR_TINT = 0.5f
 
 @Composable
 internal fun frostedHeaderTopInset(): Dp {
@@ -419,8 +424,29 @@ private fun LibraryTitleBar(
     val editing = LocalLibraryEditing.current
     // Sample only the list, so the bar never blurs its own title or buttons into the background.
     // Before the large title scrolls away, keep the original page-colour header.
-    val background = if (showSmallTitle || editing?.active == true) {
-        Modifier.frostedSurface(backdrop, shape = RectangleShape, drawBorder = false)
+    // Read here as well as where it's drawn: a bar drawn before the first song started still
+    // picks up the colour, without waiting for something else to redraw it.
+    if (coverGlow) CoverGlow.color.value
+    // A page with the cover colour and no toolbar (Home): nothing over the status bar, the
+    // colour runs right up behind it. Once the list scrolls under, a soft fade of the page
+    // colour keeps the clock and battery readable over bright covers.
+    val bare = coverGlow && !showToolbar && editing?.active != true
+    val fade by animateFloatAsState(if (bare && showSmallTitle) 1f else 0f, tween(180), label = "statusFade")
+    val pageColour = paper
+    val background = if (bare) {
+        Modifier.drawBehind {
+            if (fade > 0f) drawRect(
+                Brush.verticalGradient(listOf(pageColour.copy(alpha = 0.6f * fade), Color.Transparent), endY = size.height * 1.6f),
+                size = size.copy(height = size.height * 1.6f)
+            )
+        }
+    } else if (showSmallTitle || editing?.active == true) {
+        // The glow on the glass too: the bar keeps the cover colour once the page scrolls under
+        // it, and its solid stand-in (a tab's last frame as it leaves) never flashes black. A
+        // thinner veil there, so the songs passing under it show through the colour.
+        Modifier.frostedSurface(backdrop, shape = RectangleShape, drawBorder = false,
+            tintAlpha = if (coverGlow) COVER_GLOW_BAR_TINT else null)
+            .then(if (coverGlow) Modifier.coverGlow() else Modifier)
     } else Modifier.background(paper).then(if (coverGlow) Modifier.coverGlow() else Modifier)
     val toolbarHeight = if (showToolbar) LibraryBarHeight else 0.dp
     Box(modifier.fillMaxWidth().height(toolbarHeight + statusBar).then(background).padding(top = statusBar)) {
