@@ -236,8 +236,26 @@ fun TgMusicNavGraph(navController: NavHostController = rememberNavController()) 
     val inLibrary = currentRoute in LibraryRoutes
     // Settings hides the tabs while its Spotify page is open.
     var settingsHidesTabs by remember { mutableStateOf(false) }
-    val showBottomBar = inLibrary || currentRoute in listOf(Routes.HOME, Routes.DISCOVER, Routes.SEARCH) ||
+    // YouTube pages (a playlist, album, artist or category opened from Home or Discover) keep
+    // the tabs too, like the Library's own.
+    val showBottomBar = inLibrary || currentRoute in listOf(Routes.HOME, Routes.DISCOVER, Routes.SEARCH, Routes.YOUTUBE_BROWSE) ||
         (currentRoute == Routes.SETTINGS && !settingsHidesTabs)
+
+    // The tab lit in the dock. A YouTube page lights the tab it was opened from (Home, Discover,
+    // Search or Library), however many YouTube pages deep.
+    val dockTab = when {
+        inLibrary -> Routes.LIBRARY
+        currentRoute == Routes.YOUTUBE_BROWSE -> navController.currentBackStack.value.asReversed()
+            .firstNotNullOfOrNull { entry ->
+                val route = entry.destination.route
+                when {
+                    route in LibraryRoutes -> Routes.LIBRARY
+                    route == Routes.HOME || route == Routes.DISCOVER || route == Routes.SEARCH -> route
+                    else -> null
+                }
+            } ?: currentRoute
+        else -> currentRoute
+    }
 
     val frostedBackdrop = rememberFrostedBackdrop()
     val backdropHost = remember { FrostedBackdropHost() }
@@ -547,7 +565,7 @@ fun TgMusicNavGraph(navController: NavHostController = rememberNavController()) 
             onOpenAlbum = { album -> navController.navigate(Routes.album(album)) },
             miniPlayerContent = { state, expand, miniModifier ->
                 ClassicDock(
-                    currentRoute = if (inLibrary) Routes.LIBRARY else currentRoute,
+                    currentRoute = dockTab,
                     onNavigate = navigateTab,
                     backdrop = backdropHost.active ?: frostedBackdrop,
                     backdropBelow = backdropHost.below,
