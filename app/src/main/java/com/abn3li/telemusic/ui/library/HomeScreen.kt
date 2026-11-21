@@ -97,6 +97,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.unit.em
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
@@ -381,8 +382,8 @@ private fun homeHeroes(
     }.distinctBy { it.key }.take(HERO_COUNT)
 }
 
-/** Tall cards side by side at the top of Home, the next one's edge showing: the cover filling the
- * card, and on a dark shade at its bottom the shelf it comes from, the name and the artist.
+/** Tall cards side by side at the top of Home, the next one's edge showing: the shelf each comes
+ * from above it, the cover filling the card, and on a dark shade at its bottom the name and artist.
  * Tapping a song plays it, then the other cards' songs. */
 @Composable
 private fun HomeHeroRow(heroes: List<HomeHero>, open: (BrowseCollection) -> Unit, play: (List<BrowseTrack>, Int) -> Unit) {
@@ -395,9 +396,16 @@ private fun HomeHeroRow(heroes: List<HomeHero>, open: (BrowseCollection) -> Unit
         items(heroes, key = { it.key }) { hero ->
             val track = hero.track
             val current = track != null && playback.isCurrent(null, track.videoId)
-            HomeHeroCard(hero, current, playback.isPlaying, {
-                if (track != null) play(tracks, tracks.indexOf(track).coerceAtLeast(0)) else hero.item?.let(open)
-            }, Modifier.width(cardWidth).aspectRatio(0.76f))
+            Column(Modifier.width(cardWidth)) {
+                // The shelf it comes from, a small caption above the card ("QUICK PICKS",
+                // "LISTEN AGAIN"), so the cover carries only the name and the artist.
+                Text(hero.label.uppercase(), color = ink.copy(alpha = 0.55f), fontSize = 11.sp, lineHeight = 14.sp,
+                    fontWeight = FontWeight.SemiBold, letterSpacing = 0.08.em, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(start = 2.dp, bottom = 6.dp))
+                HomeHeroCard(hero, current, playback.isPlaying, {
+                    if (track != null) play(tracks, tracks.indexOf(track).coerceAtLeast(0)) else hero.item?.let(open)
+                }, Modifier.fillMaxWidth().aspectRatio(0.76f))
+            }
         }
     }
 }
@@ -424,12 +432,8 @@ private fun HomeHeroCard(hero: HomeHero, current: Boolean, playing: Boolean, onC
             contentScale = androidx.compose.ui.layout.ContentScale.Crop, modifier = Modifier.matchParentSize())
         Box(Modifier.fillMaxWidth().fillMaxHeight(0.55f).align(Alignment.BottomCenter).background(HeroShade))
         Column(Modifier.align(Alignment.BottomStart).padding(start = 14.dp, end = 14.dp, bottom = 14.dp)) {
-            // The shelf it comes from, small above the name ("Quick picks", "Listen again").
-            Text(hero.label, color = Color.White.copy(alpha = 0.72f), fontSize = 12.sp, lineHeight = 15.sp,
-                maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Spacer(Modifier.height(2.dp))
-            Text(hero.title, color = if (current) AppAccent else Color.White, fontSize = 21.sp, lineHeight = 24.sp,
-                fontWeight = FontWeight.ExtraBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            Text(hero.title, color = if (current) AppAccent else Color.White, fontSize = 19.sp, lineHeight = 23.sp,
+                fontWeight = FontWeight.Bold, letterSpacing = (-0.02).em, maxLines = 1, overflow = TextOverflow.Ellipsis)
             hero.subtitle?.takeIf { it.isNotBlank() }?.let {
                 Spacer(Modifier.height(3.dp))
                 Text(it, color = Color.White.copy(alpha = 0.72f), fontSize = 13.sp, lineHeight = 16.sp,
