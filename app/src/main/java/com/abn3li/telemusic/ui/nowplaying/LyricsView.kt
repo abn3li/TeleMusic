@@ -84,6 +84,7 @@ import androidx.compose.ui.draw.BlurredEdgeTreatment
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.text.style.ResolvedTextDirection
+import androidx.compose.ui.text.style.TextDirection
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.translate
@@ -96,6 +97,7 @@ import com.abn3li.telemusic.data.settings.PlayerEffects
 import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
@@ -232,6 +234,7 @@ internal fun LyricsPage(
                         fontSize = 24.sp,
                         fontWeight = FontWeight.Bold,
                         lineHeight = 34.sp,
+                        style = LocalTextStyle.current.copy(textDirection = TextDirection.Content),
                         modifier = Modifier.fillMaxWidth().combinedClickable(
                             interactionSource = remember { MutableInteractionSource() },
                             indication = null,
@@ -795,6 +798,9 @@ internal fun CurrentLyricLine(
         val sweep = remember(line, shown) { sweepTiming(line, lines.getOrNull(shown + 1)) }
         val sungChars by rememberSungChars(line.text, sweep, progressState, isPlaying && active)
         var layout by remember { mutableStateOf<TextLayoutResult?>(null) }
+        // Arabic letters sit lower in their line than English ones: an Arabic line is lifted a
+        // little so it stays level with the note.
+        val rtl = layout?.let { it.layoutInput.text.isNotEmpty() && it.getParagraphDirection(0) == ResolvedTextDirection.Rtl } == true
         Row(verticalAlignment = Alignment.CenterVertically) {
             Icon(
                 Icons.Rounded.MusicNote,
@@ -812,13 +818,15 @@ internal fun CurrentLyricLine(
                 fontWeight = FontWeight.SemiBold,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
-                modifier = if (sweep != null) Modifier
+                // Arabic sweeps from the right, like the lyrics page.
+                style = LocalTextStyle.current.copy(textDirection = TextDirection.Content),
+                modifier = Modifier.offset(y = if (rtl) (-3).dp else 0.dp).then(if (sweep != null) Modifier
                     .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
                     .drawWithContent {
                         drawContent()
                         layout?.let { maskUnsung(it, sungChars) }
                     }
-                else Modifier
+                else Modifier)
             )
         }
     }
@@ -844,7 +852,7 @@ private fun LyricLineText(
     // Soft halo on the line being sung: eases in after the line lights up, leaves quickly so the
     // old and new halos never overlap mid-scroll.
     val haloAlpha by animateFloatAsState(
-        targetValue = if (glow && isActive && selected == null) 0.6f else 0f,
+        targetValue = if (glow && isActive && selected == null) 0.8f else 0f,
         animationSpec = if (isActive) tween(500, delayMillis = 150, easing = LyricEasing) else tween(220, easing = LyricEasing),
         label = "lyricHalo"
     )
@@ -859,9 +867,14 @@ private fun LyricLineText(
         label = "lyricScale"
     )
     val blurRadius by rememberLineBlur(isActive, distance, justPassed, blurEnabled)
+    // The halo takes the cover's colour, made bright enough to light the letters; white when
+    // there's no colour yet. Read only while a halo shows.
+    val haloBase = if (haloAlpha > 0.01f) com.abn3li.telemusic.ui.navigation.CoverGlow.color.value else Color.Transparent
+    val haloColour = remember(haloBase) { lyricHaloColour(haloBase) }
 
     val sungChars by rememberSungChars(text, sweep, progressState, isPlaying)
     var layout by remember { mutableStateOf<TextLayoutResult?>(null) }
+    val rtlLine = layout?.let { it.layoutInput.text.isNotEmpty() && it.getParagraphDirection(0) == ResolvedTextDirection.Rtl } == true
 
     Text(
         text = text,
@@ -871,10 +884,14 @@ private fun LyricLineText(
         fontWeight = FontWeight.Bold,
         lineHeight = 38.sp,
         letterSpacing = (-0.3).sp,
+        // Each line runs its own language's way: Arabic from the right (and its sweep with it),
+        // English from the left. Left unset, every line was laid out left to right.
         style = if (haloAlpha > 0.01f) {
-            LocalTextStyle.current.copy(shadow = Shadow(Color.White.copy(alpha = haloAlpha), Offset.Zero, blurRadius = 36f))
+            // Small, so it hugs the letters and lights them instead of hazing the whole line.
+            LocalTextStyle.current.copy(textDirection = TextDirection.Content,
+                shadow = Shadow(haloColour.copy(alpha = haloAlpha), Offset.Zero, blurRadius = 28f))
         } else {
-            LocalTextStyle.current
+            LocalTextStyle.current.copy(textDirection = TextDirection.Content)
         },
         modifier = Modifier
             .fillMaxWidth()
@@ -907,11 +924,28 @@ private fun LyricLineText(
                 this.alpha = alpha
                 scaleX = scale
                 scaleY = scale
-                transformOrigin = TransformOrigin(0f, 0.5f)
+                // Grows from the side the line starts on.
+                transformOrigin = TransformOrigin(if (rtlLine) 1f else 0f, 0.5f)
             }
             .padding(horizontal = LINE_PADDING_H, vertical = GLOW_ROOM + LINE_PADDING_V)
             .then(if (blurRadius > 0.2.dp) Modifier.blur(blurRadius, BlurredEdgeTreatment.Unbounded) else Modifier)
     )
+}
+
+/** [cover] (the page's cover colour) as a soft, light glow around white letters. A grey or
+ * black-and-white cover gets white: forcing colour into it shows a tint the cover never had. */
+private fun lyricHaloColour(cover: Color): Color {
+    if (cover.alpha <= 0f) return Color.White
+    val hsl = FloatArray(3)
+    androidx.core.graphics.ColorUtils.colorToHSL(cover.copy(alpha = 1f).toArgb(), hsl)
+    if (hsl[1] < 0.18f) return Color.White
+    // Yellows and greens turn sickly when strong; they keep less of their colour.
+    val maxSaturation = if (hsl[0] in 50f..160f) 0.6f else 0.85f
+    hsl[1] = hsl[1].coerceAtMost(maxSaturation)
+    hsl[2] = 0.66f
+    // A little white mixed in keeps it a glow rather than a loud colour.
+    val colour = androidx.core.graphics.ColorUtils.HSLToColor(hsl)
+    return Color(androidx.core.graphics.ColorUtils.blendARGB(colour, android.graphics.Color.WHITE, 0.12f))
 }
 
 /** How blurred a line [distance] lines from the one being sung is. Snapped, never animated: an
