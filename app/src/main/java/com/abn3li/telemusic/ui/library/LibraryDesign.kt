@@ -402,6 +402,8 @@ private fun LargeTitle(title: String, trailing: (@Composable () -> Unit)?, alpha
             fontSize = 35.sp,
             lineHeight = 40.sp,
             fontWeight = FontWeight.Bold,
+            // Big text reads tighter: the page titles close up like large headings do.
+            letterSpacing = (-0.022).em,
             modifier = Modifier.weight(1f)
         )
         trailing?.invoke()
