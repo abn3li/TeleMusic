@@ -221,14 +221,14 @@ fun HomeScreen(
             val lists = moodLists?.takeIf { it.first == moodToken }?.second
             when {
                 lists != null -> item("mood_lists_$moodToken") {
-                    MoodPlaylistGrid(lists, onOpenCollection, Modifier.moodFadeIn(moodToken, moodsShown))
+                    MoodPlaylistGrid(lists, onOpenCollection, Modifier.padding(top = 14.dp).moodFadeIn(moodToken, moodsShown))
                 }
                 moodFailed == moodToken -> item("mood_failed") {
                     Text("Couldn't load ${selectedMood.title}. Check your connection and tap it again.",
                         color = ink.copy(alpha = 0.55f), modifier = Modifier.padding(horizontal = 18.dp, vertical = 24.dp))
                 }
                 else -> item("mood_loading") {
-                    Box(Modifier.fillMaxWidth().height(144.dp), contentAlignment = Alignment.Center) {
+                    Box(Modifier.fillMaxWidth().padding(top = 14.dp).height(144.dp), contentAlignment = Alignment.Center) {
                         CalmSpinner(Modifier.size(28.dp), strokeWidth = 2.dp)
                     }
                 }
