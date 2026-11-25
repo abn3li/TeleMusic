@@ -25,10 +25,11 @@ class TelegramNotSetUpException : IllegalStateException("Telegram isn't set up -
 
 /**
  * Coroutine wrapper around TDLib. Credentials come in at start() time (never baked into the
- * build). TDLib itself comes from a prebuilt JitPack AAR (see app/build.gradle.kts) - no
- * manual NDK build required.
+ * build). TDLib itself is vendored in third_party/tdlib.
  */
 class TdlibManager(private val context: Context) {
+
+    private val nativeLibrary by lazy { System.loadLibrary("tdjni") }
 
     // Volatile: set on the main thread (Telegram setup), read from playback/IO threads.
     @Volatile private var client: Client? = null
@@ -78,6 +79,8 @@ class TdlibManager(private val context: Context) {
         // tag - readable via `adb logcat` by anyone with USB debugging access to the device, or
         // by any app holding log-read permissions on older/rooted Android. Level 1 keeps only
         // fatal/error output, which is what TDLib itself recommends for production use.
+        // Its Java side leaves loading to the app; OpenSSL and the C++ runtime load with it.
+        nativeLibrary
         runCatching { Client.execute(TdApi.SetLogVerbosityLevel(1)) }
         client = Client.create({ update -> handleUpdate(update) }, null, null)
 
@@ -108,8 +111,8 @@ class TdlibManager(private val context: Context) {
         if (proxy != null && proxy.enabled && proxy.server.isNotBlank()) {
             _connectionState.value = TelegramConnectionState.CONNECTING_TO_PROXY
             val proxyType = TdApi.ProxyTypeMtproto(proxy.secret.trim())
-            client?.send(TdApi.AddProxy(proxy.server.trim(), proxy.port, true, proxyType)) { result ->
-                if (result is TdApi.Proxy) {
+            client?.send(TdApi.AddProxy(TdApi.Proxy(proxy.server.trim(), proxy.port, proxyType), true, "")) { result ->
+                if (result is TdApi.AddedProxy) {
                     Log.d("TdlibManager", "AddProxy succeeded with id=${result.id}, enabling proxy immediately...")
                     client?.send(TdApi.EnableProxy(result.id)) { }
                 } else {
@@ -184,9 +187,10 @@ class TdlibManager(private val context: Context) {
                     useSecretChats = false
                     apiId = this@TdlibManager.apiId
                     apiHash = this@TdlibManager.apiHash
-                    systemLanguageCode = "en"
-                    deviceModel = "Android"
-                    applicationVersion = "1.0.0"
+                    systemLanguageCode = "en-US"
+                    deviceModel = "${android.os.Build.MANUFACTURER} ${android.os.Build.MODEL}"
+                    systemVersion = "Android ${android.os.Build.VERSION.RELEASE}"
+                    applicationVersion = context.packageManager.getPackageInfo(context.packageName, 0).versionName ?: "1.0"
                 }
                 client?.send(params) { result ->
                     if (result is TdApi.Error) {

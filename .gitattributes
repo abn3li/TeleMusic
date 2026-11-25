@@ -7,3 +7,4 @@ tools/licensing/** text eol=lf
 LICENSE -text
 COPYING -text
 OPENSSL_PERMISSION -text
+third_party/tdlib/** -text

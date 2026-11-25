@@ -2,7 +2,7 @@
   "chaquopy": "17.0.0",
   "cpython": "3.13.9",
   "openssl_python": "3.0.18",
-  "openssl_tdlib": "1.1.1w",
+  "openssl_tdlib": "3.5.9",
   "sqlite_python": "3.50.4",
   "certifi": "2025.8.3",
   "entries": {
@@ -131,7 +131,7 @@
     "lib/arm64-v8a/libsqlite3_python.so": "6b0f0012ffff95d2420e88fd420d0d65dc4d63d943c1011567978f6203d118dd",
     "lib/arm64-v8a/libssl_chaquopy.so": "024d7a7696e789443642645df35929994aa8a4a3cb4d46b2fe7415d64f9a2282",
     "lib/arm64-v8a/libssl_python.so": "60b083de76e184b19bb830e80f9f6b155f6db87e309018d007db6439db45145e",
-    "lib/arm64-v8a/libtdjni.so": "7c1751197b35a64261e3b3f21764874c9ee8795e4b6118c23a74499426c44b91",
+    "lib/arm64-v8a/libtdjni.so": "fc3d2bf43c5a0345d9882e7ce925d93457b425aafa3e9f2bb09239eb7442e3a8",
     "lib/x86_64/libchaquopy_java.so": "e0d0ae844e67d971546cb598186f36693981fab491a6db7fe23f0b54ea385af9",
     "lib/x86_64/libcrypto_chaquopy.so": "b582c9ede7b21e16bfbd05ad7ad6fc428e785035a6f222810a9bee52966b6e66",
     "lib/x86_64/libcrypto_python.so": "d59de34d0dcee304e06681c8022bd4805dab5ea336b9af8fd58a00f5598062be",
@@ -140,9 +140,15 @@
     "lib/x86_64/libsqlite3_python.so": "909cccb83a9e8fe07a84bb1539a18e4197fdd7efc83dcd51bf74476f45034e24",
     "lib/x86_64/libssl_chaquopy.so": "4a3f2907be854faf1a7def9209489e65045a0a52fb1080aa6b0af85feac34fee",
     "lib/x86_64/libssl_python.so": "06c6228376f4557500f9a38f8e0e56be66d22d8b3c5a7e45bb6a650e548d05cb",
-    "lib/x86_64/libtdjni.so": "567bb5aaccdcc1d8280577f2f9fe8e82178908c72f513436972493fd6ad6dabd",
+    "lib/x86_64/libtdjni.so": "cf383a4ce304dc85ca0f085369117201198cb264775b26ff73df7eeb7415c01f",
     "lib/arm64-v8a/libandroidx.graphics.path.so": "41e9a793c43a0f4fddb19e33f346bace464f30f888ba7b9eaf96294ea115bfb6",
-    "lib/x86_64/libandroidx.graphics.path.so": "4e56c996f13670e70082658de7880c4020eabf4f25e43387f88ed78a713fc9f0"
+    "lib/x86_64/libandroidx.graphics.path.so": "4e56c996f13670e70082658de7880c4020eabf4f25e43387f88ed78a713fc9f0",
+    "lib/arm64-v8a/libcryptox.so": "61040c7ebc292851b0fab605f3fd5db6f111699092a5d9d5cb87dd2ea9ab024e",
+    "lib/arm64-v8a/libsslx.so": "1040ddd71b99ad5f45bb5987b2a5a68658e6989577a06e6b713698306d9ee454",
+    "lib/arm64-v8a/libc++_shared.so": "b5d97c38a728afe28d341cda3369f512d35eaf9c680c1b0563cd6a63e395230f",
+    "lib/x86_64/libcryptox.so": "e344a4346354c00e4f3abe5cc3e2694f05b4d2fef107660238c315525dfb14d0",
+    "lib/x86_64/libsslx.so": "df8c5632de732dfa442564c164678cce5cacb019124053e3c01ddb4e5ff43c2d",
+    "lib/x86_64/libc++_shared.so": "39faf2d59346e65a18980f207794fab2f1faff8a8de3f087b8319a181fa16fbd"
   },
   "packaging_variants": {
     "lib/arm64-v8a/libchaquopy_java.so": [

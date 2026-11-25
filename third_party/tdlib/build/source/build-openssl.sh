@@ -1,0 +1,174 @@
+#!/bin/bash
+set -e
+
+OPENSSL_SOURCE_DIR=${1:-openssl}
+OPENSSL_INSTALL_DIR=${2:-build/openssl}
+TGX_FLAVORS=${3:-"latest qrs nop marshmallow lollipop legacy"}
+
+source "$(pwd)/setup.sh" || exit 1
+
+if [ ! -d "$ANDROID_SDK_ROOT" ] ; then
+  echo "Error: directory \"$ANDROID_SDK_ROOT\" doesn't exist. Run ./fetch-sdk.sh first, or provide a valid path to Android SDK."
+  exit 1
+fi
+
+if [ -e "$OPENSSL_INSTALL_DIR" ] ; then
+  echo "Error: file or directory \"$OPENSSL_INSTALL_DIR\" already exists. Delete it manually to proceed."
+  exit 1
+fi
+
+source ./td/example/android/check-environment.sh || exit 1
+
+mkdir -p "$OPENSSL_INSTALL_DIR" || exit 1
+
+ANDROID_SDK_ROOT="$(cd "$(dirname -- "$ANDROID_SDK_ROOT")" >/dev/null; pwd -P)/$(basename -- "$ANDROID_SDK_ROOT")"
+OPENSSL_INSTALL_DIR="$(cd "$(dirname -- "$OPENSSL_INSTALL_DIR")" >/dev/null; pwd -P)/$(basename -- "$OPENSSL_INSTALL_DIR")"
+OPENSSL_SOURCE_DIR="$(cd "$(dirname -- "$OPENSSL_SOURCE_DIR")" >/dev/null; pwd -P)/$(basename -- "$OPENSSL_SOURCE_DIR")"
+
+cd $(dirname $0) || exit 1
+
+pushd "$OPENSSL_SOURCE_DIR" > /dev/null || exit 1
+
+# Make sure it's clean build
+make distclean > /dev/null 2>&1 || true
+
+ORIGINAL_PATH="$PATH"
+
+for TGX_FLAVOR in $TGX_FLAVORS; do
+  if [ "${TGX_FLAVOR}" != "legacy" ]; then
+    ANDROID_NDK_VERSION="$ANDROID_NDK_VERSION_PRIMARY"
+    ABIS="arm64-v8a armeabi-v7a x86_64 x86"
+  else
+    ANDROID_NDK_VERSION="$ANDROID_NDK_VERSION_LEGACY"
+    ABIS="armeabi-v7a x86"
+  fi
+
+  case "${TGX_FLAVOR}" in
+    latest)
+      ANDROID_API_LEVEL=33
+      ;;
+    qrs)
+      ANDROID_API_LEVEL=29
+      ;;
+    nop)
+      ANDROID_API_LEVEL=24
+      ;;
+    marshmallow)
+      ANDROID_API_LEVEL=23
+      ;;
+    lollipop)
+      ANDROID_API_LEVEL=21
+      ;;
+    legacy)
+      ANDROID_API_LEVEL=16
+      ;;
+    *)
+      echo -e "${STYLE_ERROR}Unsupported flavor: ${TGX_FLAVOR}.${STYLE_END}"
+      exit 1
+      ;;
+  esac
+
+  if [ "$ANDROID_API_LEVEL" -ge 30 ]; then
+    EXTRA_LDFLAGS="-Wl,--pack-dyn-relocs=android+relr -Wl,--no-use-android-relr-tags";
+  elif [ "$ANDROID_API_LEVEL" -ge 28 ]; then
+    EXTRA_LDFLAGS="-Wl,--pack-dyn-relocs=android+relr -Wl,--use-android-relr-tags";
+  elif [ "$ANDROID_API_LEVEL" -ge 23 ]; then
+    EXTRA_LDFLAGS="-Wl,--pack-dyn-relocs=android";
+  else
+    EXTRA_LDFLAGS="";
+  fi
+
+  # Make sure configurations from different NDKs are not reused
+  pushd "${OPENSSL_SOURCE_DIR:?}" > /dev/null || exit 1
+  git clean -ffdx
+  popd > /dev/null || exit 1
+
+  export ANDROID_NDK_ROOT="$ANDROID_SDK_ROOT/ndk/$ANDROID_NDK_VERSION"  # for OpenSSL 3.*.*
+  export ANDROID_NDK_HOME="$ANDROID_NDK_ROOT "                          # for OpenSSL 1.1.1
+  PATH="$ANDROID_NDK_ROOT/toolchains/llvm/prebuilt/$HOST_ARCH/bin:$ORIGINAL_PATH"
+
+  if ! clang --help >/dev/null 2>&1 ; then
+    echo "Error: failed to run clang from Android NDK."
+    if [[ "$OS_NAME" == "linux" ]] ; then
+      echo "Prebuilt Android NDK binaries are linked against glibc, so glibc must be installed."
+    fi
+    exit 1
+  fi
+
+  SOURCE_DATE_EPOCH="$(git -C "$OPENSSL_SOURCE_DIR" log -1 --format=%ct)"
+  export SOURCE_DATE_EPOCH
+
+  for ABI in $ABIS ; do
+    rm -f libcryptox.so libsslx.so libssl.so libsslx.so
+
+      PARAMS="no-tests no-docs no-apps no-legacy no-engine \
+        no-ssl3 no-ssl3-method \
+        no-ml-kem no-ml-dsa no-slh-dsa \
+        no-sm2 no-sm3 no-sm4 \
+        no-camellia no-aria no-cast no-idea \
+        no-mdc2 no-md4 no-rc2 no-rc5 no-seed \
+        no-whirlpool no-siphash \
+        no-ocb no-siv \
+        no-srp no-psk \
+        no-cms no-ts \
+        no-comp no-nextprotoneg \
+        no-async no-uplink \
+        no-autoerrinit no-autoload-config \
+        no-http no-quic \
+        no-gost no-fips no-padlockeng \
+        no-ct no-dsa no-ocsp no-des \
+        no-blake2 no-bf no-rmd160 no-scrypt \
+        no-rc4 \
+        no-cmp no-ec2m no-cmac \
+        no-filenames"
+
+    HARDENING_FLAGS="-fstack-protector-strong -D_FORTIFY_SOURCE=2"
+
+    if [[ $ABI == "x86" ]] ; then
+      LDFLAGS="$EXTRA_LDFLAGS" ./Configure android-x86 shared ${PARAMS} ${HARDENING_FLAGS} -U__ANDROID_API__ -D__ANDROID_API__=$ANDROID_API_LEVEL || exit 1
+    elif [[ $ABI == "x86_64" ]] ; then
+      LDFLAGS="-Wl,-z,max-page-size=16384 $EXTRA_LDFLAGS" ./Configure android-x86_64 shared ${PARAMS} ${HARDENING_FLAGS} -U__ANDROID_API__ -D__ANDROID_API__=$ANDROID_API_LEVEL || exit 1
+    elif [[ $ABI == "armeabi-v7a" ]] ; then
+      LDFLAGS="$EXTRA_LDFLAGS" ./Configure android-arm shared ${PARAMS} ${HARDENING_FLAGS} -U__ANDROID_API__ -D__ANDROID_API__=$ANDROID_API_LEVEL -D__ARM_MAX_ARCH__=8 || exit 1
+    elif [[ $ABI == "arm64-v8a" ]] ; then
+      LDFLAGS="-Wl,-z,max-page-size=16384 $EXTRA_LDFLAGS" ./Configure android-arm64 shared ${PARAMS} ${HARDENING_FLAGS} -mbranch-protection=standard -U__ANDROID_API__ -D__ANDROID_API__=$ANDROID_API_LEVEL || exit 1
+    fi
+
+    sed -i.bak \
+    -e 's/-O3/-O3 -ffunction-sections -fdata-sections -fno-unwind-tables -fno-asynchronous-unwind-tables/g' \
+    -e 's/libcrypto\.so/libcryptox.so/g' \
+    -e 's/libcrypto\.a/libcryptox.a/g' \
+    -e 's|-lcrypto |-lcryptox |g' \
+    -e 's|-lcrypto$|-lcryptox|g' \
+    -e 's/libssl\.so/libsslx.so/g' \
+    -e 's/libssl\.a/libsslx.a/g' \
+    Makefile || exit 1
+
+    make depend -s || exit 1
+    make -j4 -s || exit 1
+
+    test -f libcryptox.so && test -f libsslx.so || exit 1
+
+    echo "Creating symlinks..."
+
+    ln -sf libcryptox.so libcrypto.so
+    ln -sf libsslx.so libssl.so
+
+    INSTALL_DIR="$OPENSSL_INSTALL_DIR/${ANDROID_NDK_VERSION}/android-${ANDROID_API_LEVEL}/$ABI"
+    echo "Copying to ${INSTALL_DIR}"
+    mkdir -p "${INSTALL_DIR}/lib" || exit 1
+    (cp -a libcryptox.so libcrypto.so libsslx.so libssl.so "${INSTALL_DIR}/lib/.") || exit 1
+    cp -r include "${INSTALL_DIR}/." || exit 1
+
+    echo "Built OpenSSL for $ABI with NDK $ANDROID_NDK_VERSION: ${INSTALL_DIR}"
+
+    make distclean || exit 1
+  done
+done
+
+OPENSSL_COMMIT="$(git rev-parse HEAD)"
+echo "$OPENSSL_COMMIT" > "$OPENSSL_INSTALL_DIR/version.txt"
+
+popd > /dev/null
+
+echo "Build OpenSSL: $OPENSSL_INSTALL_DIR, commit: $OPENSSL_COMMIT"

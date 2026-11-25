@@ -18,28 +18,30 @@
   },
   {
     "name": "TDLib",
-    "version": "dd1b761fda7e47f4e0275c4d319f80a04db1997f",
-    "url": "https://codeload.github.com/tdlib/td/tar.gz/dd1b761fda7e47f4e0275c4d319f80a04db1997f",
-    "sha256": "b5e2a20eb38044b124650dbc72b3cc9d134e1c7861df2227f0e649b427c29fa4",
-    "source_file": "build/licensing/upstream-sources/tdlib-dd1b761.tar.gz",
+    "version": "1b9efe84d6e9a2e2f6eadeeea32b0726d2b8c25d",
+    "url": "https://codeload.github.com/tdlib/td/tar.gz/1b9efe84d6e9a2e2f6eadeeea32b0726d2b8c25d",
+    "sha256": "e7d319970e62bfb48dbccc0a6b0d9a14361a0df04866332f5b6e1db1ca1a28c2",
+    "source_file": "build/licensing/upstream-sources/tdlib-1b9efe8.tar.gz",
     "license_files": [
-      "licenses/TDLib-Boost-LICENSE.txt"
+      "licenses/TDLib-Boost-LICENSE.txt",
+      "licenses/TDLib-SQLCipher-LICENSE.txt"
     ],
     "license_sha256": {
-      "licenses/TDLib-Boost-LICENSE.txt": "c9bff75738922193e67fa726fa225535870d2aa1059f91452c411736284ad566"
+      "licenses/TDLib-Boost-LICENSE.txt": "c9bff75738922193e67fa726fa225535870d2aa1059f91452c411736284ad566",
+      "licenses/TDLib-SQLCipher-LICENSE.txt": "92a681e777538e3cc012d5886505fec7704fb9c1957ef6b67807d771985d457e"
     }
   },
   {
     "name": "OpenSSL",
-    "version": "1.1.1w",
-    "url": "https://codeload.github.com/openssl/openssl/tar.gz/refs/tags/OpenSSL_1_1_1w",
-    "sha256": "2130e8c2fb3b79d1086186f78e59e8bc8d1a6aedf17ab3907f4cb9ae20918c41",
-    "source_file": "build/licensing/upstream-sources/openssl-1.1.1w.tar.gz",
+    "version": "3.5.9",
+    "url": "https://codeload.github.com/openssl/openssl/tar.gz/45e844fa2a14ec92d146bd8f5778ac130b6625fb",
+    "sha256": "f54250b21795bb01240f3f9b42c384868d04460e339e39275aaaf93487f2d903",
+    "source_file": "build/licensing/upstream-sources/openssl-45e844f.tar.gz",
     "license_files": [
-      "licenses/OpenSSL-1.1.1w-LICENSE.txt"
+      "licenses/OpenSSL-3.5.9-LICENSE.txt"
     ],
     "license_sha256": {
-      "licenses/OpenSSL-1.1.1w-LICENSE.txt": "c32913b33252e71190af2066f08115c69bc9fddadf3bf29296e20c835389841c"
+      "licenses/OpenSSL-3.5.9-LICENSE.txt": "7d5450cb2d142651b8afa315b5f238efc805dad827d91ba367d8516bc9d49e7a"
     }
   },
   {

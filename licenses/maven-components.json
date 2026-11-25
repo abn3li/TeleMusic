@@ -56,17 +56,17 @@
     "empty_artifact": false
   },
   {
-    "coordinate": "androidx.annotation:annotation-jvm:1.9.1",
-    "artifact_sha256": "1e343917ebf27ba96fe4dc52b1cad7fd32b738fbc6355bb6cd5b3b305d7212d0",
+    "coordinate": "androidx.annotation:annotation-jvm:1.8.1",
+    "artifact_sha256": "9aab326d9492800991854360ac248f493ce7f7c3183519309b78ace9e240f6f6",
     "license": "Apache-2.0",
     "declared_licenses": [
       "The Apache Software License, Version 2.0"
     ],
-    "notice": "licenses/maven/androidx.annotation-annotation-jvm-1.9.1.txt",
-    "notice_sha256": "c978606bdc24b29da2e3f6680ad8ae90d6c4ff1925d11fc4b200ec12c0ace860",
-    "source_url": "https://dl.google.com/dl/android/maven2/androidx/annotation/annotation-jvm/1.9.1/annotation-jvm-1.9.1-sources.jar",
-    "source_sha256": "c6ae897fbfb73ca09d4ae31a24bfff85c652097ad10644cdbb738488728cb39b",
-    "source_file": "build/licensing/sources/androidx.annotation-annotation-jvm-1.9.1-sources.jar",
+    "notice": "licenses/maven/androidx.annotation-annotation-jvm-1.8.1.txt",
+    "notice_sha256": "266ecb37d6c7c17b21e7de63ccc41378fb1a97db345817589b4031b29c20510d",
+    "source_url": "https://dl.google.com/dl/android/maven2/androidx/annotation/annotation-jvm/1.8.1/annotation-jvm-1.8.1-sources.jar",
+    "source_sha256": "5add69d7bb907ade52823bf4b15730a1a32cfce6657bfbe7eb865b00107a6369",
+    "source_file": "build/licensing/sources/androidx.annotation-annotation-jvm-1.8.1-sources.jar",
     "empty_artifact": false
   },
   {
@@ -1075,20 +1075,6 @@
     "source_url": "https://dl.google.com/dl/android/maven2/androidx/versionedparcelable/versionedparcelable/1.1.1/versionedparcelable-1.1.1-sources.jar",
     "source_sha256": "135016af471acf4cd9583d36ceb779710c6b46812ccaaef7c526d5d60eae6b0b",
     "source_file": "build/licensing/sources/androidx.versionedparcelable-versionedparcelable-1.1.1-sources.jar",
-    "empty_artifact": false
-  },
-  {
-    "coordinate": "com.github.tdlibx:td:1.8.56",
-    "artifact_sha256": "0ad84491ddc56aa8d7055371fdbae992e83a552a58738e26ab8d779a3676090a",
-    "license": "Apache-2.0",
-    "declared_licenses": [
-      "Apache License 2.0"
-    ],
-    "notice": "licenses/maven/com.github.tdlibx-td-1.8.56.txt",
-    "notice_sha256": "efdbb1d9e7ab62fe68fa98839025e2a2593a9e607b4a0c158946f93963f8d8ca",
-    "source_url": "https://jitpack.io/com/github/tdlibx/td/1.8.56/td-1.8.56-sources.jar",
-    "source_sha256": "b9a4709acbd6db6fdc1c43f514c54f01e216b0ff909e40081e150e2f30cd814e",
-    "source_file": "build/licensing/sources/com.github.tdlibx-td-1.8.56-sources.jar",
     "empty_artifact": false
   },
   {

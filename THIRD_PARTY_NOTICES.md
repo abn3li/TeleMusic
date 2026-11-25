@@ -10,7 +10,7 @@ the complete reviewed notices in Settings > About > Open-source Licenses.
 [licenses/maven-components.json](licenses/maven-components.json) records all 96
 resolved Maven release artifacts, their binary and source hashes, source URLs,
 and preserved notices. These include AndroidX, Media3, Kotlin, coroutines, Coil,
-Retrofit, OkHttp, Okio, Gson, Guava, Tink and the TDLib Android wrapper. Their
+Retrofit, OkHttp, Okio, Gson, Guava and Tink. Their
 licenses are Apache-2.0. Individual third-party notices remain in
 [licenses/maven](licenses/maven), including notices found in source and binary
 archives. The full [Apache License 2.0](licenses/Apache-2.0.txt) is also included.
@@ -37,20 +37,21 @@ The arm64-v8a and x86_64 JNI libraries are built from those sources with Android
 NDK r26b. The modified application and decoder can be rebuilt together from the
 supplied source and recipe; see [BUILDING.md](BUILDING.md).
 
-## Telegram library and legacy OpenSSL
+## Telegram library and its OpenSSL
 
-The TDLib Android wrapper 1.8.56 is Apache-2.0. The bundled TDLib native core is
-under the [Boost Software License 1.0](licenses/TDLib-Boost-LICENSE.txt).
-Both shipped ABIs match the binaries in the wrapper's pinned upstream tree
-`77439c09d316e17a55a1e6a490c537084380288a`. They embed the TDLib upstream commit
-`dd1b761fda7e47f4e0275c4d319f80a04db1997f` and OpenSSL 1.1.1w.
+TDLib 1.8.71 (commit `1b9efe84d6e9a2e2f6eadeeea32b0726d2b8c25d`) and its Java API
+are under the [Boost Software License 1.0](licenses/TDLib-Boost-LICENSE.txt), with
+the [SQLCipher license](licenses/TDLib-SQLCipher-LICENSE.txt) for its database
+code. The arm64-v8a and x86_64 binaries in `third_party/tdlib` are the android-24
+ones from github.com/TGX-Android/tdlib at
+`4396573b3c12173c258a13cd5509be7746773748`; that project's build scripts and patch
+are kept in `third_party/tdlib/build`.
 
-OpenSSL 1.1.1w retains its original OpenSSL and SSLeay licenses, copyright
-notices and acknowledgments in
-[licenses/OpenSSL-1.1.1w-LICENSE.txt](licenses/OpenSSL-1.1.1w-LICENSE.txt).
-The extra permission for original TeleMusic code is in
-[OPENSSL_PERMISSION](OPENSSL_PERMISSION); it does not grant permission on
-behalf of other copyright holders.
+OpenSSL 3.5.9 (commit `45e844fa2a14ec92d146bd8f5778ac130b6625fb`) is under the
+[Apache License 2.0](licenses/OpenSSL-3.5.9-LICENSE.txt). The C++ runtime
+`libc++_shared.so` is from Android NDK r30 (30.0.16248370), stripped; see its
+[NOTICE](licenses/Android-NDK-r30-NOTICE.txt) and
+[NOTICE.toolchain](licenses/Android-NDK-r30-NOTICE.toolchain.txt).
 
 This product includes software developed by the OpenSSL Project for use in the
 OpenSSL Toolkit (https://www.openssl.org/). This product includes cryptographic
@@ -72,7 +73,7 @@ software written by Tim Hudson (tjh@cryptsoft.com).
 - CPython 3.13.9: its PSF license agreement and historical notices are preserved
   in [Python-3.13.9-LICENSE.txt](licenses/Python-3.13.9-LICENSE.txt), with
   [extension notices](licenses/python-runtime) retained separately.
-- Python's OpenSSL 3.0.18 is Apache-2.0, separate from TDLib's legacy OpenSSL.
+- Python's OpenSSL 3.0.18 is Apache-2.0, separate from TDLib's OpenSSL.
   The Python runtime also includes bzip2 1.0.8, libffi 3.4.4, SQLite 3.50.4,
   and liblzma from xz 5.4.6, with their individual notices preserved.
 - The Certifi CA bundle 2025.8.3 retains its MPL-2.0 terms and source data.

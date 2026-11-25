@@ -79,6 +79,8 @@ android {
     }
     sourceSets.getByName("main") {
         java.srcDir(rootProject.file("third_party/media3-ffmpeg/src/main/java"))
+        java.srcDir(rootProject.file("third_party/tdlib/src/main/java"))
+        jniLibs.srcDir(rootProject.file("third_party/tdlib/jniLibs"))
         assets.srcDir(layout.buildDirectory.dir("generated/openSourceNotices"))
     }
     lint {
@@ -151,9 +153,8 @@ dependencies {
 
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
 
-    // Prebuilt TDLib for Android - no NDK build needed. Check
-    // https://jitpack.io/#tdlibx/td for the latest tag if this one ever breaks.
-    implementation("com.github.tdlibx:td:1.8.56")
+    // TDLib itself is vendored in third_party/tdlib; its Java API uses these annotations.
+    implementation("androidx.annotation:annotation:1.8.1")
 }
 
 val licensingInventory = rootProject.layout.buildDirectory.file("licensing/release-components.json")
