@@ -82,6 +82,7 @@ android {
         java.srcDir(rootProject.file("third_party/tdlib/src/main/java"))
         jniLibs.srcDir(rootProject.file("third_party/tdlib/jniLibs"))
         assets.srcDir(layout.buildDirectory.dir("generated/openSourceNotices"))
+        assets.srcDir(layout.buildDirectory.dir("generated/localFonts"))
     }
     lint {
         checkReleaseBuilds = false
@@ -177,6 +178,16 @@ val prepareOpenSourceNotices = tasks.register<Exec>("prepareOpenSourceNotices") 
         "--inventory", licensingInventory.get().asFile, "--assets", licensingAssets.get().asFile)
 }
 tasks.named("preBuild") { dependsOn(prepareOpenSourceNotices) }
+
+// SF Pro files in fonts/ go into the app when present.
+val copyLocalFonts = tasks.register<Sync>("copyLocalFonts") {
+    from(rootProject.file("fonts")) {
+        include("SF-Pro-Text-*.otf", "SF-Pro-Display-*.otf")
+        exclude("*Italic*")
+    }
+    into(layout.buildDirectory.dir("generated/localFonts/fonts"))
+}
+tasks.named("preBuild") { dependsOn(copyLocalFonts) }
 
 val packageCorrespondingSource = tasks.register<Exec>("packageCorrespondingSource") {
     dependsOn("assembleRelease")

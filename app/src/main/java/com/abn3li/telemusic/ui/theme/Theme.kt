@@ -104,5 +104,5 @@ fun DarkPlayerTheme(content: @Composable () -> Unit) {
 @Composable
 private fun rememberAppTypography(): androidx.compose.material3.Typography {
     val context = LocalContext.current
-    return remember { appTypography(AppFonts.family(context)) }
+    return remember { appTypography(AppFonts.fonts(context)) }
 }
