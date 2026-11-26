@@ -79,6 +79,10 @@ interface SongDao {
     @Query("SELECT * FROM songs WHERE title LIKE '%' || :query || '%' OR artist LIKE '%' || :query || '%'")
     fun search(query: String): Flow<List<SongEntity>>
 
+    /** The liked songs that are on YouTube. */
+    @Query("SELECT youtubeVideoId FROM songs WHERE isFavorite = 1 AND youtubeVideoId IS NOT NULL AND youtubeVideoId != ''")
+    suspend fun likedYouTubeIds(): List<String>
+
     @Query("SELECT * FROM songs WHERE isFavorite = 1")
     fun observeFavorites(): Flow<List<SongEntity>>
 
@@ -135,6 +139,19 @@ interface SongDao {
     // rest of the app already relies on to tell a Telegram row apart from the other two sources.
     @Query("SELECT * FROM songs WHERE telegramFileId != 0")
     fun observeTelegramSongs(): Flow<List<SongEntity>>
+
+    /** The covers of the newest Telegram songs, one per artwork, for that list's own cover. */
+    @Query(
+        """
+        SELECT art FROM (
+            SELECT COALESCE(NULLIF(NULLIF(thumbnailPath, ''), 'none'), NULLIF(albumArtUrl, '')) AS art,
+                   MAX(addedAtMillis) AS newest
+            FROM songs WHERE telegramFileId != 0
+            GROUP BY COALESCE(NULLIF(albumArtUrl, ''), thumbnailPath)
+        ) WHERE art IS NOT NULL ORDER BY newest DESC LIMIT 4
+        """
+    )
+    fun observeTelegramCovers(): Flow<List<String>>
 
     // Only ever true for a song the user explicitly tapped Download on (YouTube or a re-download
     // of a Telegram track) - never a plain streaming cache hit, see isExplicitDownload's own doc.

@@ -145,6 +145,7 @@ class LibraryViewModel(private val repository: MusicRepository) : ViewModel() {
     val playlists: StateFlow<List<PlaylistEntity>> = repository.observePlaylists().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
     val smartCounts: StateFlow<SmartPlaylistCounts> = repository.observeSmartPlaylistCounts()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), SmartPlaylistCounts())
+    val telegramCovers: StateFlow<List<String>> = repository.observeTelegramCovers().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
     val playlistSummaries: StateFlow<List<PlaylistSummary>> = repository.observePlaylistSummaries().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     private val _showAlphabetIndex = MutableStateFlow(repository.showSongIndex)

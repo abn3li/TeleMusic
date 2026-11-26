@@ -471,7 +471,8 @@ fun TgMusicNavGraph(navController: NavHostController = rememberNavController()) 
                         viewModel = libraryViewModel,
                         onBack = libraryCallbacks.onBack,
                         onOpenPlaylist = { id, name -> navController.navigate(Routes.playlist(id, name)) },
-                        onOpenSmartPlaylist = { kind -> navController.navigate(Routes.smartPlaylist(kind)) }
+                        onOpenSmartPlaylist = { kind -> navController.navigate(Routes.smartPlaylist(kind)) },
+                        onOpenYouTubePlaylist = { browseId, title, params -> navController.navigate(Routes.youtubeBrowse(browseId, title, params)) }
                     )
                 }
                 composable(Routes.YOUTUBE_BROWSE) { backStackEntry ->

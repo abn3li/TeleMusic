@@ -53,17 +53,4 @@ class YouTubeLikeTest {
         InnertubeBrowseClient(auth = { mapOf("Authorization" to "test-auth") }, client = http).setSongLiked("video123", false)
         assertEquals(1, calls)
     }
-
-    @Test fun statusIsReadOnlyFromRequestedSongAndInvertsTheMenuAction() {
-        fun row(id: String, status: String) = JSONObject().put("playlistPanelVideoRenderer",
-            JSONObject().put("videoId", id).put("menu", JSONObject().put("toggleMenuServiceItemRenderer",
-                JSONObject().put("defaultServiceEndpoint", JSONObject().put("likeEndpoint", JSONObject()
-                    .put("status", status).put("target", JSONObject().put("videoId", id)))))))
-        val response = JSONObject().put("contents", org.json.JSONArray().put(row("other", "LIKE")).put(row("wanted", "INDIFFERENT")))
-        assertEquals(true, parseYouTubeSongLiked(response, "wanted"))
-        assertEquals(false, parseYouTubeSongLiked(response, "other"))
-        assertNull(parseYouTubeSongLiked(response, "missing"))
-        assertNull(parseYouTubeSongLiked(JSONObject(), "wanted"))
-        assertNull(parseYouTubeSongLiked(row("wanted", "UNRECOGNIZED"), "wanted"))
-    }
 }

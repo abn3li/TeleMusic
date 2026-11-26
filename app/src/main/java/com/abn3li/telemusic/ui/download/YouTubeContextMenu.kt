@@ -47,18 +47,23 @@ import kotlinx.coroutines.withContext
 
 private data class YouTubeMenuRequest(val track: BrowseTrack?, val collection: BrowseCollection?,
     val anchor: Float, val play: () -> Unit, val download: (() -> Unit)? = null,
-    val beforeOpen: () -> Unit = {}, val remove: (() -> Unit)? = null)
+    val beforeOpen: () -> Unit = {}, val remove: (() -> Unit)? = null,
+    val removeTrack: ((BrowseTrack) -> Unit)? = null)
 
 /** Only the open menu observes library state; cards hold no timers or network jobs. */
 @Stable
 internal class YouTubeMenus internal constructor(
-    private val show: (BrowseTrack?, BrowseCollection?, Float, () -> Unit, (() -> Unit)?, () -> Unit, (() -> Unit)?) -> Unit
+    private val show: (BrowseTrack?, BrowseCollection?, Float, () -> Unit, (() -> Unit)?, () -> Unit, (() -> Unit)?, ((BrowseTrack) -> Unit)?) -> Unit
 ) {
     fun track(track: BrowseTrack, anchor: Float, play: () -> Unit, download: (() -> Unit)? = null,
-        beforeOpen: () -> Unit = {}) = show(track, null, anchor, play, download, beforeOpen, null)
+        beforeOpen: () -> Unit = {}, removeTrack: ((BrowseTrack) -> Unit)? = null) =
+        show(track, null, anchor, play, download, beforeOpen, null, removeTrack)
     fun collection(collection: BrowseCollection, anchor: Float, open: () -> Unit, remove: (() -> Unit)? = null) =
-        show(null, collection, anchor, open, null, {}, remove)
+        show(null, collection, anchor, open, null, {}, remove, null)
 }
+
+/** On a playlist's own page: takes one of its songs out (offered only where the account can). */
+internal val LocalRemoveFromYouTubePlaylist = staticCompositionLocalOf<((BrowseTrack) -> Unit)?> { null }
 
 internal val LocalYouTubeMenus = staticCompositionLocalOf<YouTubeMenus> {
     error("YouTube menu provider is missing")
@@ -68,13 +73,14 @@ internal val LocalYouTubeMenus = staticCompositionLocalOf<YouTubeMenus> {
 internal fun Modifier.youtubeTrackActions(track: BrowseTrack, onClick: () -> Unit,
     onDownload: (() -> Unit)? = null, beforeOpen: () -> Unit = {}): Modifier = composed {
     val menus = LocalYouTubeMenus.current
+    val removeTrack = LocalRemoveFromYouTubePlaylist.current?.takeIf { track.setVideoId != null }
     val haptics = LocalHapticFeedback.current
     val coordinates = remember { arrayOfNulls<LayoutCoordinates>(1) }
     onPlaced { coordinates[0] = it }.combinedClickable(
         interactionSource = remember { MutableInteractionSource() }, indication = null,
         onClick = onClick, onLongClickLabel = "Options for ${track.title}", onLongClick = {
             haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-            menus.track(track, coordinates[0]?.takeIf { it.isAttached }?.positionInWindow()?.y ?: 0f, onClick, onDownload, beforeOpen)
+            menus.track(track, coordinates[0]?.takeIf { it.isAttached }?.positionInWindow()?.y ?: 0f, onClick, onDownload, beforeOpen, removeTrack)
         })
 }
 
@@ -127,8 +133,8 @@ internal fun YouTubeContextHost(content: @Composable () -> Unit) {
     var conflict by remember { mutableStateOf<DownloadConflict?>(null) }
     val downloads = remember { mutableStateListOf<String>() }
     val imports = remember { mutableStateListOf<String>() }
-    val menus = remember { YouTubeMenus { track, collection, anchor, play, download, beforeOpen, remove ->
-        request = YouTubeMenuRequest(track, collection, anchor, play, download, beforeOpen, remove)
+    val menus = remember { YouTubeMenus { track, collection, anchor, play, download, beforeOpen, remove, removeTrack ->
+        request = YouTubeMenuRequest(track, collection, anchor, play, download, beforeOpen, remove, removeTrack)
     } }
     CompositionLocalProvider(LocalYouTubeMenus provides menus) {
         content()
@@ -215,14 +221,13 @@ private fun YouTubeOptions(request: YouTubeMenuRequest, onDismiss: () -> Unit,
                         } } }, onCreate = { name -> onAction { work {
                             val saved = savedSong()
                             repository.addSongToPlaylist(repository.createPlaylist(name), saved); toast("Added to $name")
-                        } } })
+                        } } }, youtubeIds = listOf(track.videoId), onAction = onAction)
                     }
                     CardDivider()
                     CardItem(if (song?.isFavorite == true) "Remove from Favorites" else "Add to Favorites",
                         if (song?.isFavorite == true) Icons.Rounded.Star else Icons.Rounded.StarBorder, enabled = loaded) {
                         onAction { work { val saved = savedSong(); repository.setFavorite(saved, !saved.isFavorite) } }
                     }
-                    com.abn3li.telemusic.ui.library.YouTubeLikeMenuItem(track.videoId, onAction)
                     CardDivider()
                     CardItem(when { track.videoId in downloads -> "Downloading…"; song?.isExplicitDownload == true -> "Downloaded"; else -> "Download" }, Icons.Rounded.Download,
                         enabled = loaded && song?.isExplicitDownload != true && track.videoId !in downloads) { onAction {
@@ -254,6 +259,10 @@ private fun YouTubeOptions(request: YouTubeMenuRequest, onDismiss: () -> Unit,
                     } }
                     CardDivider()
                     CardItem("Share", Icons.Rounded.Share) { onAction { share("https://music.youtube.com/watch?v=${android.net.Uri.encode(track.videoId)}") } }
+                    request.removeTrack?.let { remove ->
+                        CardDivider()
+                        CardItem("Remove from Playlist", Icons.Rounded.Delete, destructive = true) { onAction { remove(track) } }
+                    }
                 } else if (collection != null) {
                     CardItem("Open", Icons.AutoMirrored.Rounded.OpenInNew) { onAction(request.play) }
                     if (collection.kind == BrowseKind.ALBUM || collection.kind == BrowseKind.PLAYLIST) {

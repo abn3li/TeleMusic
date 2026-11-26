@@ -8,7 +8,9 @@ data class BrowseTrack(
     val title: String,
     val artist: String,
     val thumbnailUrl: String?,
-    val durationSeconds: Int = 0
+    val durationSeconds: Int = 0,
+    // Its place in a playlist the signed-in account can edit; null anywhere else.
+    val setVideoId: String? = null
 )
 
 /** A card that links to another browse page (a playlist, an artist's channel, an album, a

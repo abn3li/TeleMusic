@@ -52,9 +52,38 @@ class InnertubeBrowseClient(
         check(!response.has("error")) { "YouTube rejected the rating" }
     }
 
-    fun isSongLiked(videoId: String): Boolean {
+    /** The account's own playlists (the ones songs can be added to), as offered for [videoId]. */
+    internal fun editablePlaylists(videoId: String): List<com.abn3li.telemusic.data.youtube.YouTubePlaylist> {
         checkNotNull(auth()) { "Sign in to YouTube first" }
-        return checkNotNull(parseYouTubeSongLiked(next(videoId), videoId)) { "YouTube like status unavailable" }
+        val response = post("playlist/get_add_to_playlist",
+            JSONObject().put("videoIds", org.json.JSONArray().put(videoId)).put("excludeWatchLater", true))
+        check(!response.has("error")) { "YouTube playlists unavailable" }
+        return BrowseParser.parseEditablePlaylists(response)
+    }
+
+    /** A new playlist holding [videoIds], seen by [privacy]; returns its id. */
+    internal fun createPlaylist(title: String, videoIds: List<String>, privacy: com.abn3li.telemusic.data.settings.PlaylistPrivacy): String {
+        val headers = checkNotNull(auth()) { "Sign in to YouTube first" }
+        val response = post("playlist/create", JSONObject().put("title", title).put("privacyStatus", privacy.name).apply {
+            if (videoIds.isNotEmpty()) put("videoIds", org.json.JSONArray(videoIds))
+        }, headers)
+        return response.optString("playlistId").takeIf { it.isNotBlank() } ?: error("YouTube didn't create the playlist")
+    }
+
+    internal fun addToPlaylist(playlistId: String, videoIds: List<String>) = editPlaylist(playlistId, videoIds.map {
+        JSONObject().put("action", "ACTION_ADD_VIDEO").put("addedVideoId", it).put("dedupeOption", "DEDUPE_OPTION_SKIP")
+    })
+
+    /** [setVideoId] is the song's own place in that playlist (the same song can be in it twice). */
+    internal fun removeFromPlaylist(playlistId: String, videoId: String, setVideoId: String) = editPlaylist(playlistId, listOf(
+        JSONObject().put("action", "ACTION_REMOVE_VIDEO").put("removedVideoId", videoId).put("setVideoId", setVideoId)
+    ))
+
+    private fun editPlaylist(playlistId: String, actions: List<JSONObject>) {
+        val headers = checkNotNull(auth()) { "Sign in to YouTube first" }
+        val response = post("browse/edit_playlist",
+            JSONObject().put("playlistId", playlistId).put("actions", org.json.JSONArray(actions)), headers)
+        check(response.optString("status") == "STATUS_SUCCEEDED") { "YouTube didn't change the playlist" }
     }
 
     fun browse(browseId: String, params: String? = null): JSONObject =

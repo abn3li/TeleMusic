@@ -263,9 +263,9 @@ object BrowseParser {
      * and a chart page all differ enough that hard-coding one path per type isn't worth it, same
      * tradeoff the search-side parser makes for the same reason.
      */
-    fun parseBrowseContent(response: JSONObject, includeSongCards: Boolean = false): BrowseContent {
+    fun parseBrowseContent(response: JSONObject, includeSongCards: Boolean = false, songs: JSONObject = response): BrowseContent {
         val header = parseCollectionHeader(response)
-        val trackRenderers = collectRenderers(response, "musicResponsiveListItemRenderer")
+        val trackRenderers = collectRenderers(songs, "musicResponsiveListItemRenderer")
         val tracks = LinkedHashMap<String, BrowseTrack>()
         // Videos among the songs are kept: they play as audio, and some songs only exist as one.
         trackRenderers.forEach { renderer ->
@@ -274,14 +274,14 @@ object BrowseParser {
         // A podcast show's page: its episodes, each playing as audio.
         val show = collectRenderers(response, "musicResponsiveHeaderRenderer").firstOrNull()
             ?.opt("straplineTextOne").obj()?.runs()?.takeIf { it.isNotBlank() }
-        collectRenderers(response, "musicMultiRowListItemRenderer").forEach { renderer ->
+        collectRenderers(songs, "musicMultiRowListItemRenderer").forEach { renderer ->
             parseEpisodeRow(renderer, show)?.let { tracks.putIfAbsent(it.videoId, it) }
         }
         val collections = LinkedHashMap<String, BrowseCollection>()
         collectRenderers(response, "musicTwoRowItemRenderer").forEach { renderer ->
             // Song cards belong to mixed category pages. On a playlist/album page they can
             // instead be recommendations, which must not become part of its play/import queue.
-            (if (includeSongCards || header == null) parseTwoRowTrack(renderer) else null)
+            (if (songs === response && (includeSongCards || header == null)) parseTwoRowTrack(renderer) else null)
                 ?.let { tracks.putIfAbsent(it.videoId, it) }
                 ?: parseTwoRowCollection(renderer)?.let { collections.putIfAbsent(it.browseId + ":" + it.params.orEmpty(), it) }
         }
@@ -564,9 +564,29 @@ object BrowseParser {
             // header, and the caller fills it from there (see DiscoveryRepository.browse).
             artist = artist,
             thumbnailUrl = thumbnails.best(),
-            durationSeconds = durationSecs
+            durationSeconds = durationSecs,
+            setVideoId = removableSetVideoId(renderer)
         )
     }
+
+    /** Only a row of the account's own playlist offers to take itself out. */
+    private fun removableSetVideoId(renderer: JSONObject): String? {
+        val menu = renderer.opt("menu").obj() ?: return null
+        return collectRenderers(menu, "playlistEditEndpoint").firstNotNullOfOrNull { edit ->
+            val actions = edit.opt("actions").arr() ?: return@firstNotNullOfOrNull null
+            (0 until actions.length()).mapNotNull { actions.optJSONObject(it) }
+                .firstOrNull { it.optString("action") == "ACTION_REMOVE_VIDEO" }
+                ?.optString("setVideoId")?.takeIf { it.isNotBlank() }
+        }
+    }
+
+    internal fun parseEditablePlaylists(response: JSONObject): List<com.abn3li.telemusic.data.youtube.YouTubePlaylist> =
+        collectRenderers(response, "playlistAddToOptionRenderer").mapNotNull { option ->
+            val id = option.optString("playlistId").takeIf { it.isNotBlank() && it !in setOf("LM", "LL", "WL", "SE") } ?: return@mapNotNull null
+            val text = option.opt("title").obj() ?: return@mapNotNull null
+            val title = text.optString("simpleText").ifBlank { text.runs() }.takeIf { it.isNotBlank() } ?: return@mapNotNull null
+            com.abn3li.telemusic.data.youtube.YouTubePlaylist(id, title)
+        }.distinctBy { it.id }
 
     private fun parseDurationTextSeconds(text: String): Int {
         val parts = text.trim().split(":").mapNotNull { it.toIntOrNull() }
@@ -608,6 +628,15 @@ object BrowseParser {
         walk(response)
         return found
     }
+
+    /** The part of a playlist's page (or of its next page) that holds the playlist's own songs:
+     * the account's own playlists also carry songs YouTube suggests adding. Null when the page
+     * isn't built that way. */
+    fun playlistSongs(response: JSONObject): JSONObject? =
+        (collectRenderers(response, "musicPlaylistShelfRenderer") + collectRenderers(response, "musicPlaylistShelfContinuation"))
+            .firstOrNull()
+            // An own playlist with no songs yet has only suggestions.
+            ?: JSONObject().takeIf { collectRenderers(response, "musicEditablePlaylistDetailHeaderRenderer").isNotEmpty() }
 
     private fun collectRenderers(root: Any?, name: String): List<JSONObject> {
         val out = mutableListOf<JSONObject>()

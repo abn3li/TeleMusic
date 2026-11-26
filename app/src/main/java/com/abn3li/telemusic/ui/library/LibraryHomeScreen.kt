@@ -59,11 +59,13 @@ fun LibraryHomeScreen(
     val account by app.youtubeAccount.state.collectAsState()
     // What's already known shows at once - from memory, else saved on the phone - and the fresh
     // list from YouTube replaces it quietly (nothing redraws when it's the same).
-    var followedPlaylists by remember(account.sessionId) {
-        mutableStateOf(if (account.signedIn) app.discoveryRepository.accountPlaylistsIfLoaded().orEmpty() else emptyList())
+    val showYouTube = app.settingsStore.sync.collectAsState().value.showPlaylists
+    var followedPlaylists by remember(account.sessionId, showYouTube) {
+        mutableStateOf(if (account.signedIn && showYouTube) app.discoveryRepository.accountPlaylistsIfLoaded().orEmpty() else emptyList())
     }
-    LaunchedEffect(account.sessionId, account.signedIn) {
-        if (!account.signedIn) { followedPlaylists = emptyList(); return@LaunchedEffect }
+    val playlistsChanged by app.discoveryRepository.accountPlaylistsChanged.collectAsState()
+    LaunchedEffect(account.sessionId, account.signedIn, playlistsChanged, showYouTube) {
+        if (!account.signedIn || !showYouTube) { followedPlaylists = emptyList(); return@LaunchedEffect }
         if (followedPlaylists.isEmpty()) app.discoveryRepository.savedAccountPlaylists(account.sessionId)?.let { followedPlaylists = it }
         app.discoveryRepository.accountPlaylists(account.sessionId)?.let { if (it != followedPlaylists) followedPlaylists = it }
     }
@@ -81,7 +83,7 @@ fun LibraryHomeScreen(
         onPinnedClick = onOpenSettings, pinnedDescription = "Settings") {
         item("links", contentType = "library_links") {
             Column(Modifier.fillMaxWidth().padding(top = 10.dp)) {
-                LibraryCategoryRow(Icons.AutoMirrored.Rounded.QueueMusic, "Playlists", playlists.size, onOpenPlaylists) { createPlaylist = true }
+                LibraryCategoryRow(Icons.AutoMirrored.Rounded.QueueMusic, "Playlists", playlists.size + followedPlaylists.count { it.browseId != "VLLM" }, onOpenPlaylists) { createPlaylist = true }
                 LibraryDivider(start = 60.dp)
                 LibraryCategoryRow(Icons.Rounded.MicExternalOn, "Artists", artists.size, onOpenArtists)
                 LibraryDivider(start = 60.dp)
@@ -175,7 +177,8 @@ fun LibraryYouTubePlaylistsScreen(onBack: () -> Unit, onOpenYouTubePlaylist: (St
     val app = LocalContext.current.applicationContext as TgMusicApp
     // The Library page loaded the same list for its shelf, so this is answered from memory.
     val sessionId = app.youtubeAccount.state.collectAsState().value.sessionId
-    val playlists by produceState(app.discoveryRepository.accountPlaylistsIfLoaded().orEmpty(), sessionId) {
+    val playlistsChanged by app.discoveryRepository.accountPlaylistsChanged.collectAsState()
+    val playlists by produceState(app.discoveryRepository.accountPlaylistsIfLoaded().orEmpty(), sessionId, playlistsChanged) {
         if (value.isEmpty()) app.discoveryRepository.savedAccountPlaylists(sessionId)?.let { value = it }
         app.discoveryRepository.accountPlaylists(sessionId)?.let { if (it != value) value = it }
     }

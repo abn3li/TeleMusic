@@ -544,17 +544,36 @@ fun LibraryPlaylistsScreen(
     viewModel: LibraryViewModel,
     onBack: () -> Unit,
     onOpenPlaylist: (Long, String) -> Unit,
-    onOpenSmartPlaylist: (SmartPlaylistKind) -> Unit
+    onOpenSmartPlaylist: (SmartPlaylistKind) -> Unit,
+    onOpenYouTubePlaylist: (String, String, String?) -> Unit
 ) {
     val playlists by viewModel.playlistSummaries.collectAsState()
+    val app = LocalContext.current.applicationContext as TgMusicApp
+    val account by app.youtubeAccount.state.collectAsState()
+    val playlistsChanged by app.discoveryRepository.accountPlaylistsChanged.collectAsState()
+    val sync by app.settingsStore.sync.collectAsState()
+    val showYouTube = account.signedIn && sync.showPlaylists
+    // Already read for Library's YouTube shelf, so this is answered from memory.
+    val youtubePlaylists by produceState(if (showYouTube) app.discoveryRepository.accountPlaylistsIfLoaded().orEmpty() else emptyList(), account.sessionId, playlistsChanged, showYouTube) {
+        if (!showYouTube) { value = emptyList(); return@produceState }
+        val session = account.sessionId
+        (app.discoveryRepository.accountPlaylistsIfLoaded() ?: app.discoveryRepository.savedAccountPlaylists(session))
+            ?.let { value = it }
+        app.discoveryRepository.accountPlaylists(session)?.let { value = it }
+    }
     var searchText by rememberSaveable { mutableStateOf("") }
     val query = debounced(searchText)
     var showCreate by remember { mutableStateOf(false) }
-    val smart = remember(query) {
-        SmartPlaylistKind.entries.filter { query.isBlank() || it.label.contains(query, true) }
-    }
+    // Liked and Downloaded have their own buttons on the Library page.
+    val telegram = SmartPlaylistKind.TELEGRAM
+    val telegramCovers by viewModel.telegramCovers.collectAsState()
+    val showTelegram = query.isBlank() || telegram.label.contains(query, true)
     val shown = remember(playlists, query) {
         if (query.isBlank()) playlists else playlists.filter { it.name.contains(query, true) }
+    }
+
+    val shownYouTube = remember(youtubePlaylists, query) {
+        youtubePlaylists.filter { it.browseId != "VLLM" && (query.isBlank() || it.title.contains(query, true)) }
     }
 
     LargeTitleList(
@@ -566,15 +585,29 @@ fun LibraryPlaylistsScreen(
             PlaylistRow(label = "Create New Playlist…", tile = { IconTile(Icons.Rounded.Add) }) { showCreate = true }
             LibraryDivider(start = 96.dp)
         }
-        smart.forEach { kind ->
-            item("smart_${kind.name}") {
-                PlaylistRow(label = kind.label, tile = { IconTile(kind.icon()) }) { onOpenSmartPlaylist(kind) }
-                LibraryDivider(start = 96.dp)
-            }
+        itemsIndexed(shownYouTube, key = { _, p -> p.browseId }) { _, playlist ->
+            PlaylistRow(
+                label = playlist.title,
+                detail = "YouTube",
+                tile = { CoverTile(playlist.thumbnailUrl, Modifier.size(60.dp), corner = 8, placeholder = Icons.AutoMirrored.Rounded.QueueMusic) }
+            ) { onOpenYouTubePlaylist(playlist.browseId, playlist.title, playlist.params) }
+            LibraryDivider(start = 96.dp)
+        }
+        if (showTelegram) item("telegram") {
+            PlaylistRow(
+                label = telegram.label,
+                detail = if (showYouTube) "On this phone" else null,
+                tile = {
+                    if (telegramCovers.isEmpty()) IconTile(telegram.icon())
+                    else CoverTile(telegramCovers, Modifier.size(60.dp), corner = 8, placeholder = telegram.icon())
+                }
+            ) { onOpenSmartPlaylist(telegram) }
+            if (shown.isNotEmpty()) LibraryDivider(start = 96.dp)
         }
         itemsIndexed(shown, key = { _, p -> p.id }) { index, playlist ->
             PlaylistRow(
                 label = playlist.name,
+                detail = if (showYouTube) "On this phone" else null,
                 tile = { CoverTile(playlist.covers, Modifier.size(60.dp), corner = 8, placeholder = Icons.AutoMirrored.Rounded.QueueMusic) }
             ) { onOpenPlaylist(playlist.id, playlist.name) }
             if (index < shown.lastIndex) LibraryDivider(start = 96.dp)
@@ -596,7 +629,7 @@ internal fun SmartPlaylistKind.icon(): ImageVector = when (this) {
 }
 
 @Composable
-private fun PlaylistRow(label: String, tile: @Composable () -> Unit, onClick: () -> Unit) {
+private fun PlaylistRow(label: String, tile: @Composable () -> Unit, detail: String? = null, onClick: () -> Unit) {
     Row(
         Modifier
             .fillMaxWidth()
@@ -606,14 +639,10 @@ private fun PlaylistRow(label: String, tile: @Composable () -> Unit, onClick: ()
         verticalAlignment = Alignment.CenterVertically
     ) {
         tile()
-        Text(
-            label,
-            color = ink,
-            fontSize = 17.sp,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.weight(1f).padding(start = 16.dp, end = 12.dp)
-        )
+        Column(Modifier.weight(1f).padding(start = 16.dp, end = 12.dp)) {
+            Text(label, color = ink, fontSize = 17.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            if (detail != null) Text(detail, color = ink.copy(alpha = 0.5f), fontSize = 12.5.sp, maxLines = 1)
+        }
         ChevronIcon()
     }
 }
@@ -621,7 +650,8 @@ private fun PlaylistRow(label: String, tile: @Composable () -> Unit, onClick: ()
 @Composable
 internal fun IconTile(icon: ImageVector, sizeDp: Int = 60) {
     Box(
-        Modifier.size(sizeDp.dp).clip(RoundedCornerShape(8.dp)).background(LibraryTileColor),
+        Modifier.size(sizeDp.dp).clip(RoundedCornerShape(8.dp))
+            .background(if (com.abn3li.telemusic.ui.theme.LocalPalette.current.isLight) LibraryTileColor else Color(0xFF1C1C1E)),
         contentAlignment = Alignment.Center
     ) {
         Icon(icon, contentDescription = null, tint = AppAccent, modifier = Modifier.size((sizeDp * 0.5f).dp))
@@ -631,15 +661,29 @@ internal fun IconTile(icon: ImageVector, sizeDp: Int = 60) {
 @Composable
 internal fun NewPlaylistDialog(onCreate: (String) -> Unit, onDismiss: () -> Unit) {
     var name by remember { mutableStateOf("") }
+    val app = LocalContext.current.applicationContext as TgMusicApp
+    val account by app.youtubeAccount.state.collectAsState()
+    val sync by app.settingsStore.sync.collectAsState()
+    val offerYouTube = account.signedIn && sync.playlistsEditable
+    var chosenYouTube by remember { mutableStateOf(true) }
+    val toYouTube = offerYouTube && sync.newPlaylists.youtube(chosenYouTube)
     AppAlert(
         title = "New Playlist",
         message = "Enter a name for this playlist.",
         onDismiss = onDismiss,
         actions = listOf(
             AlertAction("Cancel", onClick = onDismiss),
-            AlertAction("Create", bold = true, enabled = name.isNotBlank()) { onCreate(name.trim()) }
+            AlertAction("Create", bold = true, enabled = name.isNotBlank()) {
+                if (toYouTube) { app.youtubeLibrary.create(name.trim()); onDismiss() }
+                else onCreate(name.trim())
+            }
         )
     ) {
         AlertTextField(name, { name = it }, "Playlist name")
+        if (offerYouTube) {
+            if (sync.newPlaylists == com.abn3li.telemusic.data.settings.NewPlaylistPlace.ASK)
+                PlaylistPlaceChoice(chosenYouTube, { chosenYouTube = it }, Modifier.padding(top = 10.dp))
+            AlertNote(if (toYouTube) sync.privacy.note else "On this phone, for YouTube and Telegram songs")
+        }
     }
 }

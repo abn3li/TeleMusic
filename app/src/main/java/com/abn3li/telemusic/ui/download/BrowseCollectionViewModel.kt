@@ -84,7 +84,8 @@ class BrowseCollectionViewModel(
                     // here is far more often the page genuinely having nothing playable, or a
                     // page shape this app doesn't parse, than a network failure.
                     errorMessage = if (content.tracks.isEmpty() && content.collections.isEmpty() && content.artist == null) {
-                        "This playlist couldn't be loaded - it may be unavailable"
+                        if (content.header != null && browseId.startsWith("VL")) "This playlist is empty"
+                        else "This playlist couldn't be loaded - it may be unavailable"
                     } else null
                 )
             }
@@ -107,6 +108,19 @@ class BrowseCollectionViewModel(
                 }
             } else {
                 startDownload(track)
+            }
+        }
+    }
+
+    /** Takes [track] out of this playlist on YouTube: gone from the page at once, back if it fails. */
+    fun removeFromPlaylist(track: BrowseTrack, library: com.abn3li.telemusic.data.youtube.YouTubeLibrary) {
+        val setVideoId = track.setVideoId ?: return
+        val index = _uiState.value.tracks.indexOfFirst { it.setVideoId == setVideoId }
+        if (index < 0) return
+        _uiState.update { state -> state.copy(tracks = state.tracks.filterNot { it.setVideoId == setVideoId }) }
+        workScope.launch {
+            if (!library.remove(browseId, track.videoId, setVideoId)) _uiState.update { state ->
+                state.copy(tracks = state.tracks.toMutableList().apply { add(index.coerceAtMost(size), track) })
             }
         }
     }

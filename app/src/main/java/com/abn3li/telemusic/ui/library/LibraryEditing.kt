@@ -267,7 +267,9 @@ internal fun BoxScope.LibraryEditingBar(edit: LibraryEditing, songs: List<SongEn
                 PlaylistPicker(actions.playlists,
                     onPick = { playlist -> onAction { selectedSongs.forEach { actions.onAddToPlaylist(playlist.id, it) } } },
                     onCreate = { name -> onAction { actions.onCreatePlaylistAndAddSongs(name, selectedSongs) } },
-                    standalone = true)
+                    standalone = true,
+                    songs = selectedSongs,
+                    onAction = onAction)
             }
         }
     }

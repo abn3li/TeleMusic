@@ -99,6 +99,7 @@ class MainActivity : ComponentActivity() {
                     TgMusicNavGraph()
                 }
                 StartupUpdatePrompt()
+                com.abn3li.telemusic.ui.library.SameSongPrompt(app)
             }
         }
     }

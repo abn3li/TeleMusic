@@ -357,15 +357,23 @@ class MusicRepository(
         songDao.observeFavorites().map { it.sortedForLibrary(sortField, ascending) }
             .flowOn(Dispatchers.Default)
 
+    suspend fun likedYouTubeIds(): List<String> = songDao.likedYouTubeIds().distinct()
+
     suspend fun setFavorite(song: SongEntity, isFavorite: Boolean) {
         if (isFavorite) saveIfStreamOnly(song.telegramMessageId)
         songDao.setFavorite(song.telegramMessageId, isFavorite)
+        // Signed in, a YouTube song's star is also its like in the account.
+        withContext(Dispatchers.IO) {
+            (appContext as com.abn3li.telemusic.TgMusicApp).youtubeLibrary.favoriteChanged(song, isFavorite)
+        }
         // The large widget shows the Like star (a no-op when no widget is placed).
         com.abn3li.telemusic.widget.MusicWidgets.refresh(appContext)
     }
 
     // ---- Smart (built-in) playlists: Liked/Telegram/Downloaded - not real rows in the
     // playlists table, just a different filter over the same songs table. ----
+    fun observeTelegramCovers(): Flow<List<String>> = songDao.observeTelegramCovers()
+
     fun observeTelegramSongs(sortField: SortField, ascending: Boolean): Flow<List<SongEntity>> =
         songDao.observeTelegramSongs().map { it.sortedForLibrary(sortField, ascending) }
             .flowOn(Dispatchers.Default)

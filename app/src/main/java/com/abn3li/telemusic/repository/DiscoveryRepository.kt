@@ -28,8 +28,7 @@ class DiscoveryRepository(
     private val importedPlaylistDao: ImportedPlaylistDao,
     // Where the Search tab's categories are kept between runs (see [genres]).
     private val genresFile: File,
-    private val client: InnertubeBrowseClient = InnertubeBrowseClient(),
-    private val onLikedSongsLoaded: (List<String>) -> Unit = {}
+    private val client: InnertubeBrowseClient = InnertubeBrowseClient()
 ) {
     @Volatile private var cachedNewReleases: HomeSection? = null
     @Volatile private var cachedGenres: List<BrowseCollection>? = null
@@ -97,6 +96,20 @@ class DiscoveryRepository(
 
     /** The account playlists already in memory (even if due a refresh), for showing at once. */
     fun accountPlaylistsIfLoaded(): List<BrowseCollection>? = accountPlaylistsCache.value
+
+    private val _accountPlaylistsChanged = kotlinx.coroutines.flow.MutableStateFlow(0)
+    /** Goes up when a playlist is made here, so open pages read the list again. */
+    val accountPlaylistsChanged: kotlinx.coroutines.flow.StateFlow<Int> = _accountPlaylistsChanged
+
+    /** A playlist just made here: listed at once, under Liked Songs, without waiting for YouTube. */
+    fun accountPlaylistAdded(sessionId: String, playlist: BrowseCollection) {
+        accountPlaylistsCache.update { list ->
+            val (liked, others) = list.partition { it.browseId == "VLLM" }
+            (liked + playlist + others).distinctBy { it.browseId }
+        }
+        accountPlaylistsCache.value?.let { saveAccountPlaylists(sessionId, it) }
+        _accountPlaylistsChanged.value++
+    }
 
     /** The account playlists saved on the phone by the last load for this [sessionId]: Library
      * shows them at once after the app starts, while the fresh list loads. A list saved for
@@ -364,7 +377,6 @@ class DiscoveryRepository(
     }
 
     suspend fun browse(browseId: String, params: String?): BrowseContent = withContext(Dispatchers.IO) {
-        val accountVersion = accountGeneration.get()
         // Home's "See All" for community playlists: the list already fetched, shown as a grid.
         if (browseId == COMMUNITY_BROWSE_ID) {
             return@withContext BrowseContent(collections = communityPlaylists()?.items.orEmpty())
@@ -386,7 +398,8 @@ class DiscoveryRepository(
             // An artist's page is its own shape: top songs plus shelves, no track list to page.
             BrowseParser.parseArtistPage(raw)?.let { artist -> return@runCatching BrowseContent(artist = artist) }
             val isCategory = browseId.startsWith(InnertubeBrowseClient.GENRES_BROWSE_ID)
-            var content = BrowseParser.parseBrowseContent(raw, includeSongCards = isCategory)
+            val ownSongs = if (browseId.startsWith("VL")) BrowseParser.playlistSongs(raw) else null
+            var content = BrowseParser.parseBrowseContent(raw, includeSongCards = isCategory, songs = ownSongs ?: raw)
             if (content.tracks.isEmpty() && content.collections.isEmpty()) {
                 // A real HTTP 200 with a page shape the parser doesn't recognize looks identical
                 // to a genuinely empty page from the outside - this cheap summary (booleans only,
@@ -413,11 +426,12 @@ class DiscoveryRepository(
             if (content.tracks.isNotEmpty() && !isCategory) {
                 val allTracks = LinkedHashMap<String, com.abn3li.telemusic.data.browse.BrowseTrack>()
                 content.tracks.forEach { allTracks[it.videoId] = it }
-                var page = raw
+                var page = ownSongs ?: raw
                 var pages = 0
                 while (pages < 25) {
                     val token = BrowseParser.findContinuationToken(page) ?: break
-                    page = client.browseContinuation(token)
+                    val next = client.browseContinuation(token)
+                    page = if (ownSongs != null) BrowseParser.playlistSongs(next) ?: next else next
                     val pageContent = BrowseParser.parseBrowseContent(page)
                     if (pageContent.tracks.isEmpty()) break
                     pageContent.tracks.forEach { allTracks[it.videoId] = it }
@@ -431,9 +445,6 @@ class DiscoveryRepository(
                         thumbnailUrl = t.thumbnailUrl ?: header?.thumbnailUrl
                     )
                 })
-            }
-            if (browseId == "VLLM") synchronized(accountCacheLock) {
-                if (accountGeneration.get() == accountVersion) onLikedSongsLoaded(content.tracks.map { it.videoId })
             }
             content
         }

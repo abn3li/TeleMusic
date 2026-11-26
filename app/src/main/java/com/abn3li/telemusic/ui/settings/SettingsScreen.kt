@@ -62,6 +62,7 @@ import androidx.compose.material.icons.rounded.LibraryMusic
 import androidx.compose.material.icons.rounded.Movie
 import androidx.compose.material.icons.rounded.Lyrics
 import androidx.compose.material.icons.rounded.SdStorage
+import androidx.compose.material.icons.rounded.Sync
 import androidx.compose.material.icons.rounded.SystemUpdate
 import androidx.compose.material.icons.rounded.Wallpaper
 import androidx.compose.material.icons.rounded.VpnKey
@@ -323,6 +324,8 @@ fun SettingsScreen(
                     onSignIn = onSpotifySignIn,
                     onHelp = { uriHandler.openUri("https://developer.spotify.com/dashboard") }
                 )
+                GroupDivider(start = 57.dp)
+                SectionRow("Sync", Icons.Rounded.Sync, TilePurple) { openPage(SettingsPage.SYNC) }
             }
         }
 
@@ -388,6 +391,7 @@ fun SettingsScreen(
                     }
                 }
             }
+            SettingsPage.SYNC -> SyncPage(app, onBack = ::closePage, onSignIn = onYouTubeSignIn)
             SettingsPage.APPEARANCE -> LargeTitleList(title = "Appearance", onBack = ::closePage, grouped = true) {
                 item("theme") {
                     GroupHeader("Theme")
@@ -868,7 +872,7 @@ private fun LinkRow(title: String, value: String, icon: androidx.compose.ui.grap
 /** Pages opened over Settings, each its own large-title list. */
 private enum class SettingsPage {
     // Sections, opened from Settings.
-    HOME, APPEARANCE, PLAYER, LYRICS, AUDIO, BIT_PERFECT, LIBRARY, STORAGE, CONNECTION, ABOUT,
+    SYNC, HOME, APPEARANCE, PLAYER, LYRICS, AUDIO, BIT_PERFECT, LIBRARY, STORAGE, CONNECTION, ABOUT,
     // Lists and accounts, opened from a section or from Settings.
     LYRICS_SOURCES, TRANSLATE_TO, CACHE_LIMIT, DNS, TELEGRAM, SPOTIFY
 }

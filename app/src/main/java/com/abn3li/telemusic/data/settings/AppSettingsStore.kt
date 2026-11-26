@@ -10,6 +10,28 @@ import kotlinx.coroutines.flow.StateFlow
 /** Independent visibility of the original library feed and YouTube recommendations on Home. */
 data class HomeFeeds(val telegram: Boolean = true, val youtube: Boolean = true)
 
+/** Where a new playlist is made. */
+enum class NewPlaylistPlace { ASK, YOUTUBE, PHONE }
+
+/** Who can see a playlist made on YouTube; the names are YouTube's own. */
+enum class PlaylistPrivacy { PRIVATE, UNLISTED, PUBLIC }
+
+/** What's shared with the signed-in YouTube account. Telegram songs are off until asked for. */
+data class SyncSettings(
+    val likes: Boolean = true,
+    val unlikes: Boolean = true,
+    val showPlaylists: Boolean = true,
+    val editPlaylists: Boolean = true,
+    val newPlaylists: NewPlaylistPlace = NewPlaylistPlace.ASK,
+    val privacy: PlaylistPrivacy = PlaylistPrivacy.PRIVATE,
+    val telegramLikes: Boolean = false,
+    val telegramPlaylists: Boolean = false,
+    val askFirst: Boolean = true
+) {
+    /** Playlists that aren't shown can't be changed either. */
+    val playlistsEditable: Boolean get() = showPlaylists && editPlaylists
+}
+
 /** Now Playing visual effects the user can switch off in Settings. */
 data class PlayerEffects(
     val lyricsGlow: Boolean = true,
@@ -326,6 +348,35 @@ class AppSettingsStore(context: Context) {
         prefs.edit().putBoolean(KEY_HOME_TELEGRAM, updated.telegram)
             .putBoolean(KEY_HOME_YOUTUBE, updated.youtube).apply()
         _homeFeeds.value = updated
+    }
+
+    private val _sync = MutableStateFlow(SyncSettings().let { base ->
+        SyncSettings(
+            likes = prefs.getBoolean("sync_likes", base.likes),
+            unlikes = prefs.getBoolean("sync_unlikes", base.unlikes),
+            showPlaylists = prefs.getBoolean("sync_show_playlists", base.showPlaylists),
+            editPlaylists = prefs.getBoolean("sync_edit_playlists", base.editPlaylists),
+            newPlaylists = runCatching { NewPlaylistPlace.valueOf(prefs.getString("sync_new_playlists", null).orEmpty()) }.getOrDefault(base.newPlaylists),
+            privacy = runCatching { PlaylistPrivacy.valueOf(prefs.getString("sync_playlist_privacy", null).orEmpty()) }.getOrDefault(base.privacy),
+            telegramLikes = prefs.getBoolean("sync_telegram_likes", base.telegramLikes),
+            telegramPlaylists = prefs.getBoolean("sync_telegram_playlists", base.telegramPlaylists),
+            askFirst = prefs.getBoolean("sync_ask_first", base.askFirst)
+        )
+    })
+    val sync: StateFlow<SyncSettings> = _sync
+
+    fun updateSync(transform: (SyncSettings) -> SyncSettings) {
+        val updated = transform(_sync.value)
+        prefs.edit().putBoolean("sync_likes", updated.likes)
+            .putBoolean("sync_unlikes", updated.unlikes)
+            .putBoolean("sync_show_playlists", updated.showPlaylists)
+            .putBoolean("sync_edit_playlists", updated.editPlaylists)
+            .putString("sync_new_playlists", updated.newPlaylists.name)
+            .putString("sync_playlist_privacy", updated.privacy.name)
+            .putBoolean("sync_telegram_likes", updated.telegramLikes)
+            .putBoolean("sync_telegram_playlists", updated.telegramPlaylists)
+            .putBoolean("sync_ask_first", updated.askFirst).apply()
+        _sync.value = updated
     }
 
     // What was last searched for, newest first; Search shows them while its field is empty.

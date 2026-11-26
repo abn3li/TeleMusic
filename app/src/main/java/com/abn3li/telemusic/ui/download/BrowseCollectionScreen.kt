@@ -157,6 +157,9 @@ fun BrowseCollectionScreen(
     var chooseImport by remember { mutableStateOf(false) }
     val progress = state.importProgress
     val imported = state.importedPlaylistId != null || state.importedAsAlbum
+    val canEdit = app.settingsStore.sync.collectAsState().value.playlistsEditable
+    val removeTrack = remember(viewModel, canEdit) { if (canEdit) { track: BrowseTrack -> viewModel.removeFromPlaylist(track, app.youtubeLibrary) } else null }
+    androidx.compose.runtime.CompositionLocalProvider(LocalRemoveFromYouTubePlaylist provides removeTrack) {
     ArtistHeroLayout(
         name = pageTitle,
         photoUrl = cover,
@@ -218,6 +221,7 @@ fun BrowseCollectionScreen(
             }
         }
         trackRows(tracks, state, onPlayTracks, onPlayNext, onDownload)
+    }
     }
     if (chooseImport) AppAlert(
         title = "Import to Library",

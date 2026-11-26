@@ -80,6 +80,10 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.Stable
+import androidx.compose.runtime.collectAsState
+import com.abn3li.telemusic.data.settings.NewPlaylistPlace
+import com.abn3li.telemusic.data.settings.PlaylistPrivacy
+import com.abn3li.telemusic.data.youtube.PlaylistSong
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
@@ -553,7 +557,9 @@ private fun SongContextCard(
                     },
                     onCreate = { name ->
                         onAction { actions.onCreatePlaylistAndAdd(name, song); onToast("Added to $name") }
-                    }
+                    },
+                    songs = listOf(song),
+                    onAction = onAction
                 )
             }
             CardDivider()
@@ -561,7 +567,6 @@ private fun SongContextCard(
                 if (song.isFavorite) "Remove from Favorites" else "Add to Favorites",
                 if (song.isFavorite) Icons.Rounded.Star else Icons.Rounded.StarBorder
             ) { onAction { actions.onToggleFavorite(song) } }
-            YouTubeLikeMenuItem(song.youtubeVideoId, onAction)
             if (!isRealLocalImport) {
                 CardDivider()
                 val downloading = song.telegramMessageId in actions.downloadingIds
@@ -648,10 +653,42 @@ internal fun CardDivider() {
     Spacer(Modifier.fillMaxWidth().height(0.5.dp).background(ink.copy(alpha = 0.08f)))
 }
 
+internal fun NewPlaylistPlace.youtube(chosen: Boolean): Boolean = when (this) {
+    NewPlaylistPlace.ASK -> chosen
+    NewPlaylistPlace.YOUTUBE -> true
+    NewPlaylistPlace.PHONE -> false
+}
+
+internal val PlaylistPrivacy.note: String get() = when (this) {
+    PlaylistPrivacy.PRIVATE -> "In your YouTube account, only you can see it"
+    PlaylistPrivacy.UNLISTED -> "In your YouTube account, anyone with the link can see it"
+    PlaylistPrivacy.PUBLIC -> "In your YouTube account, everyone can see it"
+}
+
 @Composable
-internal fun PlaylistPicker(playlists: List<PlaylistEntity>, onPick: (PlaylistEntity) -> Unit, onCreate: (String) -> Unit, standalone: Boolean = false) {
+internal fun PlaylistPicker(playlists: List<PlaylistEntity>, onPick: (PlaylistEntity) -> Unit, onCreate: (String) -> Unit, standalone: Boolean = false,
+    // The songs being added: signed in, they can go to the account's playlists too when every one
+    // of them can be on YouTube. [onAction] closes the menu around its choice.
+    youtubeIds: List<String> = emptyList(), songs: List<SongEntity> = emptyList(), onAction: (() -> Unit) -> Unit = { it() }) {
     var creating by remember { mutableStateOf(false) }
     var name by remember { mutableStateOf("") }
+    val app = androidx.compose.ui.platform.LocalContext.current.applicationContext as com.abn3li.telemusic.TgMusicApp
+    val account by app.youtubeAccount.state.collectAsState()
+    val sync by app.settingsStore.sync.collectAsState()
+    val forYouTube = youtubeIds.map { PlaylistSong(it) } + songs.mapNotNull { song ->
+        val id = song.youtubeVideoId?.takeIf { it.isNotBlank() }
+        when {
+            id != null -> PlaylistSong(id)
+            song.telegramFileId != 0 && sync.telegramPlaylists -> PlaylistSong(null, song)
+            else -> null
+        }
+    }
+    val youtube = account.signedIn && sync.playlistsEditable && forYouTube.isNotEmpty() && forYouTube.size == youtubeIds.size + songs.size
+    var chosenYouTube by remember { mutableStateOf(true) }
+    val toYouTube = youtube && sync.newPlaylists.youtube(chosenYouTube)
+    val known by app.youtubeLibrary.playlists.collectAsState()
+    val youtubePlaylists = if (youtube) known?.takeIf { it.first == account.sessionId }?.second.orEmpty() else emptyList()
+    if (youtube) LaunchedEffect(account.sessionId) { app.youtubeLibrary.refreshPlaylists(forYouTube.firstNotNullOfOrNull { it.videoId }) }
     Column(Modifier.fillMaxWidth().background(if (standalone) Color.Transparent else ink.copy(alpha = 0.04f))) {
         if (creating) {
             Row(
@@ -678,9 +715,13 @@ internal fun PlaylistPicker(playlists: List<PlaylistEntity>, onPick: (PlaylistEn
                     color = if (name.isNotBlank()) AppAccent else ink.copy(alpha = 0.3f),
                     fontSize = 12.sp,
                     fontWeight = FontWeight.SemiBold,
-                    modifier = Modifier.clickable(enabled = name.isNotBlank()) { onCreate(name.trim()) }
+                    modifier = Modifier.clickable(enabled = name.isNotBlank()) {
+                        val title = name.trim()
+                        if (toYouTube) onAction { app.youtubeLibrary.create(title, forYouTube) } else onCreate(title)
+                    }
                 )
             }
+            if (youtube && sync.newPlaylists == NewPlaylistPlace.ASK) PlaylistPlaceChoice(chosenYouTube, { chosenYouTube = it }, Modifier.padding(horizontal = 16.dp).padding(bottom = 8.dp))
         } else {
             Row(
                 Modifier.fillMaxWidth().height(if (standalone) 50.dp else 36.dp).clickable { creating = true }.padding(horizontal = 19.dp),
@@ -690,7 +731,14 @@ internal fun PlaylistPicker(playlists: List<PlaylistEntity>, onPick: (PlaylistEn
                 Icon(Icons.Rounded.Add, null, tint = AppAccent, modifier = Modifier.size(if (standalone) 20.dp else 16.dp))
             }
         }
-        if (playlists.isEmpty() && !creating) {
+        if (youtubePlaylists.isNotEmpty()) {
+            PickerGroupLabel("YouTube", standalone)
+            youtubePlaylists.forEach { playlist ->
+                PickerRow(playlist.title, standalone) { onAction { app.youtubeLibrary.add(playlist, forYouTube) } }
+            }
+            if (playlists.isNotEmpty()) PickerGroupLabel("On this phone", standalone)
+        }
+        if (playlists.isEmpty() && youtubePlaylists.isEmpty() && !creating) {
             if (standalone) {
                 Column(Modifier.fillMaxWidth().padding(horizontal = 19.dp, vertical = 16.dp),
                     horizontalAlignment = Alignment.CenterHorizontally,
@@ -703,14 +751,25 @@ internal fun PlaylistPicker(playlists: List<PlaylistEntity>, onPick: (PlaylistEn
             }
         }
         playlists.forEach { playlist ->
-            Row(
-                Modifier.fillMaxWidth().height(if (standalone) 50.dp else 36.dp).clickable { onPick(playlist) }.padding(horizontal = 19.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(playlist.name, color = ink, fontSize = if (standalone) 15.sp else 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            }
+            PickerRow(playlist.name, standalone) { onPick(playlist) }
         }
     }
+}
+
+@Composable
+private fun PickerRow(label: String, standalone: Boolean, onClick: () -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().height(if (standalone) 50.dp else 36.dp).clickable(onClick = onClick).padding(horizontal = 19.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(label, color = ink, fontSize = if (standalone) 15.sp else 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+    }
+}
+
+@Composable
+private fun PickerGroupLabel(label: String, standalone: Boolean) {
+    Text(label, color = ink.copy(alpha = 0.5f), fontSize = if (standalone) 12.sp else 11.sp, maxLines = 1,
+        modifier = Modifier.padding(start = 19.dp, end = 19.dp, top = 6.dp, bottom = 4.dp))
 }
 
 /** Find Artwork's two steps: the covers for a title/artist, then saving the one picked. */

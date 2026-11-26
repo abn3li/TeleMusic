@@ -24,6 +24,9 @@ internal class HomeFeedCache<T>(private val now: () -> Long) {
         loadedAt = null
     }
 
+    /** Changes what's kept without making it any fresher. */
+    fun update(change: (T) -> T) = synchronized(this) { cached = cached?.let(change) }
+
     suspend fun getOrLoad(force: Boolean = false, load: suspend () -> T?): T? = loadMutex.withLock {
         val version = synchronized(this) { generation }
         if (!force && !isStale()) value?.let { return@withLock it }
