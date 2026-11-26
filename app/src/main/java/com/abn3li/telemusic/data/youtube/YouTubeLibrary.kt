@@ -11,6 +11,7 @@ import com.abn3li.telemusic.data.browse.BrowseKind
 import com.abn3li.telemusic.data.browse.BrowseTrack
 import com.abn3li.telemusic.data.browse.InnertubeBrowseClient
 import com.abn3li.telemusic.data.local.SongEntity
+import com.abn3li.telemusic.data.settings.PlaylistPrivacy
 import com.abn3li.telemusic.data.remote.Internet
 import com.abn3li.telemusic.data.remote.internet
 import kotlinx.coroutines.CancellationException
@@ -351,6 +352,56 @@ class YouTubeLibrary internal constructor(private val app: TgMusicApp, private v
                 failed
             }
             message?.let { say(it) }
+        }
+    }
+
+    // ---- A whole playlist ----
+
+    /** Saves [playlist] (someone else's) in the account's library, or takes it out. True once done. */
+    suspend fun setSaved(playlist: BrowseCollection, saved: Boolean): Boolean = playlistChange(
+        if (saved) "Saved to your YouTube library" else "Removed from your YouTube library", "Couldn't change your YouTube library"
+    ) { session ->
+        client(session).setPlaylistSaved(playlist.browseId.removePrefix("VL"), saved)
+        if (saved) app.discoveryRepository.accountPlaylistAdded(session, playlist)
+        else app.discoveryRepository.accountPlaylistRemoved(session, playlist.browseId)
+    }
+
+    suspend fun rename(browseId: String, title: String): Boolean = playlistChange("Renamed to $title", "Couldn't rename it on YouTube") { session ->
+        val id = browseId.removePrefix("VL")
+        client(session).renamePlaylist(id, title)
+        app.discoveryRepository.accountPlaylistRenamed(session, browseId, title)
+        _playlists.value?.takeIf { it.first == session }?.let { (s, list) ->
+            _playlists.value = s to list.map { if (it.id == id) it.copy(title = title) else it }
+        }
+    }
+
+    suspend fun setPrivacy(browseId: String, privacy: PlaylistPrivacy): Boolean = playlistChange(
+        when (privacy) {
+            PlaylistPrivacy.PRIVATE -> "Only you can see it now"
+            PlaylistPrivacy.UNLISTED -> "Anyone with the link can see it now"
+            PlaylistPrivacy.PUBLIC -> "Everyone can see it now"
+        }, "Couldn't change who can see it"
+    ) { session -> client(session).setPlaylistPrivacy(browseId.removePrefix("VL"), privacy) }
+
+    suspend fun delete(browseId: String): Boolean = playlistChange("Deleted from YouTube", "Couldn't delete it on YouTube") { session ->
+        val id = browseId.removePrefix("VL")
+        client(session).deletePlaylist(id)
+        app.discoveryRepository.accountPlaylistRemoved(session, browseId)
+        _playlists.value?.takeIf { it.first == session }?.let { (s, list) -> _playlists.value = s to list.filterNot { it.id == id } }
+    }
+
+    private suspend fun playlistChange(done: String, failed: String, work: (String) -> Unit): Boolean {
+        val session = session ?: return false
+        return try {
+            withContext(Dispatchers.IO) { work(session) }
+            say(done)
+            true
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            android.util.Log.w(TAG, "playlist not changed: ${e.message}")
+            say(failed)
+            false
         }
     }
 

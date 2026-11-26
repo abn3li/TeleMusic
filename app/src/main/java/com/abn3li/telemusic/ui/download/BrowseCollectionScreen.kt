@@ -1,5 +1,18 @@
 package com.abn3li.telemusic.ui.download
 
+import com.abn3li.telemusic.ui.library.LibrarySortMenu
+import com.abn3li.telemusic.ui.library.LibrarySubmenu
+import com.abn3li.telemusic.ui.library.LibraryMenuItem
+import com.abn3li.telemusic.ui.library.LibraryMenuDivider
+import com.abn3li.telemusic.ui.library.LibraryMenuGroupGap
+import com.abn3li.telemusic.ui.library.AlertTextField
+import com.abn3li.telemusic.ui.library.label
+import androidx.compose.material.icons.rounded.Edit
+import androidx.compose.material.icons.rounded.Bookmark
+import androidx.compose.material.icons.rounded.BookmarkBorder
+import androidx.compose.material.icons.rounded.Link
+import androidx.compose.material.icons.rounded.Share
+import androidx.compose.material.icons.rounded.Delete
 import com.abn3li.telemusic.ui.theme.LocalPalette
 import com.abn3li.telemusic.ui.theme.paper
 import com.abn3li.telemusic.ui.theme.ink
@@ -146,8 +159,16 @@ fun BrowseCollectionScreen(
     }
 
     val header = state.header
+    val sort = state.sort
+    val tracks = remember(state.tracks, sort) {
+        when (sort) {
+            PlaylistSort.PLAYLIST -> state.tracks
+            PlaylistSort.TITLE -> state.tracks.sortedBy { it.title.lowercase() }
+            PlaylistSort.ARTIST -> state.tracks.sortedWith(compareBy({ it.artist.lowercase() }, { it.title.lowercase() }))
+            PlaylistSort.LENGTH -> state.tracks.sortedBy { it.durationSeconds }
+        }
+    }
     val isAlbum = header?.subtitle?.let { it.startsWith("Album") || it.startsWith("Single") || it.startsWith("EP") } == true
-    val tracks = state.tracks
     val cover = header?.thumbnailUrl
         ?: googleArtworkAtSize(tracks.firstOrNull { !it.thumbnailUrl.isNullOrEmpty() }?.thumbnailUrl, FULL_ARTWORK_SIZE)
     val artistName = header?.artist
@@ -158,6 +179,19 @@ fun BrowseCollectionScreen(
     val progress = state.importProgress
     val imported = state.importedPlaylistId != null || state.importedAsAlbum
     val canEdit = app.settingsStore.sync.collectAsState().value.playlistsEditable
+    val signedIn = app.youtubeAccount.state.collectAsState().value.signedIn
+    // The account's own playlist can be changed; someone else's can be saved in its library.
+    val account = state.account?.takeIf { signedIn && canEdit }
+    // Liked Songs and Episodes for Later are YouTube's own lists: never renamed, deleted or saved.
+    val builtIn = browseId == "VLLM" || browseId == "VLSE"
+    val own = account?.own == true && !builtIn
+    val savable = account != null && !own && !builtIn && account.saved != null
+    val playlistPage = browseId.startsWith("VL")
+    var renaming by remember { mutableStateOf<String?>(null) }
+    var confirmDelete by remember { mutableStateOf(false) }
+    val context = LocalContext.current
+    val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
+    val link = "https://music.youtube.com/playlist?list=${android.net.Uri.encode(browseId.removePrefix("VL"))}"
     val removeTrack = remember(viewModel, canEdit) { if (canEdit) { track: BrowseTrack -> viewModel.removeFromPlaylist(track, app.youtubeLibrary) } else null }
     androidx.compose.runtime.CompositionLocalProvider(LocalRemoveFromYouTubePlaylist provides removeTrack) {
     ArtistHeroLayout(
@@ -190,7 +224,60 @@ fun BrowseCollectionScreen(
                 if (isAlbum) chooseImport = true else viewModel.importToLibrary()
             }
         },
-        searchHint = "Search in $pageTitle"
+        searchHint = "Search in $pageTitle",
+        // Import is in the menu there.
+        searchBesidePlay = playlistPage,
+        menu = if (!playlistPage) null else { close ->
+            LibrarySortMenu(sort.label, gapBefore = false) {
+                PlaylistSort.entries.forEachIndexed { index, option ->
+                    if (index > 0) LibraryMenuDivider()
+                    LibraryMenuItem(option.label, null, checked = sort == option) { viewModel.setSort(option); close() }
+                }
+            }
+            LibraryMenuGroupGap()
+            if (own) {
+                LibraryMenuItem("Rename", Icons.Rounded.Edit) { renaming = pageTitle; close() }
+                LibraryMenuDivider()
+                val privacy = account?.privacy
+                LibrarySubmenu("Who Can See It", privacy?.label ?: "", gapBefore = false) {
+                    com.abn3li.telemusic.data.settings.PlaylistPrivacy.entries.forEachIndexed { index, option ->
+                        if (index > 0) LibraryMenuDivider()
+                        LibraryMenuItem(option.label, null, checked = privacy == option) {
+                            if (privacy != option) viewModel.setPrivacy(option, app.youtubeLibrary)
+                            close()
+                        }
+                    }
+                }
+                LibraryMenuDivider()
+            }
+            if (savable) {
+                val saved = account?.saved == true
+                LibraryMenuItem(if (saved) "Remove from YouTube Library" else "Save to YouTube Library",
+                    if (saved) Icons.Rounded.Bookmark else Icons.Rounded.BookmarkBorder) { viewModel.setSaved(!saved, app.youtubeLibrary); close() }
+                LibraryMenuDivider()
+            }
+            LibraryMenuItem(if (imported) "Imported to App Library" else "Import to App Library", Icons.Rounded.LibraryAdd,
+                enabled = !imported && progress == null && tracks.isNotEmpty()) { viewModel.importToLibrary(); close() }
+            LibraryMenuDivider()
+            LibraryMenuItem("Copy Link", Icons.Rounded.Link) {
+                clipboard.setText(androidx.compose.ui.text.AnnotatedString(link))
+                android.widget.Toast.makeText(context, "Link copied", android.widget.Toast.LENGTH_SHORT).show()
+                close()
+            }
+            LibraryMenuDivider()
+            LibraryMenuItem("Share", Icons.Rounded.Share) {
+                close()
+                runCatching {
+                    context.startActivity(android.content.Intent.createChooser(android.content.Intent(android.content.Intent.ACTION_SEND)
+                        .setType("text/plain").putExtra(android.content.Intent.EXTRA_TEXT, link), pageTitle)
+                        .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
+                }
+            }
+            if (own) {
+                LibraryMenuGroupGap()
+                LibraryMenuItem("Delete Playlist", Icons.Rounded.Delete, destructive = true) { confirmDelete = true; close() }
+            }
+        }
     ) { searching, query ->
         if (searching) {
             val found = if (query.isBlank()) tracks else tracks.filter { it.title.contains(query, true) || it.artist.contains(query, true) }
@@ -223,6 +310,28 @@ fun BrowseCollectionScreen(
         trackRows(tracks, state, onPlayTracks, onPlayNext, onDownload)
     }
     }
+    renaming?.let { name ->
+        AppAlert(
+            title = "Rename Playlist",
+            message = "The new name shows on YouTube too.",
+            onDismiss = { renaming = null },
+            actions = listOf(
+                AlertAction("Cancel") { renaming = null },
+                AlertAction("Save", bold = true, enabled = name.isNotBlank() && name.trim() != pageTitle) {
+                    viewModel.rename(name.trim(), app.youtubeLibrary); renaming = null
+                }
+            )
+        ) { AlertTextField(name, { renaming = it }, "Playlist name") }
+    }
+    if (confirmDelete) AppAlert(
+        title = "Delete \"$pageTitle\"?",
+        message = "It's deleted from your YouTube account. Your songs stay in the app.",
+        onDismiss = { confirmDelete = false },
+        actions = listOf(
+            AlertAction("Cancel") { confirmDelete = false },
+            AlertAction("Delete", bold = true, destructive = true) { confirmDelete = false; viewModel.delete(app.youtubeLibrary, onBack) }
+        )
+    )
     if (chooseImport) AppAlert(
         title = "Import to Library",
         message = "Save \"$pageTitle\" as an album, or as a playlist.",

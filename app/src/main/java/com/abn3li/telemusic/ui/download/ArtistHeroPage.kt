@@ -194,6 +194,8 @@ internal fun ArtistHeroLayout(
     pillPlay: Boolean = false,
     trailing: (@Composable () -> Unit)? = null,
     searchHint: String? = null,
+    // Search as the round button beside Play, in place of [trailing] and of the top bar's.
+    searchBesidePlay: Boolean = false,
     menu: (@Composable ColumnScope.(close: () -> Unit) -> Unit)? = null,
     body: LazyListScope.(searching: Boolean, query: String) -> Unit
 ) {
@@ -361,7 +363,11 @@ internal fun ArtistHeroLayout(
                                     Icon(Icons.Rounded.PlayArrow, "Play", tint = tint, modifier = Modifier.size(46.dp))
                                 }
                             }
-                            if (trailing != null) trailing()
+                            if (searchBesidePlay && searchHint != null) RoundGlassButton(Icons.Rounded.Search, "Search", enabled = true) {
+                                searching = true
+                                scope.launch { listState.scrollToItem(0) }
+                            }
+                            else if (trailing != null) trailing()
                             else RoundGlassButton(Icons.AutoMirrored.Rounded.QueueMusic, "All songs", enabled = onAllSongs != null) {
                                 onAllSongs?.invoke()
                             }
@@ -397,7 +403,7 @@ internal fun ArtistHeroLayout(
                     Spacer(Modifier.weight(1f))
                     if (!searching) Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                         if (onShare != null) BarButton(Icons.Rounded.Share, "Share", { collapse }, onClick = onShare)
-                        if (searchHint != null) BarButton(Icons.Rounded.Search, "Search", { collapse }) {
+                        if (searchHint != null && !searchBesidePlay) BarButton(Icons.Rounded.Search, "Search", { collapse }) {
                             searching = true
                             scope.launch { listState.scrollToItem(0) }
                         }

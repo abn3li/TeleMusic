@@ -53,7 +53,17 @@ data class BrowseContent(
     val tracks: List<BrowseTrack> = emptyList(),
     val collections: List<BrowseCollection> = emptyList(),
     val header: CollectionHeader? = null,
-    val artist: ArtistPage? = null
+    val artist: ArtistPage? = null,
+    // A playlist's place in the signed-in account; null on other pages, or when signed out.
+    val account: PlaylistAccount? = null
+)
+
+/** Whether a playlist is the account's own ([privacy] then says who can see it), and whether
+ * someone else's is saved in its library ([saved] null when the page doesn't say). */
+data class PlaylistAccount(
+    val own: Boolean,
+    val saved: Boolean?,
+    val privacy: com.abn3li.telemusic.data.settings.PlaylistPrivacy?
 )
 
 /** An album's or playlist's title block: "Night Drive", "Album • 2024", by [artist],

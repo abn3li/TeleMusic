@@ -629,6 +629,29 @@ object BrowseParser {
         return found
     }
 
+    /** A playlist page's place in the signed-in account (see [PlaylistAccount]). */
+    fun parsePlaylistAccount(response: JSONObject): PlaylistAccount {
+        val own = collectRenderers(response, "musicEditablePlaylistDetailHeaderRenderer").isNotEmpty()
+        val privacy = collectRenderers(response, "musicPlaylistEditHeaderRenderer").firstOrNull()?.optString("privacy")
+            ?.let { name -> runCatching { com.abn3li.telemusic.data.settings.PlaylistPrivacy.valueOf(name) }.getOrNull() }
+        val header = collectRenderers(response, "musicResponsiveHeaderRenderer").firstOrNull()
+            ?: collectRenderers(response, "musicDetailHeaderRenderer").firstOrNull()
+        // The header's Save button: on when it's saved. Older pages say it with the menu's
+        // like action instead, which names what a tap would do.
+        val saved = header?.let { h ->
+            collectRenderers(h, "toggleButtonRenderer").firstOrNull { it.opt("defaultServiceEndpoint").obj()?.has("likeEndpoint") == true }
+                ?.optBoolean("isToggled")
+                ?: collectRenderers(h, "toggleMenuServiceItemRenderer").firstNotNullOfOrNull { toggle ->
+                    when (toggle.opt("defaultServiceEndpoint").obj()?.opt("likeEndpoint").obj()?.optString("status")) {
+                        "LIKE" -> false
+                        "INDIFFERENT" -> true
+                        else -> null
+                    }
+                }
+        }
+        return PlaylistAccount(own, if (own) null else saved, privacy)
+    }
+
     /** The part of a playlist's page (or of its next page) that holds the playlist's own songs:
      * the account's own playlists also carry songs YouTube suggests adding. Null when the page
      * isn't built that way. */

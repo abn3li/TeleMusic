@@ -20,6 +20,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.async
 import kotlinx.coroutines.launch
 import java.io.File
 
@@ -31,6 +32,10 @@ data class BrowseCollectionUiState(
     // An album's or playlist's own title block, and an artist's whole page - see BrowseContent.
     val header: CollectionHeader? = null,
     val artist: ArtistPage? = null,
+    // A playlist's place in the signed-in account (its own, or saved) - see PlaylistAccount.
+    val account: com.abn3li.telemusic.data.browse.PlaylistAccount? = null,
+    // How the songs are listed here; YouTube keeps its own order.
+    val sort: PlaylistSort = PlaylistSort.PLAYLIST,
     val errorMessage: String? = null,
     val downloadingIds: Set<String> = emptySet(),
     val downloadedIds: Set<String> = emptySet(),
@@ -48,6 +53,9 @@ data class BrowseCollectionUiState(
     // A tapped download waiting for a yes: the song is already in the library in better quality.
     val downloadConflict: DownloadConflict? = null
 )
+
+/** How a YouTube playlist's songs are listed here. */
+enum class PlaylistSort(val label: String) { PLAYLIST("Playlist order"), TITLE("Title"), ARTIST("Artist"), LENGTH("Length") }
 
 /** Backs a single browse destination - a playlist's, chart's, or artist's own page reached by
  * tapping a Discovery card. Shares the exact same folder-prompt flow the search screen uses (see
@@ -79,6 +87,7 @@ class BrowseCollectionViewModel(
                     collections = content.collections,
                     header = content.header,
                     artist = content.artist,
+                    account = content.account,
                     // Not "check your connection" - the request almost always succeeds fine
                     // (see DiscoveryRepository.browse's own diagnostic logging); an empty result
                     // here is far more often the page genuinely having nothing playable, or a
@@ -123,6 +132,43 @@ class BrowseCollectionViewModel(
                 state.copy(tracks = state.tracks.toMutableList().apply { add(index.coerceAtMost(size), track) })
             }
         }
+    }
+
+    fun setSort(sort: PlaylistSort) = _uiState.update { it.copy(sort = sort) }
+
+    /** Someone else's playlist saved in the account's library, or taken out: shown at once, back if it fails. */
+    fun setSaved(saved: Boolean, library: com.abn3li.telemusic.data.youtube.YouTubeLibrary) {
+        val state = _uiState.value
+        val account = state.account ?: return
+        val playlist = BrowseCollection(browseId, params, state.header?.title ?: state.title, state.header?.subtitle,
+            state.header?.thumbnailUrl ?: state.tracks.firstOrNull()?.thumbnailUrl, com.abn3li.telemusic.data.browse.BrowseKind.PLAYLIST)
+        _uiState.update { it.copy(account = account.copy(saved = saved)) }
+        workScope.launch {
+            if (!library.setSaved(playlist, saved)) _uiState.update { it.copy(account = it.account?.copy(saved = !saved)) }
+        }
+    }
+
+    fun rename(title: String, library: com.abn3li.telemusic.data.youtube.YouTubeLibrary) {
+        val old = _uiState.value.header ?: return
+        _uiState.update { it.copy(header = old.copy(title = title)) }
+        workScope.launch {
+            if (!library.rename(browseId, title)) _uiState.update { it.copy(header = it.header?.copy(title = old.title)) }
+        }
+    }
+
+    fun setPrivacy(privacy: com.abn3li.telemusic.data.settings.PlaylistPrivacy, library: com.abn3li.telemusic.data.youtube.YouTubeLibrary) {
+        val account = _uiState.value.account ?: return
+        _uiState.update { it.copy(account = account.copy(privacy = privacy)) }
+        workScope.launch {
+            if (!library.setPrivacy(browseId, privacy)) _uiState.update { it.copy(account = it.account?.copy(privacy = account.privacy)) }
+        }
+    }
+
+    /** Finishes even if the page is left meanwhile; [onDeleted] (on the main thread) only while
+     * it's still open. */
+    fun delete(library: com.abn3li.telemusic.data.youtube.YouTubeLibrary, onDeleted: () -> Unit) {
+        val deleting = workScope.async { library.delete(browseId) }
+        viewModelScope.launch { if (deleting.await()) onDeleted() }
     }
 
     fun dismissDownloadConflict() {

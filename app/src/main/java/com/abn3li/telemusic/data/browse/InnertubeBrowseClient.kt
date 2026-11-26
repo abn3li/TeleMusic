@@ -79,6 +79,27 @@ class InnertubeBrowseClient(
         JSONObject().put("action", "ACTION_REMOVE_VIDEO").put("removedVideoId", videoId).put("setVideoId", setVideoId)
     ))
 
+    /** Saves someone else's playlist in the account's library, or takes it out. */
+    internal fun setPlaylistSaved(playlistId: String, saved: Boolean) {
+        val headers = checkNotNull(auth()) { "Sign in to YouTube first" }
+        val response = post(if (saved) "like/like" else "like/removelike", JSONObject().put("target", JSONObject().put("playlistId", playlistId)), headers)
+        check(!response.has("error")) { "YouTube didn't change the library" }
+    }
+
+    internal fun renamePlaylist(playlistId: String, title: String) = editPlaylist(playlistId, listOf(
+        JSONObject().put("action", "ACTION_SET_PLAYLIST_NAME").put("playlistName", title)
+    ))
+
+    internal fun setPlaylistPrivacy(playlistId: String, privacy: com.abn3li.telemusic.data.settings.PlaylistPrivacy) = editPlaylist(playlistId, listOf(
+        JSONObject().put("action", "ACTION_SET_PLAYLIST_PRIVACY").put("playlistPrivacy", privacy.name)
+    ))
+
+    internal fun deletePlaylist(playlistId: String) {
+        val headers = checkNotNull(auth()) { "Sign in to YouTube first" }
+        val response = post("playlist/delete", JSONObject().put("playlistId", playlistId), headers)
+        check(!response.has("error")) { "YouTube didn't delete the playlist" }
+    }
+
     private fun editPlaylist(playlistId: String, actions: List<JSONObject>) {
         val headers = checkNotNull(auth()) { "Sign in to YouTube first" }
         val response = post("browse/edit_playlist",

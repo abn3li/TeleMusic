@@ -659,6 +659,12 @@ internal fun NewPlaylistPlace.youtube(chosen: Boolean): Boolean = when (this) {
     NewPlaylistPlace.PHONE -> false
 }
 
+internal val PlaylistPrivacy.label: String get() = when (this) {
+    PlaylistPrivacy.PRIVATE -> "Only me"
+    PlaylistPrivacy.UNLISTED -> "With link"
+    PlaylistPrivacy.PUBLIC -> "Everyone"
+}
+
 internal val PlaylistPrivacy.note: String get() = when (this) {
     PlaylistPrivacy.PRIVATE -> "In your YouTube account, only you can see it"
     PlaylistPrivacy.UNLISTED -> "In your YouTube account, anyone with the link can see it"

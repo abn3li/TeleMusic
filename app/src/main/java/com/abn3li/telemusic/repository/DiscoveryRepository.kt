@@ -111,6 +111,19 @@ class DiscoveryRepository(
         _accountPlaylistsChanged.value++
     }
 
+    /** A playlist taken out of the account here (deleted, or no longer saved). */
+    fun accountPlaylistRemoved(sessionId: String, browseId: String) = changeAccountPlaylists(sessionId) { list -> list.filterNot { it.browseId == browseId } }
+
+    /** A playlist renamed here. */
+    fun accountPlaylistRenamed(sessionId: String, browseId: String, title: String) =
+        changeAccountPlaylists(sessionId) { list -> list.map { if (it.browseId == browseId) it.copy(title = title) else it } }
+
+    private fun changeAccountPlaylists(sessionId: String, change: (List<BrowseCollection>) -> List<BrowseCollection>) {
+        accountPlaylistsCache.update(change)
+        accountPlaylistsCache.value?.let { saveAccountPlaylists(sessionId, it) }
+        _accountPlaylistsChanged.value++
+    }
+
     /** The account playlists saved on the phone by the last load for this [sessionId]: Library
      * shows them at once after the app starts, while the fresh list loads. A list saved for
      * another session (signed out, or another account) is never shown, and is deleted. */
@@ -400,6 +413,7 @@ class DiscoveryRepository(
             val isCategory = browseId.startsWith(InnertubeBrowseClient.GENRES_BROWSE_ID)
             val ownSongs = if (browseId.startsWith("VL")) BrowseParser.playlistSongs(raw) else null
             var content = BrowseParser.parseBrowseContent(raw, includeSongCards = isCategory, songs = ownSongs ?: raw)
+            if (browseId.startsWith("VL")) content = content.copy(account = BrowseParser.parsePlaylistAccount(raw))
             if (content.tracks.isEmpty() && content.collections.isEmpty()) {
                 // A real HTTP 200 with a page shape the parser doesn't recognize looks identical
                 // to a genuinely empty page from the outside - this cheap summary (booleans only,
