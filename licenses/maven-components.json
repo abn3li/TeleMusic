@@ -1162,6 +1162,20 @@
     "empty_artifact": true
   },
   {
+    "coordinate": "com.google.zxing:core:3.5.3",
+    "artifact_sha256": "8d8064c1636fdaef7189dd9055c7d59950a8940a12f2293956446ec3c109fd82",
+    "license": "Apache-2.0",
+    "declared_licenses": [
+      "The Apache Software License, Version 2.0"
+    ],
+    "notice": "licenses/maven/com.google.zxing-core-3.5.3.txt",
+    "notice_sha256": "64234a15fee73df586983ddc663dca55b2895ccb2b64cb0b0dccd13d16740b2b",
+    "source_url": "https://repo.maven.apache.org/maven2/com/google/zxing/core/3.5.3/core-3.5.3-sources.jar",
+    "source_sha256": "f983454400d73652ad5236413ba7eba48072e042982a84b10e1468506f4b28ae",
+    "source_file": "build/licensing/sources/com.google.zxing-core-3.5.3-sources.jar",
+    "empty_artifact": false
+  },
+  {
     "coordinate": "com.squareup.okhttp3:logging-interceptor:4.12.0",
     "artifact_sha256": "f3e8d5f0903c250c2b55d2f47fcfe008e80634385da8385161c7a63aaed0c74c",
     "license": "Apache-2.0",

@@ -173,6 +173,7 @@ class TdlibManager(private val context: Context) {
     }
 
     private fun handleAuthState(state: TdApi.AuthorizationState) {
+        logLoginState(state)
         when (state) {
             is TdApi.AuthorizationStateWaitTdlibParameters -> {
                 check(apiId != 0 && apiHash.isNotBlank()) { "TdlibManager.start() called without real credentials" }
@@ -194,13 +195,22 @@ class TdlibManager(private val context: Context) {
                 }
                 client?.send(params) { result ->
                     if (result is TdApi.Error) {
+                        Log.w(LOGIN_TAG, "parameters refused: ${result.code} ${result.message}")
                         _authState.value = TelegramAuthState.Error("TDLib params rejected (${result.code}): ${result.message}")
                     }
                 }
             }
             is TdApi.AuthorizationStateWaitPhoneNumber -> _authState.value = TelegramAuthState.WaitingForPhoneNumber
-            is TdApi.AuthorizationStateWaitCode -> _authState.value = TelegramAuthState.WaitingForCode(describeCodeDelivery(state.codeInfo))
-            is TdApi.AuthorizationStateWaitPassword -> _authState.value = TelegramAuthState.WaitingForPassword
+            is TdApi.AuthorizationStateWaitCode -> _authState.value = waitingForCode(state.codeInfo)
+            is TdApi.AuthorizationStateWaitOtherDeviceConfirmation -> _authState.value = TelegramAuthState.WaitingForQrScan(state.link)
+            is TdApi.AuthorizationStateWaitEmailAddress -> _authState.value = TelegramAuthState.WaitingForEmail
+            is TdApi.AuthorizationStateWaitEmailCode ->
+                _authState.value = TelegramAuthState.WaitingForEmailCode(state.codeInfo?.emailAddressPattern.orEmpty())
+            is TdApi.AuthorizationStateWaitPassword -> _authState.value = TelegramAuthState.WaitingForPassword(state.passwordHint.orEmpty())
+            is TdApi.AuthorizationStateWaitRegistration -> _authState.value = TelegramAuthState.Unsupported(
+                "This number has no Telegram account. Check the number, or make the account in the Telegram app first.")
+            is TdApi.AuthorizationStateWaitPremiumPurchase -> _authState.value = TelegramAuthState.Unsupported(
+                "Telegram asks for a payment to send a code to this number. Sign in to the Telegram app first, then ask for the code here again.")
             is TdApi.AuthorizationStateReady -> {
                 _authState.value = TelegramAuthState.Ready
             }
@@ -215,18 +225,87 @@ class TdlibManager(private val context: Context) {
         }
     }
 
-    private fun describeCodeDelivery(codeInfo: TdApi.AuthenticationCodeInfo): String = when (codeInfo.type) {
-        is TdApi.AuthenticationCodeTypeTelegramMessage ->
-            "Sent as a message inside Telegram on one of your other logged-in devices (look for the \"Telegram\" chat there) - not SMS."
-        is TdApi.AuthenticationCodeTypeSms -> "Sent via SMS to your phone."
-        is TdApi.AuthenticationCodeTypeCall -> "You'll get a phone call reading out the code."
-        is TdApi.AuthenticationCodeTypeFlashCall -> "Check your recent call log - the code is the last digits of the incoming number."
-        else -> "Code sent - check the Telegram app, SMS, or an incoming call."
+    // Login steps and Telegram's answers, for finding out why a code doesn't arrive. Only kinds and
+    // error names: never the number, the code, the password, the email, the QR link or the API id.
+    private fun logLoginState(state: TdApi.AuthorizationState) {
+        val detail = (state as? TdApi.AuthorizationStateWaitCode)?.codeInfo?.let { info ->
+            " sentBy=${info.type?.javaClass?.simpleName} next=${info.nextType?.javaClass?.simpleName} timeout=${info.timeout}s"
+        }.orEmpty()
+        Log.i(LOGIN_TAG, "state ${state.javaClass.simpleName}$detail")
     }
 
-    suspend fun submitPhoneNumber(phone: String) = sendSuspend(TdApi.SetAuthenticationPhoneNumber(phone, null))
-    suspend fun submitCode(code: String) = sendSuspend(TdApi.CheckAuthenticationCode(code))
-    suspend fun submitPassword(password: String) = sendSuspend(TdApi.CheckAuthenticationPassword(password))
+    private suspend fun sendLogin(function: TdApi.Function<*>): TdApi.Object {
+        val name = function.javaClass.simpleName
+        Log.i(LOGIN_TAG, "ask $name (connection ${_connectionState.value})")
+        return try {
+            sendSuspend(function).also { Log.i(LOGIN_TAG, "ok $name") }
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            Log.w(LOGIN_TAG, "no answer to $name")
+            throw e
+        } catch (e: Exception) {
+            // Only numbers of 7 digits and up could be a phone; waits (FLOOD_WAIT) are kept.
+            Log.w(LOGIN_TAG, "refused $name: ${e.message?.replace(Regex("\\d{7,}"), "#")}")
+            throw e
+        }
+    }
+
+    private fun waitingForCode(info: TdApi.AuthenticationCodeInfo): TelegramAuthState {
+        val type = info.type
+        return TelegramAuthState.WaitingForCode(
+            phoneNumber = info.phoneNumber.orEmpty().let { if (it.isBlank() || it.startsWith("+")) it else "+$it" },
+            delivery = describeCodeDelivery(type),
+            nextDelivery = info.nextType?.let { describeCodeDelivery(it) },
+            resendAtMillis = android.os.SystemClock.elapsedRealtime() + info.timeout.coerceAtLeast(0) * 1000L,
+            digits = type !is TdApi.AuthenticationCodeTypeSmsWord && type !is TdApi.AuthenticationCodeTypeSmsPhrase,
+            link = (type as? TdApi.AuthenticationCodeTypeFragment)?.url?.takeIf { it.startsWith("https://") }
+        )
+    }
+
+    private fun describeCodeDelivery(type: TdApi.AuthenticationCodeType): String = when (type) {
+        is TdApi.AuthenticationCodeTypeTelegramMessage ->
+            "a message inside the Telegram app, on a device signed in with this number (the \"Telegram\" chat). Not SMS."
+        is TdApi.AuthenticationCodeTypeSms -> "SMS."
+        is TdApi.AuthenticationCodeTypeSmsWord -> "SMS with a word, starting with \"${type.firstLetter.orEmpty()}\"."
+        is TdApi.AuthenticationCodeTypeSmsPhrase -> "SMS with a phrase, starting with \"${type.firstWord.orEmpty()}\"."
+        is TdApi.AuthenticationCodeTypeCall -> "a phone call that reads the code."
+        is TdApi.AuthenticationCodeTypeFlashCall -> "a short phone call; the code is in the number that calls."
+        is TdApi.AuthenticationCodeTypeMissedCall ->
+            "a missed call from ${type.phoneNumberPrefix.orEmpty()}…; the code is that number's last ${type.length} digits."
+        is TdApi.AuthenticationCodeTypeFragment -> "Fragment, where this number was bought."
+        is TdApi.AuthenticationCodeTypeFirebaseAndroid, is TdApi.AuthenticationCodeTypeFirebaseIos ->
+            "a check only the official Telegram app can do."
+        else -> "a way this app doesn't know (${type.javaClass.simpleName})."
+    }
+
+    suspend fun submitPhoneNumber(phone: String) = sendLogin(TdApi.SetAuthenticationPhoneNumber(phone, null))
+    suspend fun submitCode(code: String) = sendLogin(TdApi.CheckAuthenticationCode(code))
+    suspend fun resendCode() = sendLogin(TdApi.ResendAuthenticationCode(TdApi.ResendCodeReasonUserRequest()))
+    suspend fun requestQr() = sendLogin(TdApi.RequestQrCodeAuthentication(LongArray(0)))
+    suspend fun submitEmail(address: String) = sendLogin(TdApi.SetAuthenticationEmailAddress(address))
+    suspend fun submitEmailCode(code: String) =
+        sendLogin(TdApi.CheckAuthenticationEmailCode(TdApi.EmailAddressAuthenticationCode(code)))
+
+    private val restarting = kotlinx.coroutines.sync.Mutex()
+
+    /** Back from the QR code to the phone number. Telegram keeps making new QR codes for as long
+     * as TDLib waits on one, so TDLib is closed and started again ([start]). Nothing is signed
+     * out: a scan that just went through is simply signed in after the restart. */
+    suspend fun leaveQr(start: () -> Unit) {
+        if (!restarting.tryLock()) return
+        try {
+            val running = client ?: return
+            if (_authState.value !is TelegramAuthState.WaitingForQrScan) return
+            tdlibClosed.value = false
+            running.send(TdApi.Close()) { }
+            // Still open: starting a second one on the same files would fail.
+            withTimeoutOrNull(LOG_OUT_TIMEOUT_MS) { tdlibClosed.first { it } } ?: return
+            start()
+        } finally {
+            restarting.unlock()
+        }
+    }
+
+    suspend fun submitPassword(password: String) = sendLogin(TdApi.CheckAuthenticationPassword(password))
 
     /**
      * Applies MTProto proxy settings directly to TDLib and forces connection via proxy.
@@ -675,6 +754,7 @@ class TdlibManager(private val context: Context) {
     }
 
     private companion object {
+        const val LOGIN_TAG = "TelegramLogin"
         const val LOG_OUT_TIMEOUT_MS = 15_000L
         const val CLOSE_TIMEOUT_MS = 5_000L
     }

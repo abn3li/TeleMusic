@@ -155,6 +155,8 @@ dependencies {
 
     // TDLib itself is vendored in third_party/tdlib; its Java API uses these annotations.
     implementation("androidx.annotation:annotation:1.8.1")
+    // Draws the Telegram sign-in QR code.
+    implementation("com.google.zxing:core:3.5.3")
 }
 
 val licensingInventory = rootProject.layout.buildDirectory.file("licensing/release-components.json")

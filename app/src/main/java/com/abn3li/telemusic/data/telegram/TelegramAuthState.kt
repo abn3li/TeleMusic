@@ -4,8 +4,26 @@ sealed class TelegramAuthState {
     data object LoggedOut : TelegramAuthState()
     data object Connecting : TelegramAuthState()
     data object WaitingForPhoneNumber : TelegramAuthState()
-    data class WaitingForCode(val deliveryDescription: String) : TelegramAuthState()
-    data object WaitingForPassword : TelegramAuthState()
+    /** [delivery] says where the code went, [nextDelivery] how a resend would send it (null when
+     * Telegram offers none), [resendAtMillis] (elapsed time) when one is allowed. */
+    data class WaitingForCode(
+        val phoneNumber: String,
+        val delivery: String,
+        val nextDelivery: String?,
+        val resendAtMillis: Long,
+        val digits: Boolean = true,
+        // Fragment's page, for a number bought there.
+        val link: String? = null
+    ) : TelegramAuthState() {
+        fun secondsUntilResend(): Int =
+            ((resendAtMillis - android.os.SystemClock.elapsedRealtime() + 999) / 1000).coerceAtLeast(0).toInt()
+    }
+    data class WaitingForQrScan(val link: String) : TelegramAuthState()
+    data object WaitingForEmail : TelegramAuthState()
+    data class WaitingForEmailCode(val address: String) : TelegramAuthState()
+    data class WaitingForPassword(val hint: String) : TelegramAuthState()
+    /** A step this app can't do; [message] says what to do instead. */
+    data class Unsupported(val message: String) : TelegramAuthState()
     data object Ready : TelegramAuthState()
     data class Error(val message: String) : TelegramAuthState()
 }

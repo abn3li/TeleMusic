@@ -55,8 +55,19 @@ class SyncViewModel(private val tdlibManager: TdlibManager) : ViewModel() {
         }
     }
 
-    fun submitPhoneNumber(phone: String, onError: (String) -> Unit) =
-        submitLogin(onError) { tdlibManager.submitPhoneNumber(phone) }
+    /** [onSent] runs once Telegram took the number. */
+    fun submitPhoneNumber(phone: String, onSent: () -> Unit, onError: (String) -> Unit) =
+        submitLogin(onError) { tdlibManager.submitPhoneNumber(phone).also { onSent() } }
+
+    fun resendCode(onError: (String) -> Unit) = submitLogin(onError) { tdlibManager.resendCode() }
+
+    fun requestQr(onError: (String) -> Unit) = submitLogin(onError) { tdlibManager.requestQr() }
+
+    fun submitEmail(address: String, onError: (String) -> Unit) =
+        submitLogin(onError) { tdlibManager.submitEmail(address) }
+
+    fun submitEmailCode(code: String, onError: (String) -> Unit) =
+        submitLogin(onError) { tdlibManager.submitEmailCode(code) }
 
     fun submitCode(code: String, onError: (String) -> Unit) =
         submitLogin(onError) { tdlibManager.submitCode(code) }
@@ -80,6 +91,11 @@ class SyncViewModel(private val tdlibManager: TdlibManager) : ViewModel() {
     private fun loginErrorText(error: String): String = when {
         "PHONE_NUMBER_INVALID" in error -> "That phone number isn't valid."
         "PHONE_NUMBER_BANNED" in error -> "Telegram has banned this number."
+        "UPDATE_APP_TO_LOGIN" in error -> "Telegram no longer accepts sign-in from this version of the app."
+        "EMAIL_NOT_ALLOWED" in error -> "Telegram doesn't accept this email."
+        "EMAIL" in error && "INVALID" in error -> "That email or code isn't right."
+        "EMAIL" in error && "EXPIRED" in error -> "That email code has expired."
+        "SEND_CODE_UNAVAILABLE" in error -> "Telegram has no other way to send this code."
         "API_ID" in error -> "Your API ID or hash is wrong."
         "PHONE_CODE_EXPIRED" in error -> "That code has expired. Go back and ask for a new one."
         "PHONE_CODE" in error -> "That code isn't right."

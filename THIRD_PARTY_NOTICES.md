@@ -10,7 +10,7 @@ the complete reviewed notices in Settings > About > Open-source Licenses.
 [licenses/maven-components.json](licenses/maven-components.json) records all 96
 resolved Maven release artifacts, their binary and source hashes, source URLs,
 and preserved notices. These include AndroidX, Media3, Kotlin, coroutines, Coil,
-Retrofit, OkHttp, Okio, Gson, Guava and Tink. Their
+Retrofit, OkHttp, Okio, Gson, Guava, Tink and ZXing. Their
 licenses are Apache-2.0. Individual third-party notices remain in
 [licenses/maven](licenses/maven), including notices found in source and binary
 archives. The full [Apache License 2.0](licenses/Apache-2.0.txt) is also included.

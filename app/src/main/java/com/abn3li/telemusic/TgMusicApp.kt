@@ -149,13 +149,7 @@ class TgMusicApp : Application(), ImageLoaderFactory {
         spotifyDao = db.spotifyDao()
         spotifyImporter = com.abn3li.telemusic.repository.SpotifyImporter(musicRepository, appScope, spotifyAccount, spotifyDao, this)
         if (credentialsStore.hasCredentials()) {
-            tdlibManager.start(
-                apiId = credentialsStore.getApiId(),
-                apiHash = credentialsStore.getApiHash(),
-                initialProxy = settingsStore.proxySettings,
-                dnsResolver = settingsStore.dnsResolver,
-                customDnsIps = settingsStore.customDnsIps
-            )
+            startTelegram()
         }
 
         // One-shot catch-up for songs enriched before the thumbnail cache existed - runs once
@@ -174,6 +168,19 @@ class TgMusicApp : Application(), ImageLoaderFactory {
         appScope.launch { discoveryRepository.preloadGenres() }
         // Widgets show the last played song until something plays (no-op with no widget).
         com.abn3li.telemusic.widget.MusicWidgets.refresh(this)
+    }
+
+    private fun startTelegram() = tdlibManager.start(
+        apiId = credentialsStore.getApiId(),
+        apiHash = credentialsStore.getApiHash(),
+        initialProxy = settingsStore.proxySettings,
+        dnsResolver = settingsStore.dnsResolver,
+        customDnsIps = settingsStore.customDnsIps
+    )
+
+    /** Leaves the Telegram QR code for the phone number; does nothing on any other step. */
+    fun restartTelegramSignIn() {
+        appScope.launch { tdlibManager.leaveQr { startTelegram() } }
     }
 
     /** Readies yt-dlp once, when the app is opened with the YouTube feed on - not for a process

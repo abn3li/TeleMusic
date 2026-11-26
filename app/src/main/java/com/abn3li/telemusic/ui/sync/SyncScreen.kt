@@ -116,6 +116,9 @@ fun SyncScreen(onBack: () -> Unit) {
     // No API ID/hash yet (a new install, or after Log Out): Telegram setup comes first.
     var configured by remember { mutableStateOf(app.credentialsStore.hasCredentials()) }
 
+    // A wrong number typed: back to the number from any later step.
+    var changingNumber by remember { mutableStateOf(false) }
+
     val haptics = LocalHapticFeedback.current
     val swipeThresholdPx = with(LocalDensity.current) { 72.dp.toPx() }
     val currentFilter by rememberUpdatedState(state.filter)
@@ -188,12 +191,27 @@ fun SyncScreen(onBack: () -> Unit) {
         if (!configured) {
             item("setup") { TelegramSetupStep(onStarted = { configured = true }) }
         } else when (val auth = state.authState) {
-            TelegramAuthState.WaitingForPhoneNumber -> item("phone") { PhoneStep(viewModel, connection) }
-            is TelegramAuthState.WaitingForCode -> item("code") {
+            TelegramAuthState.WaitingForPhoneNumber -> item("phone") { PhoneStep(viewModel, connection) { changingNumber = false } }
+            is TelegramAuthState.WaitingForCode ->
+                if (changingNumber) item("phone") { PhoneStep(viewModel, connection) { changingNumber = false } }
+                else item("code") {
+                    ConnectionStatus(connection)
+                    CodeStep(viewModel, auth) { changingNumber = true }
+                }
+            is TelegramAuthState.WaitingForQrScan -> item("qr") {
                 ConnectionStatus(connection)
-                CodeStep(viewModel, auth.deliveryDescription)
+                QrStep(auth.link)
             }
-            TelegramAuthState.WaitingForPassword -> item("password") { PasswordStep(viewModel) }
+            TelegramAuthState.WaitingForEmail ->
+                if (changingNumber) item("phone") { PhoneStep(viewModel, connection) { changingNumber = false } }
+                else item("email") { EmailStep(viewModel) { changingNumber = true } }
+            is TelegramAuthState.WaitingForEmailCode ->
+                if (changingNumber) item("phone") { PhoneStep(viewModel, connection) { changingNumber = false } }
+                else item("email_code") { EmailCodeStep(viewModel, auth.address) { changingNumber = true } }
+            is TelegramAuthState.Unsupported ->
+                if (changingNumber) item("phone") { PhoneStep(viewModel, connection) { changingNumber = false } }
+                else item("unsupported") { UnsupportedStep(auth.message) { changingNumber = true } }
+            is TelegramAuthState.WaitingForPassword -> item("password") { PasswordStep(viewModel, auth.hint) }
             TelegramAuthState.Ready -> chatPicker(
                 state = state,
                 syncing = syncing,
@@ -257,7 +275,7 @@ private fun ConnectionStatus(connection: TelegramConnectionState) {
 }
 
 @Composable
-private fun PhoneStep(viewModel: SyncViewModel, connection: TelegramConnectionState) {
+private fun PhoneStep(viewModel: SyncViewModel, connection: TelegramConnectionState, onSent: () -> Unit) {
     val context = LocalContext.current
     val app = context.applicationContext as TgMusicApp
     val store = app.settingsStore
@@ -338,11 +356,15 @@ private fun PhoneStep(viewModel: SyncViewModel, connection: TelegramConnectionSt
         GroupActionRow("Continue", enabled = canSend && nationalNumber.any { it.isDigit() }, loading = isSubmitting) {
             isSubmitting = true
             error = null
-            viewModel.submitPhoneNumber("${selectedCountry.dialCode}${nationalNumber.filter { it.isDigit() }}") {
+            // Typed with the leading 0 used inside the country, the number would be a wrong one.
+            val national = nationalNumber.filter { it.isDigit() }.let { if (selectedCountry.isoCode == "IQ") it.trimStart('0') else it }
+            viewModel.submitPhoneNumber("${selectedCountry.dialCode}$national", onSent) {
                 error = it
                 isSubmitting = false
             }
         }
+        GroupDivider()
+        QrAction(viewModel, enabled = canSend && !isSubmitting) { error = it }
     }
     error?.let { GroupFooter(it, color = DestructiveRed) } ?: GroupFooter("Telegram will send a login code to this number.")
 
@@ -466,29 +488,7 @@ private fun CountryPickerDialog(selected: Country, onDismiss: () -> Unit, onSele
 }
 
 @Composable
-private fun CodeStep(viewModel: SyncViewModel, deliveryDescription: String) {
-    var code by remember { mutableStateOf("") }
-    var isSubmitting by remember { mutableStateOf(false) }
-    var error by remember { mutableStateOf<String?>(null) }
-    GroupHeader("Login Code")
-    GroupCard {
-        GroupTextField(value = code, onValueChange = { code = it; error = null }, placeholder = "12345",
-            keyboardType = KeyboardType.Number, enabled = !isSubmitting)
-        GroupDivider()
-        GroupActionRow("Verify", enabled = code.isNotBlank(), loading = isSubmitting) {
-            isSubmitting = true
-            error = null
-            viewModel.submitCode(code) {
-                error = it
-                isSubmitting = false
-            }
-        }
-    }
-    error?.let { GroupFooter(it, color = DestructiveRed) } ?: GroupFooter(deliveryDescription)
-}
-
-@Composable
-private fun PasswordStep(viewModel: SyncViewModel) {
+private fun PasswordStep(viewModel: SyncViewModel, hint: String) {
     var password by remember { mutableStateOf("") }
     var isSubmitting by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
@@ -506,7 +506,7 @@ private fun PasswordStep(viewModel: SyncViewModel) {
             }
         }
     }
-    error?.let { GroupFooter(it, color = DestructiveRed) } ?: GroupFooter("Your account has a cloud password. Enter it to continue.")
+    error?.let { GroupFooter(it, color = DestructiveRed) } ?: GroupFooter("Your account has a cloud password. Enter it to continue." + if (hint.isNotBlank()) " Hint: $hint" else "")
 }
 
 private fun LazyListScope.chatPicker(

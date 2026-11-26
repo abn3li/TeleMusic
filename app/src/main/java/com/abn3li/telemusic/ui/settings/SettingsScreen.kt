@@ -834,6 +834,10 @@ private fun telegramStatus(state: com.abn3li.telemusic.data.telegram.TelegramAut
         state is com.abn3li.telemusic.data.telegram.TelegramAuthState.WaitingForPhoneNumber ||
             state is com.abn3li.telemusic.data.telegram.TelegramAuthState.WaitingForCode ||
             state is com.abn3li.telemusic.data.telegram.TelegramAuthState.WaitingForPassword ||
+            state is com.abn3li.telemusic.data.telegram.TelegramAuthState.WaitingForQrScan ||
+            state is com.abn3li.telemusic.data.telegram.TelegramAuthState.WaitingForEmail ||
+            state is com.abn3li.telemusic.data.telegram.TelegramAuthState.WaitingForEmailCode ||
+            state is com.abn3li.telemusic.data.telegram.TelegramAuthState.Unsupported ||
             state is com.abn3li.telemusic.data.telegram.TelegramAuthState.Error -> "Sign In"
         else -> null
     }
