@@ -73,7 +73,7 @@ internal fun SyncPage(app: TgMusicApp, onBack: () -> Unit, onSignIn: () -> Unit)
 
     fun change(transform: (SyncSettings) -> SyncSettings) = app.settingsStore.updateSync(transform)
 
-    LargeTitleList(title = "Sync", onBack = onBack, grouped = true) {
+    LargeTitleList(title = "TeleMusic Tweaks", onBack = onBack, grouped = true) {
         item("account") {
             Row(
                 Modifier.fillMaxWidth().padding(horizontal = 16.5.dp).padding(top = 8.dp)

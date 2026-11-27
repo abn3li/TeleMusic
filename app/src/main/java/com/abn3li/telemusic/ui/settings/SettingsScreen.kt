@@ -325,7 +325,7 @@ fun SettingsScreen(
                     onHelp = { uriHandler.openUri("https://developer.spotify.com/dashboard") }
                 )
                 GroupDivider(start = 57.dp)
-                SectionRow("Sync", Icons.Rounded.Sync, TilePurple) { openPage(SettingsPage.SYNC) }
+                SectionRow("TeleMusic Tweaks", Icons.Rounded.Sync, TilePurple) { openPage(SettingsPage.SYNC) }
             }
         }
 
