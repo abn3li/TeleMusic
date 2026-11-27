@@ -9,7 +9,9 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.unit.toSize
@@ -44,6 +46,10 @@ class PlayerTransition {
     var textFlying: () -> Boolean = { false }
     var playFlying: () -> Boolean = { false }
 
+    /** The player's own frame, inside its parking and movement: the open player fills the screen
+     * from the top left, so a part's place in this frame is its place on screen when open. */
+    var playerFrame: LayoutCoordinates? = null
+
     /** How far down the closed player is parked (it is laid out there, off screen). */
     var closedShiftPx: Float = 0f
 
@@ -56,15 +62,19 @@ class PlayerTransition {
 /** The movement, for the open player's parts that report where they rest. */
 val LocalPlayerTransition = staticCompositionLocalOf<PlayerTransition?> { null }
 
-/** Records where this open-player part rests, in root pixels, whether the player is open or
- * parked off screen (corrected for that), never mid-movement. */
+/** Records where this open-player part rests on screen once the player is open. Measured inside
+ * the player's own frame, so it is right however the closed player is parked or shifted, and
+ * only at rest, never mid-movement. */
 fun Modifier.playerRestingSpot(transition: PlayerTransition?, store: PlayerTransition.(Rect) -> Unit): Modifier =
     if (transition == null) this else onGloballyPositioned { coordinates ->
         val e = transition.expansion.value
-        val rect = Rect(coordinates.positionInRoot(), coordinates.size.toSize())
-        when {
-            e >= 0.999f -> rect
-            e <= 0.001f -> rect.translate(0f, -transition.closedShiftPx)
-            else -> null
-        }?.let { transition.store(it) }
+        if (e > 0.001f && e < 0.999f) return@onGloballyPositioned
+        val frame = transition.playerFrame?.takeIf { it.isAttached }
+        val rect = if (frame != null) {
+            Rect(frame.localPositionOf(coordinates, Offset.Zero), coordinates.size.toSize())
+        } else {
+            val inRoot = Rect(coordinates.positionInRoot(), coordinates.size.toSize())
+            if (e >= 0.999f) inRoot else inRoot.translate(0f, -transition.closedShiftPx)
+        }
+        transition.store(rect)
     }

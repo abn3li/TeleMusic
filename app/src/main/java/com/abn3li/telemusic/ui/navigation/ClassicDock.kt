@@ -68,6 +68,7 @@ import com.abn3li.telemusic.ui.library.CalmSpinner
 import com.abn3li.telemusic.ui.nowplaying.NowPlayingUiState
 import com.abn3li.telemusic.ui.nowplaying.PlayerTransition
 import com.abn3li.telemusic.ui.nowplaying.CARD_BLEND
+import com.abn3li.telemusic.ui.nowplaying.DOCK_OVER_CARD
 import com.abn3li.telemusic.ui.theme.LocalPalette
 import kotlin.math.abs
 
@@ -146,8 +147,11 @@ internal fun ClassicDock(
     // solid underneath until the card is (CARD_BLEND) - two fading layers let the page show
     // through. The tabs drop a little and are gone just as fast. Once covered nothing here draws.
     val dropPx = with(LocalDensity.current) { TabsDrop.toPx() }
+    // The mini player sits over the card near its own size and fades in over it as it shrinks.
     val miniMove = {
-        CapsuleMove(dy = 0f, scale = 1f, alpha = if (transition.expansion.value < CARD_BLEND) 1f else 0f)
+        val e = transition.expansion.value
+        CapsuleMove(dy = 0f, scale = 1f,
+            alpha = 1f - ((e - CARD_BLEND) / (DOCK_OVER_CARD - CARD_BLEND)).coerceIn(0f, 1f))
     }
     val tabsMove = {
         val e = transition.expansion.value
