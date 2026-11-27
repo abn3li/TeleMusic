@@ -92,7 +92,8 @@ class MainActivity : ComponentActivity() {
                     else -> bar
                 })
                 @Suppress("DEPRECATION")
-                window.navigationBarColor = withMenuDim(if (playerBars) android.graphics.Color.TRANSPARENT else bar)
+                // See-through everywhere: the pages and the open player run under the navigation bar.
+                window.navigationBarColor = android.graphics.Color.TRANSPARENT
             }
             TgMusicTheme(light = light) {
                 Surface(modifier = Modifier.fillMaxSize()) {

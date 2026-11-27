@@ -1,5 +1,10 @@
 package com.abn3li.telemusic.ui.navigation
 
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.height
 import com.abn3li.telemusic.data.local.listArtwork
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.input.nestedscroll.nestedScroll
@@ -347,7 +352,7 @@ fun TgMusicNavGraph(navController: NavHostController = rememberNavController()) 
                   compositingStrategy = CompositingStrategy.Auto
               }
           }
-          .windowInsetsPadding(barsInsets.only(WindowInsetsSides.Horizontal + WindowInsetsSides.Bottom))) {
+          .windowInsetsPadding(barsInsets.only(WindowInsetsSides.Horizontal))) {
         Scaffold(
             contentWindowInsets = WindowInsets(0),
             modifier = Modifier.then(
@@ -538,6 +543,11 @@ fun TgMusicNavGraph(navController: NavHostController = rememberNavController()) 
 
         DownloadLocationPrompt(app)
       }
+        // A soft shade under the see-through navigation bar, so its handle stays visible over
+        // bright pictures. Only as tall as the bar, under the dock and the player.
+        val navBarHeight = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+        Box(Modifier.align(Alignment.BottomCenter).fillMaxWidth().height(navBarHeight + 12.dp)
+            .background(Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(alpha = 0.4f)))))
         // The page darkens as the player grows over it, and takes no taps meanwhile (they would
         // land on the page and the faded tabs around the card).
         val playerMoving by remember { derivedStateOf { playerTransition.expansion.value.isPartlyOpen() } }
